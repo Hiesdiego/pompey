@@ -1,0 +1,30 @@
+{
+  "name": "@tickr/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build",
+    "test": "hardhat test",
+    "test:sol": "hardhat test solidity",
+    "test:ts": "hardhat test nodejs",
+    "coverage": "hardhat test --coverage",
+    "deploy:testnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia",
+    "deploy:mainnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network base",
+    "node": "hardhat node",
+    "clean": "hardhat clean"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "latest",
+    "@tickr/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "latest",
+    "@nomicfoundation/hardhat-toolbox-viem": "latest",
+    "dotenv": "latest",
+    "forge-std": "github:foundry-rs/forge-std#v1.11.0",
+    "hardhat": "latest",
+    "typescript": "latest",
+    "viem": "latest"
+  }
+}

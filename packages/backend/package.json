@@ -1,0 +1,26 @@
+{
+  "name": "@tickr/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tickr/shared": "workspace:*",
+    "viem": "latest",
+    "express": "latest",
+    "ws": "latest",
+    "dotenv": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "tsx": "latest",
+    "@types/node": "latest",
+    "@types/express": "latest",
+    "@types/ws": "latest"
+  }
+}

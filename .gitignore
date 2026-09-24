@@ -1,0 +1,13 @@
+node_modules/
+.next/
+dist/
+artifacts/
+cache/
+.env
+.env.local
+*.log
+.turbo/
+.DS_Store
+ignition/deployments/
+**/ignition/deployments/
+typechain-types/

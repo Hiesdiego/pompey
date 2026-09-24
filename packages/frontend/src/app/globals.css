@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+:root {
+  --tickr-purple: #7f77dd;
+  --tickr-teal: #1d9e75;
+  --tickr-bg: #0b0b0d;
+  --tickr-bg-secondary: #141416;
+}
+
+body {
+  background: var(--tickr-bg);
+  color: #f5f5f5;
+  font-family: system-ui, -apple-system, sans-serif;
+}
