@@ -39,6 +39,11 @@ export default buildModule("TickrV01Module", (m) => {
   // override via parameters for anything beyond local experimentation.
   const backendSigner = m.getParameter("backendSigner", owner);
 
+  // Tickr treasury — receives the entire pool when a fixture settles with no
+  // stakers in the winning outcome. Defaults to the deployer on testnet;
+  // point it at a multisig for mainnet via parameters.
+  const treasury = m.getParameter("treasury", owner);
+
   // --- Persistent contracts ---
   const initialTickSupply = 10_000_000n * 10n ** 18n;
   const tickToken = m.contract("TickToken", [owner, initialTickSupply]);
@@ -50,6 +55,7 @@ export default buildModule("TickrV01Module", (m) => {
     tickToken,
     seasonRegistry,
     playerStats,
+    treasury,
   ]);
 
   const priceOracle = m.contract("PriceOracle", [owner, backendSigner]);

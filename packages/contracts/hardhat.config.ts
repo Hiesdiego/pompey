@@ -22,14 +22,14 @@ export default defineConfig({
     // Base Sepolia — TICKR v0.1 primary deployment target
     baseSepolia: {
       type: "http",
-      chainType: "generic",
+      chainType: "l1",
       url: configVariable("BASE_SEPOLIA_RPC_URL"),
       accounts: [configVariable("BASE_SEPOLIA_PRIVATE_KEY")],
     },
     // Base mainnet — reserved for post-beta production launch
     base: {
       type: "http",
-      chainType: "generic",
+      chainType: "l1",
       url: configVariable("BASE_MAINNET_RPC_URL"),
       accounts: [configVariable("BASE_MAINNET_PRIVATE_KEY")],
     },

@@ -32,6 +32,10 @@ contract PredictionPool is Ownable, ReentrancyGuard {
     uint256 public platformFeeBps = 700; // 7%, owner-adjustable within a hard cap
     uint256 public constant MAX_FEE_BPS = 1_000; // 10% hard ceiling
 
+    /// @notice Tickr treasury — receives the ENTIRE pool when a fixture
+    /// settles with no stakers in the winning outcome (see settleFixture).
+    address public treasury;
+
     address public resultEngine;
     bool public resultEngineSet;
 
@@ -50,7 +54,9 @@ contract PredictionPool is Ownable, ReentrancyGuard {
     event Staked(uint256 indexed seasonId, uint256 indexed fixtureId, address indexed player, Outcome outcome, uint256 amount);
     event Settled(uint256 indexed seasonId, uint256 indexed fixtureId, Outcome winningOutcome, uint256 totalPool);
     event Claimed(uint256 indexed seasonId, uint256 indexed fixtureId, address indexed player, uint256 payout);
-    event Refunded(uint256 indexed seasonId, uint256 indexed fixtureId, address indexed player, uint256 amount);
+    event TreasurySwept(uint256 indexed seasonId, uint256 indexed fixtureId, uint256 amount);
+    event TreasuryUpdated(address indexed newTreasury);
+    event Forfeited(uint256 indexed seasonId, uint256 indexed fixtureId, address indexed player, uint256 amount);
 
     error StakeTooLow(uint256 provided, uint256 minimum);
     error BettingClosed(uint256 seasonId, uint256 fixtureId);
@@ -61,6 +67,8 @@ contract PredictionPool is Ownable, ReentrancyGuard {
     error AlreadyClaimed(uint256 seasonId, uint256 fixtureId, address player);
     error NothingToClaim(uint256 seasonId, uint256 fixtureId, address player);
     error FeeTooHigh(uint256 provided, uint256 max);
+    error TreasuryNotSet();
+    error InvalidTreasuryAddress();
 
     modifier onlyResultEngine() {
         if (msg.sender != resultEngine) revert OnlyResultEngine();
@@ -71,17 +79,29 @@ contract PredictionPool is Ownable, ReentrancyGuard {
         address initialOwner,
         address tickAddress,
         address seasonRegistryAddress,
-        address playerStatsAddress
+        address playerStatsAddress,
+        address treasuryAddress
     ) Ownable(initialOwner) {
+        if (treasuryAddress == address(0)) revert InvalidTreasuryAddress();
         tick = IERC20(tickAddress);
         seasonRegistry = ISeasonRegistry(seasonRegistryAddress);
         playerStats = IPlayerStats(playerStatsAddress);
+        treasury = treasuryAddress;
     }
 
     function setResultEngine(address _resultEngine) external onlyOwner {
         if (resultEngineSet) revert ResultEngineAlreadySet();
         resultEngine = _resultEngine;
         resultEngineSet = true;
+    }
+
+    /// @notice Point the treasury at a new address (e.g. a multisig once
+    /// mainnet operations begin). Zero address is rejected — funds must
+    /// always have somewhere to go.
+    function setTreasury(address newTreasury) external onlyOwner {
+        if (newTreasury == address(0)) revert InvalidTreasuryAddress();
+        treasury = newTreasury;
+        emit TreasuryUpdated(newTreasury);
     }
 
     function setPlatformFeeBps(uint256 newFeeBps) external onlyOwner {
@@ -131,6 +151,17 @@ contract PredictionPool is Ownable, ReentrancyGuard {
         p.winningOutcome = outcome;
 
         uint256 totalPool = p.totalHome + p.totalDraw + p.totalAway;
+
+        // Treasury rule: if nobody staked the winning outcome, the ENTIRE
+        // pool goes to the Tickr treasury — no refunds. Swept here at
+        // settlement (not lazily in claim) so the outcome is atomic and
+        // doesn't depend on anyone calling claim().
+        if (_poolFor(p, outcome) == 0 && totalPool > 0) {
+            if (treasury == address(0)) revert TreasuryNotSet();
+            tick.safeTransfer(treasury, totalPool);
+            emit TreasurySwept(seasonId, fixtureId, totalPool);
+        }
+
         emit Settled(seasonId, fixtureId, outcome, totalPool);
     }
 
@@ -139,8 +170,10 @@ contract PredictionPool is Ownable, ReentrancyGuard {
     // =========================================================================
 
     /// @notice Parimutuel payout: (yourStakeInWinningOutcome / totalWinningPool)
-    /// * totalPool * (1 - fee). If nobody staked the winning outcome, everyone
-    /// who staked at all is refunded their original stake with no fee taken.
+    /// * totalPool * (1 - fee). If nobody staked the winning outcome, the
+    /// whole pool was swept to the Tickr treasury at settlement — stakers
+    /// forfeit, and the forfeit is recorded as a LOSS in PlayerStats
+    /// (they didn't win, and it wasn't a draw).
     function claim(uint256 seasonId, uint256 fixtureId) external nonReentrant {
         uint256 gid = SeasonMath.globalFixtureId(seasonId, fixtureId);
         MatchPool storage p = pools[gid];
@@ -152,23 +185,20 @@ contract PredictionPool is Ownable, ReentrancyGuard {
 
         claimed[gid][msg.sender] = true;
 
+        uint256 userTotalStake = stakes[gid][msg.sender][Outcome.WinHome]
+            + stakes[gid][msg.sender][Outcome.Draw]
+            + stakes[gid][msg.sender][Outcome.WinAway];
+
         if (winningPoolTotal == 0) {
-            uint256 refund = stakes[gid][msg.sender][Outcome.WinHome]
-                + stakes[gid][msg.sender][Outcome.Draw]
-                + stakes[gid][msg.sender][Outcome.WinAway];
+            if (userTotalStake == 0) revert NothingToClaim(seasonId, fixtureId, msg.sender);
 
-            if (refund == 0) revert NothingToClaim(seasonId, fixtureId, msg.sender);
-
-            tick.safeTransfer(msg.sender, refund);
-            playerStats.recordOutcome(msg.sender, seasonId, fixtureId, false, true, refund, 0);
-            emit Refunded(seasonId, fixtureId, msg.sender, refund);
+            // Pool went to the treasury at settlement — nothing to pay out.
+            playerStats.recordOutcome(msg.sender, seasonId, fixtureId, false, false, userTotalStake, 0);
+            emit Forfeited(seasonId, fixtureId, msg.sender, userTotalStake);
             return;
         }
 
         uint256 userWinningStake = stakes[gid][msg.sender][p.winningOutcome];
-        uint256 userTotalStake = stakes[gid][msg.sender][Outcome.WinHome]
-            + stakes[gid][msg.sender][Outcome.Draw]
-            + stakes[gid][msg.sender][Outcome.WinAway];
 
         if (userWinningStake == 0) {
             if (userTotalStake == 0) revert NothingToClaim(seasonId, fixtureId, msg.sender);

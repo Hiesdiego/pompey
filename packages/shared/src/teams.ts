@@ -23,7 +23,7 @@ export const TICKR_TEAMS: TeamDefinition[] = [
   { teamId: 4, name: "Solana", symbol: "SOL", coingeckoId: "solana", binanceSymbol: "SOLUSDT" },
   { teamId: 5, name: "Cardano", symbol: "ADA", coingeckoId: "cardano", binanceSymbol: "ADAUSDT" },
   { teamId: 6, name: "Ripple", symbol: "XRP", coingeckoId: "ripple", binanceSymbol: "XRPUSDT" },
-  { teamId: 7, name: "Polygon", symbol: "POL", coingeckoId: "matic-network", binanceSymbol: "POLUSDT" },
+  { teamId: 7, name: "Polygon", symbol: "POL", coingeckoId: "polygon-ecosystem-token", binanceSymbol: "POLUSDT" }, // CG "matic-network" is a stale legacy entry — verified 2026-09-25
   { teamId: 8, name: "Dogecoin", symbol: "DOGE", coingeckoId: "dogecoin", binanceSymbol: "DOGEUSDT" },
   { teamId: 9, name: "Avalanche", symbol: "AVAX", coingeckoId: "avalanche-2", binanceSymbol: "AVAXUSDT" },
   { teamId: 10, name: "Litecoin", symbol: "LTC", coingeckoId: "litecoin", binanceSymbol: "LTCUSDT" },
@@ -32,7 +32,7 @@ export const TICKR_TEAMS: TeamDefinition[] = [
   { teamId: 13, name: "Chainlink", symbol: "LINK", coingeckoId: "chainlink", binanceSymbol: "LINKUSDT" },
   { teamId: 14, name: "Polkadot", symbol: "DOT", coingeckoId: "polkadot", binanceSymbol: "DOTUSDT" },
   { teamId: 15, name: "Near", symbol: "NEAR", coingeckoId: "near", binanceSymbol: "NEARUSDT" },
-  { teamId: 16, name: "Ton", symbol: "TON", coingeckoId: "the-open-network", binanceSymbol: "TONUSDT" },
+  { teamId: 16, name: "Ton", symbol: "TON", coingeckoId: "the-open-network", binanceSymbol: "GRAMUSDT" }, // Toncoin trades as GRAM/USDT on CEXs; Binance "TONUSDT" is a different token — verified 2026-09-25
   { teamId: 17, name: "Filecoin", symbol: "FIL", coingeckoId: "filecoin", binanceSymbol: "FILUSDT" },
   { teamId: 18, name: "Cosmos", symbol: "ATOM", coingeckoId: "cosmos", binanceSymbol: "ATOMUSDT" },
   { teamId: 19, name: "Shiba Inu", symbol: "SHIB", coingeckoId: "shiba-inu", binanceSymbol: "SHIBUSDT" },

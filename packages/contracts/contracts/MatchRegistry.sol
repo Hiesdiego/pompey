@@ -47,16 +47,25 @@ contract MatchRegistry is Ownable {
     mapping(uint8 => uint256[]) public fixturesByMatchday; // matchdayIndex => fixtureIds
     bool public scheduleGenerated;
 
+    // Batched schedule generation state (generateScheduleBatch)
+    uint8 public matchdaysGenerated; // contiguous count from matchday 0
+    uint64 public seasonStartTimestamp; // pinned on the first batch
+    uint64 public matchdayIntervalSeconds; // pinned on the first batch
+
     // Wired post-deploy (avoids circular constructor dependencies)
     address public resultEngine;
     bool public resultEngineSet;
 
     event ScheduleGenerated(uint256 fixtureCount, uint8 matchdayCount, uint64 seasonStart);
+    event MatchdaysGenerated(uint8 startMatchday, uint8 matchdayCount, uint8 totalGenerated);
     event KickoffRevealed(uint256 indexed fixtureId, uint64 kickoffTimestamp);
     event FixtureSettled(uint256 indexed fixtureId);
     event BackendSignerUpdated(address indexed newSigner);
 
     error ScheduleAlreadyGenerated();
+    error InvalidBatchRange(uint8 startMatchday, uint8 matchdayCount);
+    error NonContiguousBatch(uint8 expectedStart, uint8 gotStart);
+    error BatchParameterMismatch();
     error TeamCountMustBeEvenAndNonZero();
     error InvalidFixtureId(uint256 fixtureId);
     error KickoffAlreadyRevealed(uint256 fixtureId);
@@ -99,85 +108,155 @@ contract MatchRegistry is Ownable {
     // FIXTURE GENERATION — circle-method round robin
     // =========================================================================
 
-    /// @notice Generates the full home-and-away round robin schedule and
-    /// assigns each match to a matchday window. Callable once per deployment
-    /// (i.e. once per season, since this whole contract is redeployed for
-    /// each new season).
-    /// @param seasonStartTimestamp When matchday 0's window opens.
-    /// @param matchdayIntervalSeconds How long each matchday's window stays
+    /// @notice Generates the fixture schedule IN BATCHES. A full 380-fixture
+    /// season exceeds per-transaction gas limits, so generation is split
+    /// across multiple transactions — e.g. 2 matchdays (20 fixtures) per
+    /// call. Batches must be contiguous starting from matchday 0; the
+    /// schedule is complete when every matchday is generated, at which point
+    /// scheduleGenerated flips true and no further batches are accepted.
+    /// Fixture indices are deterministic (first half occupies the low
+    /// indices, second half the high ones), so the final schedule is
+    /// identical regardless of batch sizing. Season timing params are
+    /// pinned on the first batch and must match on later ones.
+    /// @param _seasonStartTimestamp When matchday 0's window opens.
+    /// @param _matchdayIntervalSeconds How long each matchday's window stays
     /// open for (during which its fixtures' kickoffs can be individually
     /// revealed). A week (604800) is a reasonable default.
-    function generateSchedule(uint64 seasonStartTimestamp, uint64 matchdayIntervalSeconds)
-        external
-        onlyOwner
-    {
+    /// @param startMatchday First matchday in this batch (must equal the
+    /// number of matchdays generated so far).
+    /// @param matchdayCount How many consecutive matchdays to generate.
+    function generateScheduleBatch(
+        uint64 _seasonStartTimestamp,
+        uint64 _matchdayIntervalSeconds,
+        uint8 startMatchday,
+        uint8 matchdayCount
+    ) external onlyOwner {
         if (scheduleGenerated) revert ScheduleAlreadyGenerated();
 
         uint16 n = teamRegistry.teamCount();
         if (n == 0 || n % 2 != 0) revert TeamCountMustBeEvenAndNonZero();
 
         uint16 roundsPerHalf = n - 1;
+        uint8 totalMatchdays = uint8(roundsPerHalf * 2);
+        uint8 endMatchday = startMatchday + matchdayCount;
 
+        if (matchdayCount == 0 || endMatchday > totalMatchdays) {
+            revert InvalidBatchRange(startMatchday, matchdayCount);
+        }
+        if (startMatchday != matchdaysGenerated) {
+            revert NonContiguousBatch(matchdaysGenerated, startMatchday);
+        }
+
+        if (matchdaysGenerated == 0) {
+            seasonStartTimestamp = _seasonStartTimestamp;
+            matchdayIntervalSeconds = _matchdayIntervalSeconds;
+        } else if (
+            _seasonStartTimestamp != seasonStartTimestamp
+                || _matchdayIntervalSeconds != matchdayIntervalSeconds
+        ) {
+            revert BatchParameterMismatch();
+        }
+
+        // Walk the circle-method rotation round by round (memory only),
+        // persisting only the matchdays inside this batch. The per-round
+        // work lives in _storeBatchRound so each function stays under the
+        // EVM's 16-slot stack reach.
         uint16[] memory arr = new uint16[](n);
         for (uint16 i = 0; i < n; i++) {
             arr[i] = i;
         }
 
-        uint256 idx = 0;
         for (uint16 round = 0; round < roundsPerHalf; round++) {
-            for (uint16 i = 0; i < n / 2; i++) {
-                // Circle method: teamA = arr[i], its partner = arr[n-1-i]
-                // from the opposite end of the rotating array. Alternate
-                // which side is home each round so no team is permanently at
-                // home — even rounds put teamA home, odd rounds swap. Read
-                // both ends inline to keep this loop's live-variable count
-                // under the EVM's 16-slot stack reach (see _storeFixture).
-                bool teamAHome = round % 2 == 0;
-                _storeFixture(
-                    idx,
-                    arr[teamAHome ? i : n - 1 - i],
-                    arr[teamAHome ? n - 1 - i : i],
-                    uint8(round),
-                    seasonStartTimestamp,
-                    matchdayIntervalSeconds
-                );
-                idx++;
-            }
-
-            uint16 last = arr[n - 1];
-            for (uint16 k = n - 1; k >= 2; k--) {
-                arr[k] = arr[k - 1];
-            }
-            arr[1] = last;
+            _storeBatchRound(arr, n, roundsPerHalf, round, startMatchday, endMatchday);
+            _rotate(arr, n);
         }
 
-        uint256 firstHalfCount = idx;
-        for (uint256 j = 0; j < firstHalfCount; j++) {
-            Fixture memory f = _fixtures[j];
-            uint8 mirroredMatchday = uint8(f.matchdayIndex + roundsPerHalf);
-            _storeFixture(
-                idx,
-                f.awayTeamId,
-                f.homeTeamId,
-                mirroredMatchday,
-                seasonStartTimestamp,
-                matchdayIntervalSeconds
-            );
-            idx++;
-        }
+        matchdaysGenerated = endMatchday;
+        emit MatchdaysGenerated(startMatchday, matchdayCount, matchdaysGenerated);
 
-        fixtureCount = idx;
-        scheduleGenerated = true;
-        emit ScheduleGenerated(fixtureCount, uint8(roundsPerHalf * 2), seasonStartTimestamp);
+        if (endMatchday == totalMatchdays) {
+            fixtureCount = uint256(roundsPerHalf) * (n / 2) * 2;
+            scheduleGenerated = true;
+            emit ScheduleGenerated(fixtureCount, totalMatchdays, seasonStartTimestamp);
+        }
     }
 
+    /// @dev Stores one round's fixtures that fall inside the batch window —
+    /// the first-leg round and/or its mirrored second leg. Fixture indices
+    /// are deterministic (first half occupies the low indices, second half
+    /// the high ones), so the final schedule is identical regardless of
+    /// batch sizing.
+    function _storeBatchRound(
+        uint16[] memory arr,
+        uint16 n,
+        uint16 roundsPerHalf,
+        uint16 round,
+        uint8 startMatchday,
+        uint8 endMatchday
+    ) private {
+        uint16 pairsPerRound = n / 2;
+
+        if (round >= startMatchday && round < endMatchday) {
+            _storeLeg(arr, n, pairsPerRound, round, uint8(round), uint256(round) * pairsPerRound, false);
+        }
+
+        uint8 mirrorMatchday = uint8(uint16(round) + roundsPerHalf);
+        if (mirrorMatchday >= startMatchday && mirrorMatchday < endMatchday) {
+            _storeLeg(
+                arr,
+                n,
+                pairsPerRound,
+                round,
+                mirrorMatchday,
+                uint256(roundsPerHalf) * pairsPerRound + uint256(round) * pairsPerRound,
+                true
+            );
+        }
+    }
+
+    /// @dev Stores one leg's pairings for a single round, starting at
+    /// `baseFixtureId`. When `swapHome` is true the home/away sides are
+    /// swapped, producing the mirrored second leg of the same pairing.
+    function _storeLeg(
+        uint16[] memory arr,
+        uint16 n,
+        uint16 pairsPerRound,
+        uint16 round,
+        uint8 matchdayIndex,
+        uint256 baseFixtureId,
+        bool swapHome
+    ) private {
+        for (uint16 i = 0; i < pairsPerRound; i++) {
+            // Circle method: teamA = arr[i], its partner = arr[n-1-i]
+            // from the opposite end of the rotating array. Alternate
+            // which side is home each round so no team is permanently at
+            // home — even rounds put teamA home, odd rounds swap; the
+            // mirrored leg swaps unconditionally.
+            bool teamAHome = (round % 2 == 0) != swapHome;
+            uint16 homeIdx = teamAHome ? i : n - 1 - i;
+            uint16 awayIdx = teamAHome ? n - 1 - i : i;
+
+            _storeFixture(baseFixtureId + i, arr[homeIdx], arr[awayIdx], matchdayIndex);
+        }
+    }
+
+    /// @dev Circle-method rotation: hold position 0, move the last element
+    /// to position 1, shift the rest right.
+    function _rotate(uint16[] memory arr, uint16 n) private pure {
+        uint16 last = arr[n - 1];
+        for (uint16 k = n - 1; k >= 2; k--) {
+            arr[k] = arr[k - 1];
+        }
+        arr[1] = last;
+    }
+
+    /// @dev Persists one fixture. Season timing is read from the pinned
+    /// state set by the first generateScheduleBatch call.
     function _storeFixture(
         uint256 fixtureId,
         uint16 home,
         uint16 away,
-        uint8 matchdayIndex,
-        uint64 seasonStartTimestamp,
-        uint64 matchdayIntervalSeconds
+        uint8 matchdayIndex
     ) private {
         uint64 windowStart = seasonStartTimestamp + (uint64(matchdayIndex) * matchdayIntervalSeconds);
         uint64 windowEnd = windowStart + matchdayIntervalSeconds;

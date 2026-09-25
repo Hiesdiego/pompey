@@ -32,16 +32,27 @@ contract MatchRegistryScheduleTest is Test {
         vm.stopPrank();
     }
 
+
+    /// @notice Generate the entire 38-matchday schedule via the batched
+    /// generator, exercising a mid-size batch (2 matchdays per call).
+    function _generateFullSchedule(uint64 seasonStart) internal {
+        vm.startPrank(owner);
+        for (uint8 md = 0; md < EXPECTED_MATCHDAYS; md += 2) {
+            matchRegistry.generateScheduleBatch(seasonStart, 7 days, md, 2);
+        }
+        vm.stopPrank();
+    }
+
     function test_GeneratesExactly380Fixtures() public {
         vm.prank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         require(matchRegistry.fixtureCount() == EXPECTED_FIXTURES, "wrong total fixture count");
     }
 
     function test_GeneratesExactly38Matchdays() public {
         vm.prank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         for (uint8 md = 0; md < EXPECTED_MATCHDAYS; md++) {
             uint256[] memory ids = matchRegistry.getFixturesByMatchday(md);
@@ -51,7 +62,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_EachTeamPlaysExactly38Matches() public {
         vm.prank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         uint16[TEAM_COUNT] memory appearances;
 
@@ -68,7 +79,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_NoTeamPlaysItself() public {
         vm.prank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         for (uint256 i = 0; i < EXPECTED_FIXTURES; i++) {
             Fixture memory f = matchRegistry.getFixture(i);
@@ -78,7 +89,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_EachTeamPlaysEveryOpponentExactlyTwice() public {
         vm.prank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         uint8[TEAM_COUNT][TEAM_COUNT] memory directedCount;
 
@@ -96,18 +107,65 @@ contract MatchRegistryScheduleTest is Test {
     }
 
     function test_CannotGenerateScheduleTwice() public {
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
+
+        vm.prank(owner);
+        vm.expectRevert();
+        matchRegistry.generateScheduleBatch(
+            uint64(block.timestamp + 1 days), 7 days, 0, 2
+        );
+    }
+
+    function test_BatchesMustBeContiguous() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        matchRegistry.generateScheduleBatch(
+            uint64(block.timestamp + 1 days), 7 days, 2, 2 // skipping matchdays 0-1
+        );
+    }
+
+    function test_BatchParamsMustMatchAcrossBatches() public {
         vm.startPrank(owner);
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        matchRegistry.generateScheduleBatch(
+            uint64(block.timestamp + 1 days), 7 days, 0, 2
+        );
 
         vm.expectRevert();
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        matchRegistry.generateScheduleBatch(
+            uint64(block.timestamp + 2 days), 7 days, 2, 2 // different start
+        );
         vm.stopPrank();
+    }
+
+    function test_SingleMatchdayBatchesGiveSameSchedule() public {
+        // Regenerate one matchday at a time and spot-check a fixture from
+        // each half against the deterministic indices.
+        uint64 seasonStart = uint64(block.timestamp + 1 days);
+        vm.startPrank(owner);
+        for (uint8 md = 0; md < EXPECTED_MATCHDAYS; md++) {
+            matchRegistry.generateScheduleBatch(seasonStart, 7 days, md, 1);
+        }
+        vm.stopPrank();
+
+        require(matchRegistry.fixtureCount() == EXPECTED_FIXTURES, "wrong total fixture count");
+        require(matchRegistry.scheduleGenerated(), "schedule should be marked generated");
+        require(matchRegistry.matchdaysGenerated() == EXPECTED_MATCHDAYS, "wrong matchday count");
+
+        // First-half fixture 0 and its second-half mirror (index 190)
+        // must be the same pairing with home/away swapped.
+        Fixture memory first = matchRegistry.getFixture(0);
+        Fixture memory mirror = matchRegistry.getFixture(190);
+        require(
+            first.homeTeamId == mirror.awayTeamId && first.awayTeamId == mirror.homeTeamId,
+            "second leg must mirror the first leg"
+        );
+        require(mirror.matchdayIndex == 19, "mirror must sit on matchday 19");
     }
 
     function test_OnlyOwnerCanGenerateSchedule() public {
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        matchRegistry.generateSchedule(uint64(block.timestamp + 1 days), 7 days);
+        matchRegistry.generateScheduleBatch(uint64(block.timestamp + 1 days), 7 days, 0, 2);
     }
 
     // =========================================================================
@@ -117,7 +175,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_BackendCanRevealKickoffWithinBounds() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
 
         vm.warp(seasonStart); // enter matchday 0's window
 
@@ -133,7 +191,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_RevealRejectsTimestampBelowMinLeadTime() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         uint64 tooSoon = uint64(block.timestamp) + 10 minutes; // below 30 min minimum
@@ -145,7 +203,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_RevealRejectsTimestampAboveMaxLeadTime() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         uint64 tooFar = uint64(block.timestamp) + 200 minutes; // above 120 min maximum
@@ -157,7 +215,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_OnlyBackendCanReveal() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         vm.prank(address(0xBAD));
@@ -168,7 +226,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_CannotRevealSameFixtureTwice() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         vm.startPrank(backend);
@@ -182,7 +240,7 @@ contract MatchRegistryScheduleTest is Test {
     function test_BettingOpenBeforeRevealAndClosesAtKickoff() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
         vm.prank(owner);
-        matchRegistry.generateSchedule(seasonStart, 7 days);
+        _generateFullSchedule(seasonStart);
 
         require(matchRegistry.isBettingOpen(0), "betting should be open before reveal");
 

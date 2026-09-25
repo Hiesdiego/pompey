@@ -16,6 +16,7 @@ contract PredictionPoolTest is Test {
 
     address owner = address(0xA11CE);
     address resultEngine = address(0xE12E);
+    address treasury = address(0x7EA54);
     address alice = address(0xA1);
     address bob = address(0xB0B);
     address carol = address(0xCA5);
@@ -31,7 +32,7 @@ contract PredictionPoolTest is Test {
         matchRegistry = new MockMatchRegistry();
         seasonRegistry = new MockSeasonRegistry(address(matchRegistry), address(0x7EA5));
         playerStats = new MockPlayerStats();
-        pool = new PredictionPool(owner, address(tick), address(seasonRegistry), address(playerStats));
+        pool = new PredictionPool(owner, address(tick), address(seasonRegistry), address(playerStats), treasury);
         pool.setResultEngine(resultEngine);
         vm.stopPrank();
 
@@ -134,26 +135,44 @@ contract PredictionPoolTest is Test {
         require(tick.balanceOf(bob) == 1_000 * 10 ** 18 - STAKE_50 + bobExpected, "bob payout mismatch");
     }
 
-    /// @notice If nobody staked the winning outcome, everyone who staked
-    /// anything gets a full refund (no fee taken) rather than funds being
-    /// stuck in the contract.
-    function test_RefundWhenNoOneStakedWinningOutcome() public {
+    /// @notice If nobody staked the winning outcome, the ENTIRE pool is swept
+    /// to the Tickr treasury at settlement — no refunds. Stakers forfeit and
+    /// the forfeit is recorded as a loss.
+    function test_TreasurySweepsWholePoolWhenNoOneStakedWinningOutcome() public {
         vm.prank(alice);
         pool.stake(SEASON_ID, FIXTURE_ID, Outcome.WinAway, STAKE_100);
 
         vm.prank(bob);
         pool.stake(SEASON_ID, FIXTURE_ID, Outcome.WinAway, STAKE_50);
 
+        uint256 treasuryBalBefore = tick.balanceOf(treasury);
+
         // Home wins, but nobody staked Home.
         vm.prank(resultEngine);
         pool.settleFixture(SEASON_ID, FIXTURE_ID, Outcome.WinHome);
 
-        uint256 aliceBalBefore = tick.balanceOf(alice);
+        require(
+            tick.balanceOf(treasury) - treasuryBalBefore == STAKE_100 + STAKE_50,
+            "treasury should receive the entire pool"
+        );
 
+        // Alice forfeits: claiming pays nothing and does not revert.
+        uint256 aliceBalBefore = tick.balanceOf(alice);
         vm.prank(alice);
         pool.claim(SEASON_ID, FIXTURE_ID);
+        require(tick.balanceOf(alice) == aliceBalBefore, "forfeited stake must not be returned");
+    }
 
-        require(tick.balanceOf(alice) - aliceBalBefore == STAKE_100, "alice should be refunded in full");
+    /// @notice Treasury can be rotated by the owner; zero address rejected.
+    function test_SetTreasury() public {
+        address newTreasury = address(0xBEEF);
+        vm.prank(owner);
+        pool.setTreasury(newTreasury);
+        require(pool.treasury() == newTreasury, "treasury not updated");
+
+        vm.prank(owner);
+        vm.expectRevert();
+        pool.setTreasury(address(0));
     }
 
     function test_CannotClaimTwice() public {

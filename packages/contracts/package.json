@@ -11,6 +11,7 @@
     "coverage": "hardhat test --coverage",
     "deploy:testnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia",
     "deploy:mainnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network base",
+    "schedule:testnet": "hardhat run scripts/generate-schedule.ts --network baseSepolia",
     "node": "hardhat node",
     "clean": "hardhat clean"
   },
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "latest",
     "@nomicfoundation/hardhat-toolbox-viem": "latest",
+    "@types/node": "^26.6.2",
     "dotenv": "latest",
     "forge-std": "github:foundry-rs/forge-std#v1.11.0",
     "hardhat": "latest",
