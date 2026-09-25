@@ -27,6 +27,10 @@ export const TICKR_V01_CONFIG = {
   MATCHES_PER_DAY: 3,
 } as const;
 
+// Named aliases for frontend consumers that import individual values.
+export const MATCH_DURATION_SECONDS = TICKR_V01_CONFIG.MATCH_DURATION_SECONDS;
+export const PLATFORM_FEE_BPS = TICKR_V01_CONFIG.PLATFORM_FEE_BPS;
+
 export const OUTCOME = {
   WIN_HOME: 0,
   DRAW: 1,

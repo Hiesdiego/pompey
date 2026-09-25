@@ -91,7 +91,7 @@ export function buildRouter(deps: ApiDeps): Router {
   });
 
   router.get("/api/fixtures/:id", (req: Request, res: Response) => {
-    const id = BigInt(req.params.id);
+    const id = BigInt(String(req.params.id));
     const f = deps.lifecycle.getFixtures().find((x) => x.fixtureId === id);
     if (!f) {
       res.status(404).json({ error: "fixture not found" });
@@ -102,7 +102,7 @@ export function buildRouter(deps: ApiDeps): Router {
 
   router.get("/api/fixtures/:id/pool", async (req: Request, res: Response) => {
     try {
-      const pool = await deps.reader.getPool(config.seasonId, BigInt(req.params.id));
+      const pool = await deps.reader.getPool(config.seasonId, BigInt(String(req.params.id)));
       res.json(pool);
     } catch (err) {
       logger.warn("[api] getPool failed", { error: String(err) });
@@ -129,7 +129,7 @@ export function buildRouter(deps: ApiDeps): Router {
   });
 
   router.get("/api/players/:address", async (req: Request, res: Response) => {
-    const address = req.params.address;
+    const address = String(req.params.address);
     if (!isAddress(address)) {
       res.status(400).json({ error: "invalid address" });
       return;

@@ -17,7 +17,7 @@ export function useTickBalance(playerAddress: Address | null) {
   const [faucetBusy, setFaucetBusy] = useState(false);
   const [faucetError, setFaucetError] = useState<string | null>(null);
   const [faucetTx, setFaucetTx] = useState<string | null>(null);
-  const { write } = useContractWrite();
+  const { write, ready: walletReady } = useContractWrite();
 
   const refresh = useCallback(async () => {
     if (!playerAddress || !CONTRACTS.tickToken) {
@@ -48,6 +48,10 @@ export function useTickBalance(playerAddress: Address | null) {
       setFaucetError("TICK token address not configured.");
       return;
     }
+    if (!walletReady) {
+      setFaucetError("Your wallet is still initializing. Please wait a moment and try again.");
+      return;
+    }
     setFaucetBusy(true);
     setFaucetError(null);
     setFaucetTx(null);
@@ -72,7 +76,7 @@ export function useTickBalance(playerAddress: Address | null) {
     } finally {
       setFaucetBusy(false);
     }
-  }, [write, refresh]);
+  }, [write, refresh, walletReady]);
 
   return { balance, refresh, claimFaucet, faucetBusy, faucetError, faucetTx };
 }

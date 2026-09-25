@@ -24,7 +24,6 @@ export function useContractWrite() {
       args?: unknown[];
       label?: string;
     }): Promise<Hex> => {
-      if (!ready) throw new Error("Wallet not ready — sign in first.");
       setPending(true);
       setError(null);
       try {

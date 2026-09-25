@@ -7,11 +7,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { useLiveFeed } from "../hooks/useLiveFeed";
-import { api, type ApiFixture } from "../lib/api";
-import { FixtureCard, fixtureStatus } from "../components/FixtureCard";
-import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../components/States";
-import { cn } from "../lib/cn";
+import { useLiveFeed } from "../../hooks/useLiveFeed";
+import { api, type ApiFixture } from "../../lib/api";
+import { FixtureCard, fixtureStatus } from "../../components/FixtureCard";
+import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../../components/States";
+import { cn } from "../../lib/cn";
 
 export default function FixturesPage() {
   const { fixtureUpdates } = useLiveFeed(true);

@@ -14,21 +14,21 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Loader2, Wallet } from "lucide-react";
 import type { Address } from "viem";
-import { useTickr } from "../hooks/useTickr";
-import { useTickBalance } from "../hooks/useTickBalance";
-import { useContractWrite } from "../hooks/useContractWrite";
-import { getPublicClient } from "../hooks/usePublicClient";
+import { useTickr } from "../../hooks/useTickr";
+import { useTickBalance } from "../../hooks/useTickBalance";
+import { useContractWrite } from "../../hooks/useContractWrite";
+import { getPublicClient } from "../../hooks/usePublicClient";
 import {
   CONTRACTS,
   PREDICTION_POOL_ABI,
   SEASON_ID,
   globalFixtureId,
-} from "../lib/contracts";
-import { api, type ApiFixture } from "../lib/api";
-import { formatTick, OUTCOME_SHORT, outcomeLabel } from "../lib/format";
-import { cn } from "../lib/cn";
-import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../components/States";
-import { TeamBadge } from "../components/TeamBadge";
+} from "../../lib/contracts";
+import { api, type ApiFixture } from "../../lib/api";
+import { formatTick, OUTCOME_SHORT, outcomeLabel } from "../../lib/format";
+import { cn } from "../../lib/cn";
+import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../components/States";
+import { TeamBadge } from "../../components/TeamBadge";
 
 interface Claimable {
   fixture: ApiFixture;

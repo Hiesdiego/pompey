@@ -4,7 +4,15 @@
  * Copy `packages/backend/.env.example` to `.env` and fill in the secrets.
  * Fails fast on missing required values so misconfiguration never runs silent.
  */
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Resolve the package env file from this module instead of process.cwd().
+// This keeps `pnpm --filter @tickr/backend start` and `node
+// packages/backend/dist/index.js` behaving identically when launched from
+// either the workspace root or packages/backend.
+loadDotenv({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 
 function required(name: string): string {
   const v = process.env[name];
@@ -28,8 +36,21 @@ function optionalInt(name: string, fallback: number): number {
   return n;
 }
 
+function optionalBigInt(name: string, fallback: string): bigint {
+  const raw = optional(name, fallback);
+  try {
+    return BigInt(raw);
+  } catch {
+    throw new Error(`[config] Env var ${name} must be an integer, got: ${raw}`);
+  }
+}
+
 export const config = {
   port: optionalInt("PORT", 4000),
+  corsOrigins: optional("CORS_ORIGIN", "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 
   chainEnv: optional("TICKR_CHAIN_ENV", "testnet") as "testnet" | "mainnet",
   baseSepoliaRpcUrl: optional("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org"),
@@ -119,6 +140,19 @@ export const config = {
     binanceStaleAfterMs: 65_000,
     /** A CoinGecko price older than this is treated as stale. */
     coingeckoStaleAfterMs: 10 * 60 * 1000,
+  },
+
+  leaderboard: {
+    /**
+     * First block scanned for PlayerStats.OutcomeRecorded events.
+     * Base Sepolia's public RPC caps eth_getLogs at 1,000 blocks per call,
+     * so the reader pages through history in chunks starting here.
+     * Set this to the PlayerStats deployment block in production to skip
+     * empty history. 0 = genesis (correct but slower on the very first
+     * scan; the watermark makes every later scan cheap).
+     */
+    // Current Season 1 deployment block. Override this for a new deployment.
+    scanStartBlock: optionalBigInt("LEADERBOARD_SCAN_START_BLOCK", "47283463"),
   },
 } as const;
 

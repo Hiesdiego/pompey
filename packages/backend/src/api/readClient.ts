@@ -4,7 +4,12 @@
  * The leaderboard is built by indexing PlayerStats.OutcomeRecorded events
  * (the contract can't enumerate players on-chain — sorting an unbounded
  * player set on-chain isn't gas-viable, per the contract's own docs).
- * Results are cached briefly to avoid re-scanning logs on every request.
+ *
+ * Base Sepolia's public RPC caps eth_getLogs at 1,000 blocks per call, so the
+ * event scan pages through history in 900-block chunks and keeps a watermark:
+ * each refresh only fetches blocks since the last scan. Results are cached
+ * briefly to avoid re-scanning logs on every request, and only players with
+ * new events are re-read (everyone else keeps their cached stats).
  */
 
 import { createPublicClient, http, parseAbiItem, type PublicClient } from "viem";
@@ -132,16 +137,24 @@ export interface PlayerView {
 }
 
 const LEADERBOARD_CACHE_MS = 60_000;
+/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000 — stay under it. */
+const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
 export class ChainReader {
   private readonly publicClient: PublicClient;
   private leaderboardCache: { at: number; rows: PlayerView[] } | null = null;
+  /** Per-player stats cache — only players with new events are re-read. */
+  private readonly leaderboardRows = new Map<`0x${string}`, PlayerView>();
+  /** Highest block already scanned for OutcomeRecorded events (null = never). */
+  private leaderboardScannedTo: bigint | null = null;
 
   constructor() {
     const chain = config.chainEnv === "mainnet" ? base : baseSepolia;
     const rpcUrl =
       config.chainEnv === "mainnet" ? config.baseMainnetRpcUrl : config.baseSepoliaRpcUrl;
-    this.publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+    // The selected Base chain is runtime-configured. PublicClient's inferred
+    // union is stricter than the chain-agnostic client used by this reader.
+    this.publicClient = createPublicClient({ chain, transport: http(rpcUrl) }) as PublicClient;
   }
 
   get client(): PublicClient {
@@ -248,21 +261,63 @@ export class ChainReader {
     if (this.leaderboardCache && Date.now() - this.leaderboardCache.at < LEADERBOARD_CACHE_MS) {
       return this.leaderboardCache.rows.slice(0, limit);
     }
-    let players: `0x${string}`[] = [];
+    let touched: Set<`0x${string}`>;
     try {
-      const logs = await this.publicClient.getLogs({
-        address: config.contracts.playerStats,
-        event: OUTCOME_RECORDED_EVENT,
-        fromBlock: 0n,
-      });
-      players = [...new Set(logs.map((l) => l.args.player as `0x${string}`))];
+      touched = await this.scanNewOutcomeEvents();
     } catch (err) {
       logger.warn("[ChainReader] event scan for leaderboard failed", { error: String(err) });
+      // Serve the last good snapshot instead of wiping the leaderboard.
+      if (this.leaderboardCache) return this.leaderboardCache.rows.slice(0, limit);
       return [];
     }
-    const rows = await Promise.all(players.map((p) => this.getPlayer(p)));
+    // Re-read only players with new events (includes brand-new players);
+    // everyone else keeps their cached stats — no redundant RPC calls.
+    const fresh = await Promise.all([...touched].map((p) => this.getPlayer(p)));
+    for (const row of fresh) this.leaderboardRows.set(row.address as `0x${string}`, row);
+
+    const rows = [...this.leaderboardRows.values()];
     rows.sort((a, b) => Number(BigInt(b.winRateBps) - BigInt(a.winRateBps)));
     this.leaderboardCache = { at: Date.now(), rows };
     return rows.slice(0, limit);
+  }
+
+  /**
+   * Incrementally index OutcomeRecorded events, paging in 900-block chunks
+   * (Base Sepolia caps eth_getLogs at 1,000 blocks per call). The watermark
+   * means each refresh only fetches blocks since the previous scan.
+   *
+   * @returns addresses that appeared in the newly scanned range.
+   */
+  private async scanNewOutcomeEvents(): Promise<Set<`0x${string}`>> {
+    const touched = new Set<`0x${string}`>();
+    const latest = await this.publicClient.getBlockNumber();
+    let from =
+      this.leaderboardScannedTo !== null
+        ? this.leaderboardScannedTo + 1n
+        : config.leaderboard.scanStartBlock;
+    if (from > latest) return touched;
+
+    let pages = 0;
+    while (from <= latest) {
+      const chunkEnd = from + LOG_SCAN_CHUNK_BLOCKS - 1n;
+      const to = chunkEnd > latest ? latest : chunkEnd;
+      const logs = await this.publicClient.getLogs({
+        address: config.contracts.playerStats,
+        event: OUTCOME_RECORDED_EVENT,
+        fromBlock: from,
+        toBlock: to,
+      });
+      for (const l of logs) touched.add(l.args.player as `0x${string}`);
+      pages++;
+      from = to + 1n;
+    }
+    this.leaderboardScannedTo = latest;
+    logger.debug("[ChainReader] leaderboard event scan complete", {
+      pages,
+      touched: touched.size,
+      knownPlayers: this.leaderboardRows.size,
+      scannedTo: latest.toString(),
+    });
+    return touched;
   }
 }

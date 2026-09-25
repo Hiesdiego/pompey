@@ -71,16 +71,17 @@ export default function HomePage() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.fixtures(), api.table(), api.leaderboard()])
-      .then(([f, t, l]) => {
+    Promise.allSettled([api.fixtures(), api.table(), api.leaderboard()]).then(
+      ([fixturesResult, tableResult, leadersResult]) => {
         if (!alive) return;
-        setFixtures(f);
-        setTable(t);
-        setLeaders(l);
-      })
-      .catch((e: Error) => {
-        if (alive) setError(e.message);
-      });
+        if (fixturesResult.status === "fulfilled") setFixtures(fixturesResult.value);
+        else setError(fixturesResult.reason instanceof Error ? fixturesResult.reason.message : String(fixturesResult.reason));
+        // These are secondary panels. A slow chain scan must not hide the
+        // fixtures and the rest of the landing page.
+        setTable(tableResult.status === "fulfilled" ? tableResult.value : []);
+        setLeaders(leadersResult.status === "fulfilled" ? leadersResult.value : []);
+      }
+    );
     return () => {
       alive = false;
     };

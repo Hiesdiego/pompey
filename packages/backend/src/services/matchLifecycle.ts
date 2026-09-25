@@ -15,11 +15,16 @@
  *   3. END — when now >= kickoff + matchDuration: validate prices →
  *      PriceOracle.submitEndPrice, which cascades into ResultEngine →
  *      league table, MatchRegistry.markSettled, PredictionPool.settleFixture.
+ *      If the start snapshot is missing (backend was down over the start
+ *      window), the submitter performs a late-start recovery first so the
+ *      fixture can still settle instead of reverting forever.
  *
  * Idempotency: every step pre-checks on-chain state AND the contracts revert
  * on double-submit, so restarts and overlapping ticks are safe. One fixture
- * failing never blocks the others. Multiple concurrent matches are handled
- * independently (the signer's TxQueue serializes the actual transactions).
+ * failing never blocks the others. A per-fixture exponential backoff keeps a
+ * persistently failing fixture from spamming doomed transactions every tick.
+ * Multiple concurrent matches are handled independently (the signer's TxQueue
+ * serializes the actual transactions).
  */
 
 import { createPublicClient, http, type PublicClient } from "viem";
@@ -151,10 +156,25 @@ class FixtureCache {
   }
 }
 
+/**
+ * Per-fixture failure backoff: a fixture whose processing keeps throwing
+ * (bad signer, deterministic revert, RPC trouble) waits progressively longer
+ * between retries — 1m, 2m, 4m … capped at 30m — instead of firing a doomed
+ * transaction every 30s tick. Success clears the backoff.
+ */
+const BACKOFF_BASE_MS = 60_000;
+const BACKOFF_MAX_MS = 30 * 60_000;
+
+interface FailureState {
+  count: number;
+  nextRetryAtMs: number;
+}
+
 export class MatchLifecycle {
   private readonly cache: FixtureCache;
   private readonly durationMs: number;
   private readonly leadMs: number;
+  private readonly failures = new Map<bigint, FailureState>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
 
@@ -167,7 +187,7 @@ export class MatchLifecycle {
     const rpcUrl =
       config.chainEnv === "mainnet" ? config.baseMainnetRpcUrl : config.baseSepoliaRpcUrl;
     const client =
-      publicClient ?? createPublicClient({ chain, transport: http(rpcUrl) });
+      publicClient ?? (createPublicClient({ chain, transport: http(rpcUrl) }) as PublicClient);
     this.cache = new FixtureCache(client);
     this.durationMs = config.leagues.main.matchDurationMinutes * 60 * 1000;
     this.leadMs = config.kickoff.leadMinutes * 60 * 1000;
@@ -259,12 +279,21 @@ export class MatchLifecycle {
       .all()
       .filter((f) => f.kickoffRevealed && !f.settled && f.kickoffMs <= now);
     for (const f of live) {
+      const failure = this.failures.get(f.fixtureId);
+      if (failure && now < failure.nextRetryAtMs) continue; // backing off
       try {
         await this.processFixture(f, now);
+        if (failure) this.failures.delete(f.fixtureId); // success resets backoff
       } catch (err) {
-        // One fixture failing must never block the others.
+        // One fixture failing must never block the others — and a
+        // persistently failing fixture must not spam doomed txs every tick.
+        const count = (failure?.count ?? 0) + 1;
+        const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** (count - 1), BACKOFF_MAX_MS);
+        this.failures.set(f.fixtureId, { count, nextRetryAtMs: now + backoffMs });
         logger.error("[MatchLifecycle] fixture processing failed", {
           fixtureId: f.fixtureId.toString(),
+          attempt: count,
+          nextRetryInMin: Math.round(backoffMs / 60_000),
           error: String(err),
         });
       }

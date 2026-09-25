@@ -9,13 +9,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Crown } from "lucide-react";
-import { useTickr } from "../hooks/useTickr";
-import { api, type ApiPlayer } from "../lib/api";
-import { formatTick, formatWinRateBps, truncateAddress } from "../lib/format";
-import { resolveIdentity } from "../lib/profile";
-import { TeamBadge } from "../components/TeamBadge";
-import { SectionTitle, ErrorState, EmptyState, SkeletonRows } from "../components/States";
-import { cn } from "../lib/cn";
+import { useTickr } from "../../hooks/useTickr";
+import { api, type ApiPlayer } from "../../lib/api";
+import { formatTick, formatWinRateBps, truncateAddress } from "../../lib/format";
+import { resolveIdentity } from "../../lib/profile";
+import { TeamBadge } from "../../components/TeamBadge";
+import { SectionTitle, ErrorState, EmptyState, SkeletonRows } from "../../components/States";
+import { cn } from "../../lib/cn";
 
 const RANK_STYLE = [
   "bg-gradient-to-br from-amber-300 to-amber-500 text-white shadow-[0_0_12px_rgba(251,191,36,.5)]",

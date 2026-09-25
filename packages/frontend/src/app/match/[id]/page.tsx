@@ -15,21 +15,21 @@ import {
   CONTRACTS,
   PRICE_ORACLE_ABI,
   SEASON_ID,
-} from "../lib/contracts";
-import { api, type ApiFixture, type ApiPool } from "../lib/api";
-import { isoToMs } from "../lib/format";
-import { useTickr } from "../hooks/useTickr";
-import { useTickBalance } from "../hooks/useTickBalance";
-import { useLiveFeed } from "../hooks/useLiveFeed";
-import { getPublicClient } from "../hooks/usePublicClient";
-import { fixtureStatus, type FixtureStatus } from "../components/FixtureCard";
-import { StakePanel } from "../components/StakePanel";
-import { LiveMatchPanel } from "../components/LiveMatchPanel";
-import { PostMatchPanel, type FullSnapshot } from "../components/PostMatchPanel";
-import { PoolBars } from "../components/PoolBars";
-import { Countdown } from "../components/Countdown";
-import { TeamBadge } from "../components/TeamBadge";
-import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../components/States";
+} from "../../../lib/contracts";
+import { api, type ApiFixture, type ApiPool } from "../../../lib/api";
+import { isoToMs } from "../../../lib/format";
+import { useTickr } from "../../../hooks/useTickr";
+import { useTickBalance } from "../../../hooks/useTickBalance";
+import { useLiveFeed } from "../../../hooks/useLiveFeed";
+import { getPublicClient } from "../../../hooks/usePublicClient";
+import { fixtureStatus, type FixtureStatus } from "../../../components/FixtureCard";
+import { StakePanel } from "../../../components/StakePanel";
+import { LiveMatchPanel } from "../../../components/LiveMatchPanel";
+import { PostMatchPanel, type FullSnapshot } from "../../../components/PostMatchPanel";
+import { PoolBars } from "../../../components/PoolBars";
+import { Countdown } from "../../../components/Countdown";
+import { TeamBadge } from "../../../components/TeamBadge";
+import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../../components/States";
 
 const MATCH_MS = MATCH_DURATION_SECONDS * 1000;
 

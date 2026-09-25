@@ -86,9 +86,18 @@ export class ApiError extends Error {
 async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BACKEND_API_URL}${path}`, { cache: "no-store" });
+    res = await fetch(`${BACKEND_API_URL}${path}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
+    });
   } catch (err) {
-    throw new ApiError(0, `Backend unreachable at ${BACKEND_API_URL} — is it running?`);
+    const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+    throw new ApiError(
+      0,
+      timedOut
+        ? `Backend request timed out at ${BACKEND_API_URL}. Check the backend logs.`
+        : `Backend unreachable at ${BACKEND_API_URL} — is it running?`
+    );
   }
   if (!res.ok) {
     let detail = res.statusText;

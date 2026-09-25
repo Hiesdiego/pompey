@@ -20,24 +20,27 @@ export const ACTIVE_CHAIN_NAME = getChainEnv() === "mainnet" ? "Base" : "Base Se
 
 export const SEASON_ID: bigint = BigInt(process.env.NEXT_PUBLIC_SEASON_ID ?? "1");
 
+const configuredBackendUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL?.trim();
 export const BACKEND_API_URL =
-  process.env.NEXT_PUBLIC_BACKEND_API_URL ?? "http://localhost:4000";
+  (configuredBackendUrl || "http://localhost:4000").replace(/\/$/, "");
 
-function envAddress(name: string): Address | "" {
-  const v = (process.env[name] ?? "").trim();
+function envAddress(value: string | undefined): Address | "" {
+  const v = (value ?? "").trim();
   return v === "" ? "" : (v as Address);
 }
 
 /** Deployed contract addresses. "" = not configured yet. */
 export const CONTRACTS = {
-  tickToken: envAddress("NEXT_PUBLIC_TICK_TOKEN_ADDRESS"),
-  playerStats: envAddress("NEXT_PUBLIC_PLAYER_STATS_ADDRESS"),
-  priceOracle: envAddress("NEXT_PUBLIC_PRICE_ORACLE_ADDRESS"),
-  seasonRegistry: envAddress("NEXT_PUBLIC_SEASON_REGISTRY_ADDRESS"),
-  teamRegistryS1: envAddress("NEXT_PUBLIC_TEAM_REGISTRY_S1_ADDRESS"),
-  matchRegistryS1: envAddress("NEXT_PUBLIC_MATCH_REGISTRY_S1_ADDRESS"),
-  predictionPool: envAddress("NEXT_PUBLIC_PREDICTION_POOL_ADDRESS"),
-  resultEngine: envAddress("NEXT_PUBLIC_RESULT_ENGINE_ADDRESS"),
+  // Keep these references static: Next.js inlines NEXT_PUBLIC_* values only
+  // when it can see the property access at build time.
+  tickToken: envAddress(process.env.NEXT_PUBLIC_TICK_TOKEN_ADDRESS),
+  playerStats: envAddress(process.env.NEXT_PUBLIC_PLAYER_STATS_ADDRESS),
+  priceOracle: envAddress(process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS),
+  seasonRegistry: envAddress(process.env.NEXT_PUBLIC_SEASON_REGISTRY_ADDRESS),
+  teamRegistryS1: envAddress(process.env.NEXT_PUBLIC_TEAM_REGISTRY_S1_ADDRESS),
+  matchRegistryS1: envAddress(process.env.NEXT_PUBLIC_MATCH_REGISTRY_S1_ADDRESS),
+  predictionPool: envAddress(process.env.NEXT_PUBLIC_PREDICTION_POOL_ADDRESS),
+  resultEngine: envAddress(process.env.NEXT_PUBLIC_RESULT_ENGINE_ADDRESS),
 } as const;
 
 export const TICK_DECIMALS = 18;

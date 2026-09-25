@@ -78,6 +78,13 @@ export class PriceValidationError extends Error {
   }
 }
 
+/**
+ * How often the same team's "Binance stale" warning may repeat. Without this,
+ * a single stale symbol spams the log on every price read (every few seconds
+ * when the frontend is polling) and buries real signals.
+ */
+const STALE_WARN_THROTTLE_MS = 5 * 60_000;
+
 export class PriceFeed {
   private readonly primaries: PrimaryPriceSource[];
   private readonly coingecko: CoingeckoPoller;
@@ -85,6 +92,8 @@ export class PriceFeed {
   private readonly maxDeviationBps: number;
   private readonly binanceStaleAfterMs: number;
   private readonly coingeckoStaleAfterMs: number;
+  /** teamId → last time we logged a Binance-stale warning for it. */
+  private readonly lastStaleWarnAt = new Map<number, number>();
 
   constructor(
     primaries: PrimaryPriceSource[],
@@ -159,10 +168,7 @@ export class PriceFeed {
 
     // Degraded: Binance down, CoinGecko carrying.
     if (coingeckoPrice !== null) {
-      logger.warn("[PriceFeed] Binance stale/missing — using CoinGecko fallback", {
-        teamId,
-        coingeckoPrice,
-      });
+      this.warnBinanceStaleThrottled(teamId, def.binanceSymbol, coingeckoPrice);
       return {
         teamId,
         scaled: priceToScaled(coingeckoPrice),
@@ -197,6 +203,59 @@ export class PriceFeed {
       `No fresh price for team ${teamId} (binance: ${binancePrice ?? "stale/missing"}, ` +
         `coingecko: ${coingeckoPrice ?? "stale/missing"})`
     );
+  }
+
+  /**
+   * Throttled Binance-stale warning (max once per team per 5 min).
+   *
+   * Escalates to ERROR when the gap is symbol-specific — i.e. most other
+   * symbols are arriving fine on Binance but this one isn't. That pattern
+   * means the feed is healthy and the symbol itself is the problem
+   * (wrong stream name, delisted pair, mirror lag), which is actionable;
+   * a feed-wide outage is just degraded mode and stays a warning.
+   */
+  private warnBinanceStaleThrottled(
+    teamId: number,
+    binanceSymbol: string,
+    coingeckoPrice: string
+  ): void {
+    const now = Date.now();
+    const last = this.lastStaleWarnAt.get(teamId) ?? 0;
+    if (now - last < STALE_WARN_THROTTLE_MS) return;
+    this.lastStaleWarnAt.set(teamId, now);
+
+    const health = this.binanceHealth();
+    if (health.fresh >= Math.ceil(health.total / 2) && health.total > 1) {
+      logger.error("[PriceFeed] SYMBOL FEED GAP — Binance healthy overall, no ticks for this symbol", {
+        teamId,
+        binanceSymbol,
+        healthySymbols: `${health.fresh}/${health.total}`,
+        coingeckoPrice,
+        hint: "Check the symbol is listed on Binance spot and the WS stream name matches (e.g. somiusdt@miniTicker).",
+      });
+      return;
+    }
+    logger.warn("[PriceFeed] Binance stale/missing — using CoinGecko fallback", {
+      teamId,
+      binanceSymbol,
+      coingeckoPrice,
+    });
+  }
+
+  /** How many teams currently have a fresh Binance tick (feed-health check). */
+  private binanceHealth(): { fresh: number; total: number } {
+    const now = Date.now();
+    let fresh = 0;
+    for (const t of this.teams) {
+      for (const feed of this.primaries) {
+        const tick = feed.getLatest(t.binanceSymbol);
+        if (tick && now - tick.receivedAtMs <= this.binanceStaleAfterMs) {
+          fresh++;
+          break;
+        }
+      }
+    }
+    return { fresh, total: this.teams.length };
   }
 
   /** Human-readable one-liner for logs / the live API. */

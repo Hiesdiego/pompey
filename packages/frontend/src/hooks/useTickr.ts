@@ -35,15 +35,14 @@ export function useTickr() {
   const smartWalletAddress: Address | null =
     (smartWalletClient?.account?.address as Address | undefined) ?? null;
 
-  const embeddedWallet = wallets.find(
-    (w) => w.walletClientType === "privy" && w.chainType === "ethereum"
-  );
+  const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
   const anyWallet = embeddedWallet ?? wallets[0] ?? null;
   const embeddedAddress: Address | null =
     (anyWallet?.address as Address | undefined) ?? null;
 
-  /** Prefer the smart wallet; fall back to the connected wallet. */
-  const playerAddress: Address | null = smartWalletAddress ?? embeddedAddress;
+  // The sponsored write path uses the embedded wallet when available, so use
+  // the same address for balances and claims. Smart Wallet is the fallback.
+  const playerAddress: Address | null = embeddedAddress ?? smartWalletAddress;
 
   const ensureChain = useCallback(async (): Promise<boolean> => {
     if (!walletsReady || wallets.length === 0) return false;

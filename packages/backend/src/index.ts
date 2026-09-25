@@ -11,7 +11,6 @@
  *
  * Copy packages/backend/.env.example → .env and fill in the secrets first.
  */
-import "dotenv/config";
 import express from "express";
 import { createServer } from "node:http";
 import { TICKR_TEAMS } from "@tickr/shared";
@@ -88,6 +87,21 @@ async function main(): Promise<void> {
 
   // --- HTTP + WS ----------------------------------------------------------
   const app = express();
+  const allowedOrigins = new Set(config.corsOrigins);
+  app.use((req, res, next) => {
+    const origin = req.header("Origin");
+    if (origin && allowedOrigins.has(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+    }
+    res.header("Access-Control-Allow-Methods", "GET,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
   app.use(express.json());
   app.use(buildRouter({ reader, lifecycle, priceFeed, coingecko, binance: binanceWs }));
 
