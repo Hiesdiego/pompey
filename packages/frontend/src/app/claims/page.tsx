@@ -156,12 +156,12 @@ export default function ClaimsPage() {
     return (
       <div className="py-10">
         <EmptyState
-          icon={<Wallet className="h-8 w-8 text-zinc-600" />}
+          icon={<Wallet className="h-8 w-8 text-zinc-400 dark:text-zinc-600" />}
           title="Sign in to see your claimable rewards."
         >
           <button
             onClick={login}
-            className="mt-3 rounded-xl bg-[#7F77DD] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#6f68d6]"
+            className="mt-3 rounded-xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_28px_rgba(46,124,246,.55)] active:scale-[.97]"
           >
             Sign in
           </button>
@@ -178,7 +178,7 @@ export default function ClaimsPage() {
           <button
             onClick={runScan}
             disabled={scanning}
-            className="text-sm font-medium text-[#7F77DD] hover:underline disabled:opacity-50"
+            className="text-sm font-semibold text-[#1D4ED8] transition-colors hover:text-[#2E7CF6] disabled:opacity-50 dark:text-[#7db3ff] dark:hover:text-[#4B93FF]"
           >
             {scanning ? "Scanning…" : "Rescan"}
           </button>
@@ -202,46 +202,64 @@ export default function ClaimsPage() {
         </EmptyState>
       ) : (
         <>
-          <div className="mb-4 flex flex-col items-stretch justify-between gap-3 rounded-2xl border border-zinc-800 bg-[#141416] p-4 sm:flex-row sm:items-center">
-            <p className="text-sm text-zinc-300">
-              <span className="font-bold text-white">{items.length}</span> match
-              {items.length === 1 ? "" : "es"} ready to claim
+          <div className="glass mb-4 flex flex-col items-stretch justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
+            <p className="text-sm text-zinc-500 dark:text-zinc-300">
+              <span className="font-display font-bold tabular-nums text-zinc-900 dark:text-white">
+                {items.length}
+              </span>{" "}
+              match{items.length === 1 ? "" : "es"} ready to claim
             </p>
-            <button
-              onClick={claimAll}
-              disabled={claiming}
-              className={cn(
-                "flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white",
-                claiming ? "cursor-not-allowed bg-zinc-700" : "bg-[#1D9E75] hover:bg-[#178a64]"
+            <div className="flex flex-col gap-2">
+              {claiming && (
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/8 dark:bg-white/8">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#2E7CF6] to-[#1D4ED8] transition-all duration-300"
+                    style={{
+                      width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
               )}
-            >
-              {claiming && <Loader2 className="h-4 w-4 animate-spin" />}
-              {claiming
-                ? `Claiming ${progress.done}/${progress.total}…`
-                : `Claim all (${items.length})`}
-            </button>
+              <button
+                onClick={claimAll}
+                disabled={claiming}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white transition-all active:scale-[.98]",
+                  claiming
+                    ? "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
+                    : "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_36px_rgba(46,124,246,.6)]"
+                )}
+              >
+                {claiming && <Loader2 className="h-4 w-4 animate-spin" />}
+                {claiming
+                  ? `Claiming ${progress.done}/${progress.total}…`
+                  : `Claim all (${items.length})`}
+              </button>
+            </div>
           </div>
           {claimError && (
-            <p className="mb-4 rounded-xl bg-red-950/40 p-3 text-sm text-red-200">{claimError}</p>
+            <p className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-200">
+              {claimError}
+            </p>
           )}
           <div className="space-y-3">
             {items.map((c) => (
               <Link
                 key={c.fixture.fixtureId}
                 href={`/match/${c.fixture.fixtureId}`}
-                className="flex items-center gap-4 rounded-2xl border border-zinc-800 bg-[#141416] p-4 hover:border-[#7F77DD]/50"
+                className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
               >
                 <div className="flex flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-6">
                   {c.fixture.home && c.fixture.away && (
-                    <div className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
                       <TeamBadge teamId={c.fixture.home.teamId} size={24} showName={false} />
                       <span className="hidden sm:inline">{c.fixture.home.name}</span>
-                      <span className="text-zinc-600">vs</span>
+                      <span className="text-zinc-400 dark:text-zinc-600">vs</span>
                       <TeamBadge teamId={c.fixture.away.teamId} size={24} showName={false} />
                       <span className="hidden sm:inline">{c.fixture.away.name}</span>
                     </div>
                   )}
-                  <span className="text-xs text-zinc-500">
+                  <span className="font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
                     Matchday {(c.fixture.matchdayIndex ?? 0) + 1} · staked{" "}
                     {c.stakes
                       .map((s, i) => (s > 0n ? `${OUTCOME_SHORT[i]} ${formatTick(s, 0)}` : null))
@@ -254,10 +272,10 @@ export default function ClaimsPage() {
                   className={cn(
                     "shrink-0 rounded-full px-3 py-1 text-xs font-bold",
                     c.won
-                      ? "bg-[#1D9E75]/15 text-[#9fe8cd]"
+                      ? "bg-[#1D9E75]/12 text-[#0f7a55] shadow-[0_0_14px_rgba(29,158,117,.25)] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]"
                       : c.winningOutcome !== null
-                        ? "bg-zinc-800 text-zinc-400"
-                        : "bg-amber-500/15 text-amber-300"
+                        ? "bg-black/5 text-zinc-500 dark:bg-white/8 dark:text-zinc-400"
+                        : "bg-amber-500/12 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300"
                   )}
                 >
                   {c.won
@@ -269,7 +287,7 @@ export default function ClaimsPage() {
               </Link>
             ))}
           </div>
-          <p className="mt-4 text-center text-[11px] text-zinc-600">
+          <p className="mt-4 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
             Batch claiming sends one gasless transaction per match, in sequence.
           </p>
         </>

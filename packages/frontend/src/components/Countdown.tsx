@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { countdownParts } from "../lib/format";
+import { cn } from "../lib/cn";
 
 export function useCountdown(targetMs: number | null, tickMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -34,8 +35,9 @@ export function Countdown({
   className?: string;
 }) {
   const { remaining, expired, parts } = useCountdown(target);
-  if (target === null || parts === null) return <span className={className}>—</span>;
-  if (expired) return <span className={className}>00:00</span>;
+  if (target === null || parts === null)
+    return <span className={cn("font-display tabular-nums", className)}>—</span>;
+  if (expired) return <span className={cn("font-display tabular-nums", className)}>00:00</span>;
   const pad = (n: number) => String(n).padStart(2, "0");
   const text =
     parts.d > 0
@@ -43,5 +45,5 @@ export function Countdown({
       : parts.h > 0
         ? `${pad(parts.h)}:${pad(parts.m)}:${pad(parts.s)}`
         : `${pad(parts.m)}:${pad(parts.s)}`;
-  return <span className={className}>{text}</span>;
+  return <span className={cn("font-display tabular-nums", className)}>{text}</span>;
 }

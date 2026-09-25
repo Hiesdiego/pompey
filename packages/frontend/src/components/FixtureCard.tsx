@@ -34,9 +34,9 @@ function StatusPill({ status, kickoffMs }: { status: FixtureStatus; kickoffMs: n
   switch (status) {
     case "live":
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600/20 px-2.5 py-0.5 text-xs font-bold text-red-400">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/12 px-2.5 py-0.5 font-display text-xs font-bold text-red-600 shadow-[0_0_14px_rgba(239,68,68,.3)] dark:bg-red-500/15 dark:text-red-400">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
           </span>
           LIVE
@@ -44,26 +44,26 @@ function StatusPill({ status, kickoffMs }: { status: FixtureStatus; kickoffMs: n
       );
     case "upcoming":
       return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-[#7F77DD]/15 px-2.5 py-0.5 text-xs font-semibold text-[#a5a0f0]">
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#2E7CF6]/10 px-2.5 py-0.5 text-xs font-semibold text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]">
           <Clock className="h-3 w-3" />
           <Countdown target={kickoffMs} />
         </span>
       );
     case "settled":
       return (
-        <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-zinc-400">
+        <span className="rounded-full bg-[#2E7CF6]/10 px-2.5 py-0.5 font-display text-xs font-bold text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]">
           FT
         </span>
       );
     case "awaiting":
       return (
-        <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
+        <span className="rounded-full bg-amber-500/12 px-2.5 py-0.5 text-xs font-semibold text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">
           Awaiting result
         </span>
       );
     default:
       return (
-        <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-zinc-500">
+        <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-semibold text-zinc-500 dark:bg-white/8 dark:text-zinc-400">
           TBA
         </span>
       );
@@ -85,12 +85,12 @@ export function FixtureCard({
     <Link
       href={`/match/${fixture.fixtureId}`}
       className={cn(
-        "group block rounded-2xl border border-zinc-800 bg-[#141416] p-4 transition-colors hover:border-[#7F77DD]/50",
-        status === "live" && "border-red-500/40"
+        "glass card-interactive group block rounded-2xl p-4",
+        status === "live" && "!border-red-500/40 shadow-[0_0_24px_rgba(239,68,68,.12)]"
       )}
     >
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-500">
           Matchday {fixture.matchdayIndex + 1}
         </span>
         <StatusPill status={status} kickoffMs={kickoffMs} />

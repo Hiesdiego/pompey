@@ -14,8 +14,14 @@ import { api, type ApiPlayer } from "../lib/api";
 import { formatTick, formatWinRateBps, truncateAddress } from "../lib/format";
 import { resolveIdentity } from "../lib/profile";
 import { TeamBadge } from "../components/TeamBadge";
-import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../components/States";
+import { SectionTitle, ErrorState, EmptyState, SkeletonRows } from "../components/States";
 import { cn } from "../lib/cn";
+
+const RANK_STYLE = [
+  "bg-gradient-to-br from-amber-300 to-amber-500 text-white shadow-[0_0_12px_rgba(251,191,36,.5)]",
+  "bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-700 shadow-[0_0_10px_rgba(160,160,170,.4)] dark:from-zinc-400 dark:to-zinc-600 dark:text-white",
+  "bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-[0_0_10px_rgba(180,120,40,.45)]",
+];
 
 export default function LeaderboardPage() {
   const { playerAddress } = useTickr();
@@ -48,21 +54,21 @@ export default function LeaderboardPage() {
   return (
     <div>
       <SectionTitle title="Leaderboard" />
-      <p className="mb-6 text-sm text-zinc-400">
+      <p className="mb-6 font-display text-sm tabular-nums text-zinc-500 dark:text-zinc-400">
         Ranked by win rate · {players?.length ?? "—"} predictors
       </p>
 
       {!players ? (
-        <LoadingState label="Loading leaderboard…" />
+        <SkeletonRows rows={8} />
       ) : players.length === 0 ? (
         <EmptyState title="No predictors yet.">
           Be the first to stake on a match and claim your spot.
         </EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-[#141416]">
+        <div className="glass overflow-x-auto rounded-2xl">
           <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left text-[11px] uppercase tracking-wider text-zinc-500">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-black/8 bg-white/70 text-left text-[11px] uppercase tracking-widest text-zinc-500 backdrop-blur-xl dark:border-white/8 dark:bg-black/60 dark:text-zinc-500">
                 <th className="px-4 py-3">#</th>
                 <th className="px-2 py-3">Predictor</th>
                 <th className="px-2 py-3">Team</th>
@@ -87,19 +93,28 @@ export default function LeaderboardPage() {
                   <tr
                     key={p.address}
                     className={cn(
-                      "border-b border-zinc-800/50 last:border-0",
-                      isYou && "bg-[#7F77DD]/10"
+                      "border-b border-black/5 transition-colors last:border-0 hover:bg-[#2E7CF6]/6 dark:border-white/5 dark:hover:bg-[#2E7CF6]/8",
+                      isYou && "bg-[#2E7CF6]/8 dark:bg-[#2E7CF6]/10"
                     )}
                   >
                     <td className="px-4 py-3">
-                      <span className="inline-flex w-7 items-center justify-center gap-1 font-black text-zinc-400">
-                        {i === 0 && <Crown className="h-3.5 w-3.5 text-amber-400" />}
+                      <span
+                        className={cn(
+                          "inline-flex h-7 w-7 items-center justify-center gap-1 rounded-full font-display text-xs font-bold",
+                          RANK_STYLE[i] ??
+                            "bg-black/5 text-zinc-500 dark:bg-white/8 dark:text-zinc-400"
+                        )}
+                      >
+                        {i === 0 && <Crown className="h-3 w-3" />}
                         {i + 1}
                       </span>
                     </td>
-                    <td className="px-2 py-3 font-semibold text-zinc-100">
+                    <td className="px-2 py-3 font-semibold text-zinc-800 dark:text-zinc-100">
                       {profileHref ? (
-                        <Link href={profileHref} className="hover:text-[#7F77DD] hover:underline">
+                        <Link
+                          href={profileHref}
+                          className="transition-colors hover:text-[#1D4ED8] hover:underline dark:hover:text-[#7db3ff]"
+                        >
                           {label}
                         </Link>
                       ) : (
@@ -115,16 +130,16 @@ export default function LeaderboardPage() {
                           showSymbol
                         />
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-zinc-400 dark:text-zinc-600">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-3 text-center text-[#1D9E75]">{p.wins}</td>
-                    <td className="px-2 py-3 text-center text-zinc-400">{p.draws}</td>
-                    <td className="px-2 py-3 text-center text-red-400">{p.losses}</td>
-                    <td className="px-2 py-3 text-center font-semibold text-white">
+                    <td className="px-2 py-3 text-center font-display tabular-nums text-[#0f7a55] dark:text-[#7fe0bd]">{p.wins}</td>
+                    <td className="px-2 py-3 text-center font-display tabular-nums text-zinc-500 dark:text-zinc-400">{p.draws}</td>
+                    <td className="px-2 py-3 text-center font-display tabular-nums text-red-500 dark:text-red-400">{p.losses}</td>
+                    <td className="px-2 py-3 text-center font-display font-bold tabular-nums text-zinc-900 dark:text-white">
                       {formatWinRateBps(p.winRateBps)}
                     </td>
-                    <td className="px-4 py-3 text-right text-zinc-300">
+                    <td className="px-4 py-3 text-right font-display tabular-nums text-zinc-600 dark:text-zinc-300">
                       {formatTick(p.totalWonTick, 0)} TICK
                     </td>
                   </tr>

@@ -19,14 +19,14 @@ function Logo({ team, size }: { team: TeamInfo; size: number }) {
         width={size}
         height={size}
         onError={() => setBroken(true)}
-        className="rounded-full"
+        className="rounded-full ring-1 ring-black/10 dark:ring-white/10"
         style={{ width: size, height: size }}
       />
     );
   }
   return (
     <span
-      className="flex items-center justify-center rounded-full bg-gradient-to-br from-[#7F77DD] to-[#1D9E75] font-bold text-white"
+      className="flex items-center justify-center rounded-full bg-gradient-to-br from-[#2E7CF6] to-[#1D4ED8] font-display font-bold text-white shadow-[0_0_12px_rgba(46,124,246,.35)]"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
       {team.symbol.slice(0, 1)}
@@ -53,7 +53,9 @@ export function TeamBadge({
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
       <Logo team={team} size={size} />
-      {showName && <span className="font-semibold text-zinc-100">{team.name}</span>}
+      {showName && (
+        <span className="font-semibold text-zinc-800 dark:text-zinc-100">{team.name}</span>
+      )}
       {showSymbol && <span className="text-xs text-zinc-500">{team.symbol}</span>}
     </span>
   );

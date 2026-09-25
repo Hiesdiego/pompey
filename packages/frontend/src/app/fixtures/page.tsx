@@ -10,7 +10,7 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLiveFeed } from "../hooks/useLiveFeed";
 import { api, type ApiFixture } from "../lib/api";
 import { FixtureCard, fixtureStatus } from "../components/FixtureCard";
-import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../components/States";
+import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../components/States";
 import { cn } from "../lib/cn";
 
 export default function FixturesPage() {
@@ -62,20 +62,20 @@ export default function FixturesPage() {
   return (
     <div>
       <SectionTitle title="Fixtures" />
-      <p className="mb-6 flex items-center gap-2 text-sm text-zinc-400">
-        <CalendarDays className="h-4 w-4" />
+      <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+        <CalendarDays className="h-4 w-4 text-[#2E7CF6]" />
         Season 1 · 38 matchdays · 20-minute windows · dates show as TBA until revealed
       </p>
 
       {!fixtures || matchday === null ? (
-        <LoadingState label="Loading season calendar…" />
+        <SkeletonCards cards={6} />
       ) : (
         <>
-          <div className="mb-6 flex items-center gap-2">
+          <div className="glass mb-6 flex items-center gap-2 rounded-2xl p-2">
             <button
               onClick={() => setMatchday((m) => Math.max(0, (m ?? 0) - 1))}
               disabled={matchday === 0}
-              className="rounded-xl border border-zinc-700 p-2 text-zinc-300 disabled:opacity-30 hover:border-zinc-500"
+              className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
               aria-label="Previous matchday"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -89,16 +89,16 @@ export default function FixturesPage() {
                       key={md}
                       onClick={() => setMatchday(md)}
                       className={cn(
-                        "relative shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold",
+                        "relative shrink-0 rounded-lg px-2.5 py-1.5 font-display text-xs font-bold tabular-nums transition-all active:scale-95",
                         md === matchday
-                          ? "bg-[#7F77DD] text-white"
-                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                          ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white shadow-[0_0_16px_rgba(46,124,246,.45)]"
+                          : "bg-black/5 text-zinc-500 hover:bg-[#2E7CF6]/10 hover:text-[#1D4ED8] dark:bg-white/5 dark:text-zinc-400 dark:hover:bg-[#2E7CF6]/12 dark:hover:text-[#7db3ff]"
                       )}
                       title={`Matchday ${md + 1}`}
                     >
                       {md + 1}
                       {open && md !== matchday && (
-                        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#1D9E75]" />
+                        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#1D9E75] shadow-[0_0_6px_rgba(29,158,117,.8)]" />
                       )}
                     </button>
                   );
@@ -108,7 +108,7 @@ export default function FixturesPage() {
             <button
               onClick={() => setMatchday((m) => Math.min(matchdays.length - 1, (m ?? 0) + 1))}
               disabled={matchdays.length === 0 || matchday === matchdays.length - 1}
-              className="rounded-xl border border-zinc-700 p-2 text-zinc-300 disabled:opacity-30 hover:border-zinc-500"
+              className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
               aria-label="Next matchday"
             >
               <ChevronRight className="h-4 w-4" />
@@ -119,7 +119,7 @@ export default function FixturesPage() {
             <EmptyState title="No fixtures for this matchday." />
           ) : (
             <>
-              <h2 className="mb-4 text-base font-bold text-white">
+              <h2 className="mb-4 font-display text-base font-bold text-zinc-900 dark:text-white">
                 Matchday {current[0] + 1}
                 <span className="ml-2 text-sm font-normal text-zinc-500">
                   {current[1].length} matches

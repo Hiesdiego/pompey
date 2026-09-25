@@ -141,7 +141,7 @@ export default function MatchPage() {
   if (!fixture.home || !fixture.away) {
     return (
       <EmptyState title="Match not found.">
-        <Link href="/fixtures" className="text-[#7F77DD] hover:underline">
+        <Link href="/fixtures" className="font-semibold text-[#1D4ED8] hover:underline dark:text-[#7db3ff]">
           Back to fixtures
         </Link>
       </EmptyState>
@@ -157,7 +157,7 @@ export default function MatchPage() {
     <div>
       <Link
         href="/fixtures"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-200"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 transition-colors hover:text-[#1D4ED8] dark:text-zinc-400 dark:hover:text-[#7db3ff]"
       >
         <ArrowLeft className="h-4 w-4" /> Fixtures
       </Link>
@@ -165,30 +165,44 @@ export default function MatchPage() {
       <SectionTitle title={`Matchday ${fixture.matchdayIndex + 1}`} />
 
       {/* Match header */}
-      <div className="mb-6 rounded-3xl border border-zinc-800 bg-[#141416] p-6 md:p-8">
-        <div className="grid grid-cols-3 items-center gap-2 text-center">
+      <div className="glass relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8">
+        <div
+          className="pointer-events-none absolute left-1/2 top-0 h-40 w-[36rem] -translate-x-1/2 rounded-full bg-[#2E7CF6]/12 blur-3xl dark:bg-[#2E7CF6]/18"
+          aria-hidden
+        />
+        <div className="relative grid grid-cols-3 items-center gap-2 text-center">
           <div className="flex flex-col items-center gap-2">
             <TeamBadge teamId={fixture.home.teamId} size={56} showName={false} />
-            <p className="font-bold text-white">{fixture.home.name}</p>
-            <p className="text-xs text-zinc-500">HOME · {fixture.home.symbol}</p>
+            <p className="font-display font-bold text-zinc-900 dark:text-white">{fixture.home.name}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+              HOME · {fixture.home.symbol}
+            </p>
           </div>
           <div>
             {status === "tba" || status === "upcoming" ? (
               <>
-                <p className="text-xs uppercase tracking-wider text-zinc-500">Kickoff in</p>
-                <Countdown target={kickoffMs} className="text-2xl font-black text-white md:text-3xl" />
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">Kickoff in</p>
+                <Countdown target={kickoffMs} className="text-gradient text-2xl font-bold md:text-3xl" />
                 {kickoffMs === null && <p className="text-sm text-zinc-500">TBA</p>}
               </>
             ) : (
-              <p className="text-2xl font-black text-white">
-                {status === "live" ? "LIVE" : status === "settled" ? "FT" : "—"}
+              <p className="font-display text-2xl font-bold text-zinc-900 dark:text-white">
+                {status === "live" ? (
+                  <span className="text-gradient-animate">LIVE</span>
+                ) : status === "settled" ? (
+                  "FT"
+                ) : (
+                  "—"
+                )}
               </p>
             )}
           </div>
           <div className="flex flex-col items-center gap-2">
             <TeamBadge teamId={fixture.away.teamId} size={56} showName={false} />
-            <p className="font-bold text-white">{fixture.away.name}</p>
-            <p className="text-xs text-zinc-500">AWAY · {fixture.away.symbol}</p>
+            <p className="font-display font-bold text-zinc-900 dark:text-white">{fixture.away.name}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+              AWAY · {fixture.away.symbol}
+            </p>
           </div>
         </div>
       </div>
@@ -211,9 +225,9 @@ export default function MatchPage() {
               windowEndMs={windowEndMs}
             />
           ) : status === "awaiting" ? (
-            <div className="rounded-2xl border border-amber-500/30 bg-[#141416] p-8 text-center">
-              <p className="text-lg font-bold text-white">Full time</p>
-              <p className="mt-1 text-sm text-zinc-400">
+            <div className="glass rounded-2xl border-amber-500/25! p-8 text-center">
+              <p className="font-display text-lg font-bold text-zinc-900 dark:text-white">Full time</p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                 The window has closed — the result is being finalized on-chain.
               </p>
             </div>
@@ -231,18 +245,18 @@ export default function MatchPage() {
         </div>
 
         <div className="lg:col-span-2">
-          <div className="rounded-2xl border border-zinc-800 bg-[#141416] p-5">
-            <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-zinc-400">
+          <div className="glass rounded-2xl p-5">
+            <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
               Pool — live
             </h3>
             {pool ? (
               <PoolBars pool={pool} />
             ) : (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-500 dark:text-zinc-500">
                 No stakes yet — be the first to move the odds.
               </p>
             )}
-            <div className="mt-4 border-t border-zinc-800 pt-3 text-xs text-zinc-500">
+            <div className="mt-4 border-t border-black/8 pt-3 text-xs text-zinc-500 dark:border-white/8 dark:text-zinc-500">
               <p>
                 Window:{" "}
                 {isoToMs(fixture.windowStart)

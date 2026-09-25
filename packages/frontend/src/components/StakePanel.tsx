@@ -34,11 +34,13 @@ import { getPublicClient } from "../hooks/usePublicClient";
 import { useContractWrite } from "../hooks/useContractWrite";
 import { PoolBars } from "./PoolBars";
 
-const OUTCOME_COLORS = [
-  "border-[#7F77DD] bg-[#7F77DD]/20 text-[#c9c5f5]",
-  "border-zinc-500 bg-zinc-500/20 text-zinc-200",
-  "border-[#1D9E75] bg-[#1D9E75]/20 text-[#9fe8cd]",
+const OUTCOME_ACTIVE = [
+  "border-[#2E7CF6] bg-[#2E7CF6]/12 text-[#1D4ED8] shadow-[0_0_18px_rgba(46,124,246,.25)] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]",
+  "border-zinc-400 bg-zinc-500/12 text-zinc-600 dark:border-zinc-500 dark:text-zinc-200",
+  "border-[#1D9E75] bg-[#1D9E75]/12 text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]",
 ];
+const OUTCOME_IDLE =
+  "border-black/10 bg-black/[.02] text-zinc-500 hover:border-[#2E7CF6]/40 hover:text-zinc-800 dark:border-white/10 dark:bg-white/[.03] dark:text-zinc-400 dark:hover:border-[#2E7CF6]/40 dark:hover:text-zinc-200";
 
 type Step = "idle" | "approving" | "staking" | "done";
 
@@ -165,15 +167,17 @@ export function StakePanel({
 
   if (!authenticated) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-800 bg-[#141416] p-8 text-center">
-        <Wallet className="h-8 w-8 text-zinc-600" />
-        <p className="font-semibold text-zinc-200">Sign in to stake on this match</p>
-        <p className="text-sm text-zinc-400">
+      <div className="glass flex flex-col items-center gap-3 rounded-2xl p-8 text-center">
+        <Wallet className="h-8 w-8 text-zinc-400 dark:text-zinc-600" />
+        <p className="font-display font-semibold text-zinc-800 dark:text-zinc-200">
+          Sign in to stake on this match
+        </p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Privy login is gasless — your smart wallet covers transaction fees.
         </p>
         <button
           onClick={onLogin}
-          className="rounded-xl bg-[#7F77DD] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#6f68d6]"
+          className="rounded-xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_28px_rgba(46,124,246,.55)] active:scale-[.97]"
         >
           Sign in
         </button>
@@ -182,8 +186,10 @@ export function StakePanel({
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-[#141416] p-5">
-      <h3 className="mb-4 text-base font-bold text-white">Place your stake</h3>
+    <div className="glass rounded-2xl p-5">
+      <h3 className="mb-4 font-display text-base font-bold text-zinc-900 dark:text-white">
+        Place your stake
+      </h3>
 
       {fixture.home && fixture.away && (
         <div className="mb-4 grid grid-cols-3 gap-2">
@@ -197,13 +203,11 @@ export function StakePanel({
               onClick={() => setOutcome(opt.o)}
               disabled={busy}
               className={cn(
-                "rounded-xl border-2 px-2 py-3 text-center transition-all",
-                outcome === opt.o
-                  ? OUTCOME_COLORS[opt.o]
-                  : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-600"
+                "rounded-xl border-2 px-2 py-3 text-center transition-all active:scale-[.97]",
+                outcome === opt.o ? OUTCOME_ACTIVE[opt.o] : OUTCOME_IDLE
               )}
             >
-              <div className="text-xl font-black">{opt.label}</div>
+              <div className="font-display text-xl font-bold">{opt.label}</div>
               <div className="truncate text-[11px] opacity-80">{opt.sub}</div>
             </button>
           ))}
@@ -213,13 +217,13 @@ export function StakePanel({
       {pool && (
         <div className="mb-4">
           <PoolBars pool={pool} compact />
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
             Pool total: {formatTick(totalPool)} TICK · {PLATFORM_FEE_BPS / 100}% platform fee
           </p>
         </div>
       )}
 
-      <label className="mb-1 block text-xs font-medium text-zinc-400">
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
         Amount (TICK) — min {MIN_STAKE_TICK}
       </label>
       <div className="flex gap-2">
@@ -228,7 +232,7 @@ export function StakePanel({
           onChange={(e) => setAmountStr(e.target.value)}
           inputMode="decimal"
           disabled={busy}
-          className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-white outline-none focus:border-[#7F77DD]"
+          className="w-full rounded-xl border border-black/10 bg-black/[.03] px-3 py-2.5 font-display tabular-nums text-zinc-900 outline-none transition-all placeholder:text-zinc-400 focus:border-[#2E7CF6] focus:ring-2 focus:ring-[#2E7CF6]/40 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-zinc-600"
           placeholder="10"
         />
         {["10", "50", "100"].map((q) => (
@@ -236,7 +240,7 @@ export function StakePanel({
             key={q}
             onClick={() => setAmountStr(q)}
             disabled={busy}
-            className="rounded-xl border border-zinc-700 px-3 text-sm text-zinc-300 hover:border-[#7F77DD]"
+            className="rounded-xl border border-black/10 px-3 text-sm font-semibold text-zinc-600 transition-all hover:border-[#2E7CF6]/60 hover:text-[#1D4ED8] active:scale-95 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/60 dark:hover:text-[#7db3ff]"
           >
             {q}
           </button>
@@ -248,44 +252,48 @@ export function StakePanel({
             )
           }
           disabled={busy}
-          className="rounded-xl border border-zinc-700 px-3 text-sm text-zinc-300 hover:border-[#7F77DD]"
+          className="rounded-xl border border-black/10 px-3 text-sm font-semibold text-zinc-600 transition-all hover:border-[#2E7CF6]/60 hover:text-[#1D4ED8] active:scale-95 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/60 dark:hover:text-[#7db3ff]"
         >
           MAX
         </button>
       </div>
-      <p className="mt-1 text-xs text-zinc-500">
+      <p className="mt-1 font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
         Balance: {balance === null ? "—" : `${formatTick(balance)} TICK`}
       </p>
 
       {estimatedPayout !== null && minOk && (
-        <div className="mt-3 rounded-xl bg-zinc-900/70 p-3 text-sm">
-          <div className="flex justify-between text-zinc-400">
+        <div className="mt-3 rounded-xl border border-[#2E7CF6]/20 bg-[#2E7CF6]/6 p-3 text-sm dark:bg-[#2E7CF6]/8">
+          <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
             <span>Est. payout if {OUTCOME_LABELS[outcome].toLowerCase()} wins</span>
-            <span className="font-bold text-[#1D9E75]">{formatTick(estimatedPayout)} TICK</span>
+            <span className="font-display font-bold tabular-nums text-[#1D4ED8] dark:text-[#7fe0bd]">
+              {formatTick(estimatedPayout)} TICK
+            </span>
           </div>
-          <p className="mt-1 text-[11px] text-zinc-600">
+          <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-600">
             Estimate only — final odds move as others stake. Winners split the pool minus fee.
           </p>
         </div>
       )}
 
       {step === "done" && (
-        <p className="mt-3 rounded-xl bg-[#1D9E75]/15 p-3 text-sm font-medium text-[#9fe8cd]">
+        <p className="mt-3 rounded-xl bg-[#1D9E75]/12 p-3 text-sm font-medium text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]">
           Stake placed — good luck! Pool totals update live below.
         </p>
       )}
       {error && (
-        <p className="mt-3 rounded-xl bg-red-950/40 p-3 text-sm text-red-200">{error}</p>
+        <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-200">
+          {error}
+        </p>
       )}
 
       <button
         onClick={handleStake}
         disabled={busy || !minOk || !balanceOk}
         className={cn(
-          "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white",
+          "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
           busy || !minOk || !balanceOk
-            ? "cursor-not-allowed bg-zinc-700"
-            : "bg-[#7F77DD] hover:bg-[#6f68d6]"
+            ? "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
+            : "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_36px_rgba(46,124,246,.6)]"
         )}
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -297,7 +305,7 @@ export function StakePanel({
               ? `Approve & stake ${amount ? formatTick(amount, 0) : ""} TICK`
               : `Stake ${amount ? formatTick(amount, 0) : ""} TICK`}
       </button>
-      <p className="mt-2 text-center text-[11px] text-zinc-600">
+      <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
         Gasless — sent from your smart wallet, sponsored by TICKR.
       </p>
     </div>

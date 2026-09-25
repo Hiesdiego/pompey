@@ -7,7 +7,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Sparkles } from "lucide-react";
 import { useTickr } from "../hooks/useTickr";
 import { useTeams, type TeamInfo } from "../hooks/useTeams";
 import { getProfile, saveProfile, validateUsername } from "../lib/profile";
@@ -26,22 +26,22 @@ function TeamOption({
     <button
       onClick={onSelect}
       className={cn(
-        "flex flex-col items-center gap-1 rounded-xl border-2 p-2 transition-all",
+        "flex flex-col items-center gap-1 rounded-xl border-2 p-2 transition-all active:scale-95",
         selected
-          ? "border-[#7F77DD] bg-[#7F77DD]/15"
-          : "border-zinc-800 bg-zinc-900/50 hover:border-zinc-600"
+          ? "border-[#2E7CF6] bg-[#2E7CF6]/12 shadow-[0_0_16px_rgba(46,124,246,.25)] dark:bg-[#2E7CF6]/15"
+          : "border-black/8 bg-black/[.02] hover:border-[#2E7CF6]/40 dark:border-white/8 dark:bg-white/[.02] dark:hover:border-[#2E7CF6]/40"
       )}
     >
       {team.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={team.imageUrl} alt={team.symbol} width={28} height={28} className="rounded-full" />
       ) : (
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-[#7F77DD] to-[#1D9E75] text-xs font-bold text-white">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-[#2E7CF6] to-[#1D4ED8] text-xs font-bold text-white">
           {team.symbol.slice(0, 1)}
         </span>
       )}
-      <span className="text-[10px] font-semibold text-zinc-300">{team.symbol}</span>
-      {selected && <Check className="h-3 w-3 text-[#7F77DD]" />}
+      <span className="text-[10px] font-semibold text-zinc-600 dark:text-zinc-300">{team.symbol}</span>
+      {selected && <Check className="h-3 w-3 text-[#2E7CF6]" />}
     </button>
   );
 }
@@ -87,14 +87,23 @@ export function OnboardingModal({ onDone }: { onDone?: () => void }) {
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-zinc-700 bg-[#141416] p-6">
-        <h2 className="text-xl font-black text-white">Welcome to TICKR</h2>
-        <p className="mb-5 mt-1 text-sm text-zinc-400">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
+      <div className="glass-strong max-h-[90vh] w-full max-w-lg animate-page-in overflow-y-auto rounded-3xl p-6 md:p-8">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_20px_rgba(46,124,246,.45)]">
+            <Sparkles className="h-4 w-4 text-white" />
+          </span>
+          <h2 className="font-display text-xl font-bold text-zinc-900 dark:text-white">
+            Welcome to TICKR
+          </h2>
+        </div>
+        <p className="mb-5 mt-1 text-sm text-zinc-500 dark:text-zinc-400">
           Pick a username and your favourite team to get started. This only happens once.
         </p>
 
-        <label className="mb-1 block text-xs font-medium text-zinc-400">Username</label>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Username
+        </label>
         <input
           value={username}
           onChange={(e) => {
@@ -104,22 +113,26 @@ export function OnboardingModal({ onDone }: { onDone?: () => void }) {
           maxLength={20}
           placeholder="e.g. satoshi_bets"
           className={cn(
-            "w-full rounded-xl border bg-zinc-900 px-3 py-2.5 text-white outline-none",
-            touched && usernameError ? "border-red-500" : "border-zinc-700 focus:border-[#7F77DD]"
+            "w-full rounded-xl border bg-black/[.03] px-3 py-2.5 text-zinc-900 outline-none transition-all placeholder:text-zinc-400 focus:ring-2 focus:ring-[#2E7CF6]/40 dark:bg-white/5 dark:text-white dark:placeholder:text-zinc-600",
+            touched && usernameError
+              ? "border-red-500"
+              : "border-black/10 focus:border-[#2E7CF6] dark:border-white/10"
           )}
         />
         {touched && usernameError ? (
-          <p className="mt-1 text-xs text-red-400">{usernameError}</p>
+          <p className="mt-1 text-xs text-red-500 dark:text-red-400">{usernameError}</p>
         ) : (
-          <p className="mt-1 text-xs text-zinc-600">3–20 characters: letters, numbers, underscores.</p>
+          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600">
+            3–20 characters: letters, numbers, underscores.
+          </p>
         )}
 
-        <label className="mb-2 mt-5 block text-xs font-medium text-zinc-400">
+        <label className="mb-2 mt-5 block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
           Favourite team
         </label>
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
+            <Loader2 className="h-4 w-4 animate-spin text-[#2E7CF6]" /> Loading teams…
           </div>
         ) : (
           <div className="grid grid-cols-5 gap-2">
@@ -138,14 +151,16 @@ export function OnboardingModal({ onDone }: { onDone?: () => void }) {
           onClick={handleSave}
           disabled={!canSave}
           className={cn(
-            "mt-6 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white",
-            canSave ? "bg-[#7F77DD] hover:bg-[#6f68d6]" : "cursor-not-allowed bg-zinc-700"
+            "mt-6 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
+            canSave
+              ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_34px_rgba(46,124,246,.6)]"
+              : "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
           )}
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" />}
           Start playing
         </button>
-        <p className="mt-2 text-center text-[11px] text-zinc-600">
+        <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
           Your profile is stored on this device for now.
         </p>
       </div>

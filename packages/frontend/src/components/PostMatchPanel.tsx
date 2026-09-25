@@ -149,42 +149,44 @@ export function PostMatchPanel({
   const won = winning !== null && stakes !== null && stakes[winning] > 0n;
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-[#141416] p-5">
+    <div className="glass rounded-2xl p-5">
       <div className="mb-4 flex items-center justify-center gap-2">
-        <Trophy className="h-5 w-5 text-amber-400" />
-        <h3 className="text-base font-bold text-white">Full time</h3>
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-[0_0_18px_rgba(251,191,36,.4)]">
+          <Trophy className="h-4 w-4 text-white" />
+        </span>
+        <h3 className="font-display text-base font-bold text-zinc-900 dark:text-white">Full time</h3>
       </div>
 
       <div className="mb-4 grid grid-cols-3 items-center gap-2 text-center">
         <div>
           <TeamBadge teamId={fixture.home.teamId} size={40} showName={false} className="justify-center" />
-          <p className="mt-1 text-sm font-semibold text-zinc-200">{fixture.home.name}</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">{fixture.home.name}</p>
         </div>
-        <div className="rounded-xl bg-zinc-900 py-3">
-          <div className="text-3xl font-black text-white">
+        <div className="rounded-2xl border border-black/8 bg-black/[.03] py-3 dark:border-white/8 dark:bg-white/[.03]">
+          <div className="font-display text-3xl font-bold tabular-nums text-zinc-900 dark:text-white">
             {homePct === null ? "–" : roundPctLikeOracle(homePct)}
-            <span className="mx-1 text-zinc-600">:</span>
+            <span className="mx-1 text-zinc-300 dark:text-zinc-600">:</span>
             {awayPct === null ? "–" : roundPctLikeOracle(awayPct)}
           </div>
-          <p className="mt-1 text-[11px] uppercase tracking-wider text-zinc-500">final % score</p>
+          <p className="mt-1 text-[11px] uppercase tracking-widest text-zinc-500">final % score</p>
         </div>
         <div>
           <TeamBadge teamId={fixture.away.teamId} size={40} showName={false} className="justify-center" />
-          <p className="mt-1 text-sm font-semibold text-zinc-200">{fixture.away.name}</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">{fixture.away.name}</p>
         </div>
       </div>
 
       {winning !== null && (
-        <p className="mb-4 text-center text-sm text-zinc-300">
+        <p className="mb-4 text-center text-sm text-zinc-500 dark:text-zinc-300">
           Result:{" "}
-          <span className="font-bold text-white">
+          <span className="font-display font-bold text-zinc-900 dark:text-white">
             {winning === 0
               ? `${fixture.home.name} win`
               : winning === 2
                 ? `${fixture.away.name} win`
                 : "Draw"}
           </span>{" "}
-          <span className="text-zinc-500">({OUTCOME_SHORT[winning]} · {outcomeLabel(winning)})</span>
+          <span className="text-zinc-400 dark:text-zinc-500">({OUTCOME_SHORT[winning]} · {outcomeLabel(winning)})</span>
         </p>
       )}
 
@@ -196,8 +198,8 @@ export function PostMatchPanel({
         <p className="text-center text-sm text-zinc-500">You didn't stake on this match.</p>
       )}
       {playerAddress && hasStake && claimed === false && (
-        <div className="rounded-xl bg-zinc-900/70 p-4">
-          <p className="mb-1 text-sm text-zinc-300">
+        <div className="rounded-2xl border border-black/8 bg-black/[.03] p-4 dark:border-white/8 dark:bg-white/[.03]">
+          <p className="mb-1 font-display text-sm tabular-nums text-zinc-600 dark:text-zinc-300">
             Your stakes:{" "}
             {stakes
               .map((s, i) => (s > 0n ? `${OUTCOME_SHORT[i]} ${formatTick(s)}` : null))
@@ -205,35 +207,39 @@ export function PostMatchPanel({
               .join(" · ")}{" "}
             TICK
           </p>
-          <p className={cn("mb-3 text-sm font-semibold", won ? "text-[#1D9E75]" : "text-zinc-400")}>
+          <p className={cn("mb-3 text-sm font-semibold", won ? "text-[#0f7a55] dark:text-[#7fe0bd]" : "text-zinc-500 dark:text-zinc-400")}>
             {won ? "You won — claim your payout!" : "No win this time."}
           </p>
           <button
             onClick={handleClaim}
             disabled={claimBusy}
             className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white",
-              claimBusy ? "cursor-not-allowed bg-zinc-700" : "bg-[#1D9E75] hover:bg-[#178a64]"
+              "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
+              claimBusy
+                ? "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
+                : "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_36px_rgba(46,124,246,.6)]"
             )}
           >
             {claimBusy && <Loader2 className="h-4 w-4 animate-spin" />}
             {claimBusy ? "Claiming…" : "Claim payout"}
           </button>
-          <p className="mt-2 text-center text-[11px] text-zinc-600">
+          <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
             Gasless — sent from your smart wallet, sponsored by TICKR.
           </p>
         </div>
       )}
       {playerAddress && hasStake && claimed === true && (
-        <p className="flex items-center justify-center gap-2 text-sm font-medium text-[#1D9E75]">
+        <p className="flex items-center justify-center gap-2 text-sm font-medium text-[#0f7a55] dark:text-[#7fe0bd]">
           <CheckCircle2 className="h-4 w-4" /> Claimed
           {claimTx && (
-            <span className="font-mono text-[11px] text-zinc-500">{claimTx.slice(0, 10)}…</span>
+            <span className="font-mono text-[11px] text-zinc-400 dark:text-zinc-500">{claimTx.slice(0, 10)}…</span>
           )}
         </p>
       )}
       {claimError && (
-        <p className="mt-3 rounded-xl bg-red-950/40 p-3 text-sm text-red-200">{claimError}</p>
+        <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-200">
+          {claimError}
+        </p>
       )}
     </div>
   );

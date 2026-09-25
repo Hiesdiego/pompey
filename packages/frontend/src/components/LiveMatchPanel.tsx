@@ -61,21 +61,25 @@ export function LiveMatchPanel({
           : "draw";
 
   const barFor = (pct: number | null) => {
-    if (pct === null) return { width: 0, cls: "bg-zinc-600" };
+    if (pct === null) return { width: 0, cls: "bg-zinc-400 dark:bg-zinc-600", live: false };
     const w = Math.min(100, Math.abs(pct) * 10);
     return {
       width: Math.max(2, w),
-      cls: pct >= 0 ? "bg-[#1D9E75]" : "bg-red-500",
+      cls:
+        pct >= 0
+          ? "bg-gradient-to-r from-[#1D9E75] to-[#34d399] shadow-[0_0_14px_rgba(29,158,117,.5)]"
+          : "bg-gradient-to-r from-red-500 to-red-400 shadow-[0_0_14px_rgba(239,68,68,.5)]",
+      live: true,
     };
   };
 
   return (
-    <div className="rounded-2xl border border-red-500/30 bg-[#141416] p-5">
+    <div className="glass rounded-2xl border-red-500/25! p-5 shadow-[0_0_40px_rgba(239,68,68,.08)]">
       <div className="mb-4 flex items-center justify-between">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600/20 px-3 py-1 text-xs font-bold text-red-400">
+        <span className="inline-flex animate-glow-pulse items-center gap-1.5 rounded-full bg-red-500/12 px-3 py-1 font-display text-xs font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">
           <Radio className="h-3.5 w-3.5 animate-pulse" /> LIVE
         </span>
-        <span className="text-xs text-zinc-400">
+        <span className="font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
           {windowEndMs === null
             ? "—"
             : expired
@@ -88,19 +92,19 @@ export function LiveMatchPanel({
       <div className="mb-6 grid grid-cols-3 items-center gap-2 text-center">
         <div>
           <TeamBadge teamId={fixture.home.teamId} size={40} showName={false} className="justify-center" />
-          <p className="mt-1 text-sm font-semibold text-zinc-200">{fixture.home.name}</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">{fixture.home.name}</p>
         </div>
-        <div className="rounded-xl bg-zinc-900 py-3">
-          <div className="text-3xl font-black tracking-tight text-white">
+        <div className="rounded-2xl border border-black/8 bg-black/[.03] py-3 dark:border-white/8 dark:bg-white/[.03]">
+          <div className="font-display text-3xl font-bold tracking-tight tabular-nums text-zinc-900 dark:text-white">
             {homeRounded === null ? "–" : homeRounded}
-            <span className="mx-1 text-zinc-600">:</span>
+            <span className="mx-1 text-zinc-300 dark:text-zinc-600">:</span>
             {awayRounded === null ? "–" : awayRounded}
           </div>
-          <p className="mt-1 text-[11px] uppercase tracking-wider text-zinc-500">rounded % score</p>
+          <p className="mt-1 text-[11px] uppercase tracking-widest text-zinc-500">rounded % score</p>
         </div>
         <div>
           <TeamBadge teamId={fixture.away.teamId} size={40} showName={false} className="justify-center" />
-          <p className="mt-1 text-sm font-semibold text-zinc-200">{fixture.away.name}</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">{fixture.away.name}</p>
         </div>
       </div>
 
@@ -114,27 +118,31 @@ export function LiveMatchPanel({
           return (
             <div key={row.teamId}>
               <div className="mb-1 flex items-baseline justify-between text-sm">
-                <span className={cn("font-medium", row.leading ? "text-white" : "text-zinc-400")}>
+                <span className={cn("font-medium", row.leading ? "text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400")}>
                   {row.name}
-                  {row.leading && <span className="ml-2 text-[10px] font-bold text-[#1D9E75]">LEADING</span>}
+                  {row.leading && (
+                    <span className="ml-2 rounded-full bg-[#1D9E75]/12 px-1.5 py-0.5 text-[10px] font-bold text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]">
+                      LEADING
+                    </span>
+                  )}
                 </span>
                 <span
                   className={cn(
-                    "font-mono font-bold",
-                    row.pct === null ? "text-zinc-500" : row.pct >= 0 ? "text-[#1D9E75]" : "text-red-400"
+                    "font-display font-bold tabular-nums",
+                    row.pct === null ? "text-zinc-400 dark:text-zinc-500" : row.pct >= 0 ? "text-[#0f7a55] dark:text-[#7fe0bd]" : "text-red-500 dark:text-red-400"
                   )}
                 >
                   {row.pct === null ? "waiting for price…" : formatSignedPct(row.pct)}
                 </span>
               </div>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-800">
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/8 dark:bg-white/8">
                 <div
-                  className={cn("h-full rounded-full transition-all duration-1000", bar.cls)}
+                  className={cn("h-full rounded-full transition-all duration-1000", bar.cls, bar.live && "bar-shimmer")}
                   style={{ width: `${bar.width}%` }}
                 />
               </div>
               {homePrice && awayPrice && (
-                <p className="mt-1 text-[11px] text-zinc-600">
+                <p className="mt-1 font-display text-[11px] tabular-nums text-zinc-400 dark:text-zinc-600">
                   Live: ${Number(prices[row.teamId]?.price ?? 0).toLocaleString("en-US")} ·{" "}
                   {prices[row.teamId]?.source ?? "—"}
                 </p>
@@ -145,7 +153,7 @@ export function LiveMatchPanel({
       </div>
 
       {!snapshot && (
-        <p className="mt-4 text-center text-xs text-zinc-500">
+        <p className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-500">
           Kickoff snapshot not yet on-chain — bars appear once the backend submits start prices.
         </p>
       )}

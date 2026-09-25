@@ -34,7 +34,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       config={{
         appearance: {
           theme: "dark",
-          accentColor: "#7F77DD",
+          accentColor: "#2E7CF6",
           landingHeader: "Welcome to TICKR",
           loginMessage: "Predict. Stake. Climb the table.",
           showWalletLoginFirst: false,
