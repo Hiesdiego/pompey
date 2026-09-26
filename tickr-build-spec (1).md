@@ -364,14 +364,15 @@ These points were ambiguous or contradictory in the source notes and have been r
 
 | Contract | Address | Scope |
 |---|---|---|
-| PlayerStats | `0x7bEE9463A80Db25528548981a6FecfEC4942E789` | persistent |
-| PriceOracle | `0xC439Fc957041990E3CEBC7e327d4a135450A5DB6` | persistent |
-| SeasonRegistry | `0x9150456181e1EcAD4989e6A4aEAFaD6af184f0B6` | persistent |
-| TeamRegistrySeason1 | `0x5090FD25f46791a217153C3b10Cc0d850CEbA756` | Season 1 |
-| TickToken | `0x9284ae11bFA0616177462D149fF3C6E803053FED` | persistent |
-| MatchRegistrySeason1 | `0x08F2929F2BA4a60c2b5485b4CC2c1881dE7C903c` | Season 1 |
-| PredictionPool | `0x008d64439DD189480EDc9b74983db6D87fD8F48A` | persistent |
-| ResultEngine | `0xA02Be4BDb0FF7E774FA3CFAa8D879bDbd06AF5D6` | persistent |
+| PlayerStats | `0x6c6A1e8AA000527FdA6DEC9Ef3b9Cf77C37C650E` | persistent |
+| PriceOracle | `0x8915F4919F6a2031A6aba16D9AAe639BE209b23b` | persistent |
+| SeasonRegistry | `0x38d5C94d2BAB4a40D9663c2042e7ea02388Fc6ab` | persistent |
+| TeamRegistrySeason1 | `0xCeF503a73d507Fead4bB090537E884C76692B6eF` | Season 1 |
+| TickToken | `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b` | persistent |
+| MatchRegistrySeason1 | `0xf7954389d44B2DB3540A53331C1BAf08b70Ca1D6` | Season 1 |
+| PredictionPool | `0x70deB4Cc3002813cEC623d4E289186f2949e7DA0` | persistent |
+| ResultEngine | `0xFA974C6ee13F2D38C6a7C56aaF595DB1352730bc` | persistent |
+| MarketFactory | `0xb61933b364E65201Ac01C64f51aa29c51b8F5ed2` | persistent |
 
 > Address byte-length not independently verified against the deploy log as pasted — recheck against the explorer/artifacts before wiring the backend if any call reverts on an invalid address.
 

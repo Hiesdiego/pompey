@@ -18,7 +18,8 @@ export function useContractWrite() {
 
   const write = useCallback(
     async (params: {
-      to: Address;
+      to?: Address;
+      address?: Address;
       abi: Abi;
       functionName: string;
       args?: unknown[];
@@ -32,7 +33,7 @@ export function useContractWrite() {
           functionName: params.functionName,
           args: params.args as never[],
         });
-        const hash = await sendSponsoredTx({ to: params.to, data });
+        const hash = await sendSponsoredTx({ to: params.to ?? params.address!, data });
         const receipt = await getPublicClient().waitForTransactionReceipt({ hash });
         if (receipt.status !== "success") {
           throw new Error(
@@ -51,5 +52,5 @@ export function useContractWrite() {
     [sendSponsoredTx, ready]
   );
 
-  return { write, pending, error, clearError: () => setError(null), ready };
+  return { write, pending, status: pending ? "pending" : error ? "error" : "idle", error, clearError: () => setError(null), ready };
 }

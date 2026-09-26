@@ -23,7 +23,8 @@ contract MockMatchRegistry is IMatchRegistry {
             windowEnd: 0,
             kickoffTimestamp: 0,
             kickoffRevealed: false,
-            settled: false
+            settled: false,
+            matchEndTimestamp: 0
         });
     }
 
@@ -37,6 +38,24 @@ contract MockMatchRegistry is IMatchRegistry {
 
     function markSettled(uint256 fixtureId) external {
         settledOverride[fixtureId] = true;
+    }
+
+    // --- v0.2: IMatchRegistry grew schedule/timing accessors; the mock
+    // --- stubs them with sane defaults so it stays concrete.
+    function scheduleGenerated() external pure returns (bool) {
+        return true;
+    }
+
+    function matchdaysGenerated() external pure returns (uint8) {
+        return 38;
+    }
+
+    function seasonStartTimestamp() external pure returns (uint64) {
+        return 0;
+    }
+
+    function matchdayIntervalSeconds() external pure returns (uint64) {
+        return 172800;
     }
 }
 

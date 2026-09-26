@@ -10,12 +10,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { MATCH_DURATION_SECONDS } from "@tickr/shared/constants";
 import {
   CONTRACTS,
   PRICE_ORACLE_ABI,
   SEASON_ID,
 } from "../../../lib/contracts";
+import { MATCH_REGISTRY_V2_ABI } from "../../../lib/marketFactory";
 import { api, type ApiFixture, type ApiPool } from "../../../lib/api";
 import { isoToMs } from "../../../lib/format";
 import { useTickr } from "../../../hooks/useTickr";
@@ -31,7 +31,7 @@ import { Countdown } from "../../../components/Countdown";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../../components/States";
 
-const MATCH_MS = MATCH_DURATION_SECONDS * 1000;
+const MATCH_MS = 60 * 60 * 1000;
 
 export default function MatchPage() {
   const params = useParams();
@@ -44,17 +44,58 @@ export default function MatchPage() {
   const [pool, setPool] = useState<ApiPool | null>(null);
   const [snapshot, setSnapshot] = useState<FullSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  const [bettingCloseMs, setBettingCloseMs] = useState<number | null>(null);
+  const [bettingOpen, setBettingOpen] = useState(false);
 
   // Tick so the status recomputes as kickoff/windows pass.
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const t = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(t);
   }, []);
 
   const loadFixture = useCallback(async () => {
     const f = await api.fixture(id);
     setFixture(f);
+    if (!CONTRACTS.matchRegistryS1) return;
+    try {
+      const pc = getPublicClient();
+      const [open, onChainFixture] = await Promise.all([
+        pc.readContract({
+          address: CONTRACTS.matchRegistryS1 as `0x${string}`,
+          abi: MATCH_REGISTRY_V2_ABI,
+          functionName: "isBettingOpen",
+          args: [BigInt(id)],
+        }),
+        pc.readContract({
+          address: CONTRACTS.matchRegistryS1 as `0x${string}`,
+          abi: MATCH_REGISTRY_V2_ABI,
+          functionName: "getFixture",
+          args: [BigInt(id)],
+        }),
+      ]);
+      setBettingOpen(open);
+      const matchEnd = onChainFixture.matchEndTimestamp;
+      setBettingCloseMs(matchEnd > 0n ? Number(matchEnd) * 1000 - 5 * 60 * 1000 : null);
+    } catch {
+      setBettingOpen(false);
+      setBettingCloseMs(null);
+    }
+  }, [id]);
+
+  const refreshBettingWindow = useCallback(async () => {
+    if (!CONTRACTS.matchRegistryS1) return;
+    try {
+      const open = await getPublicClient().readContract({
+        address: CONTRACTS.matchRegistryS1 as `0x${string}`,
+        abi: MATCH_REGISTRY_V2_ABI,
+        functionName: "isBettingOpen",
+        args: [BigInt(id)],
+      });
+      setBettingOpen(open);
+    } catch {
+      /* Keep the last known state if the RPC read fails. */
+    }
   }, [id]);
 
   const loadPool = useCallback(async () => {
@@ -124,6 +165,13 @@ export default function MatchPage() {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixture, fixtureUpdates[id], loadPool]);
+
+  useEffect(() => {
+    if (!fixture || fixtureStatus(fixture, fixtureUpdates[id]) !== "live") return;
+    void refreshBettingWindow();
+    const t = setInterval(() => void refreshBettingWindow(), 1_000);
+    return () => clearInterval(t);
+  }, [fixture, fixtureUpdates, id, refreshBettingWindow]);
 
   const handleStaked = useCallback(() => {
     loadPool();
@@ -218,12 +266,39 @@ export default function MatchPage() {
               onClaimed={handleStaked}
             />
           ) : status === "live" ? (
-            <LiveMatchPanel
-              fixture={fixture}
-              snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null}
-              prices={prices}
-              windowEndMs={windowEndMs}
-            />
+            <div className="space-y-6">
+              <LiveMatchPanel
+                fixture={fixture}
+                snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null}
+                prices={prices}
+                windowEndMs={windowEndMs}
+              />
+              {bettingOpen && bettingCloseMs !== null && bettingCloseMs > now ? (
+                <div className="glass rounded-2xl border-emerald-500/25! p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-display text-sm font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                      <span className="live-badge mr-2">Live</span> In-play betting open
+                    </h3>
+                    <span className="text-xs text-zinc-500">
+                      Closes in <Countdown target={bettingCloseMs} />
+                    </span>
+                  </div>
+                  <StakePanel
+                    fixture={fixture}
+                    pool={pool}
+                    playerAddress={playerAddress}
+                    balance={balance}
+                    authenticated={authenticated}
+                    onLogin={login}
+                    onStaked={handleStaked}
+                  />
+                </div>
+              ) : bettingOpen ? (
+                <p className="text-center text-sm text-amber-600 dark:text-amber-400">
+                  In-play betting closes 5 minutes before full time.
+                </p>
+              ) : null}
+            </div>
           ) : status === "awaiting" ? (
             <div className="glass rounded-2xl border-amber-500/25! p-8 text-center">
               <p className="font-display text-lg font-bold text-zinc-900 dark:text-white">Full time</p>

@@ -59,6 +59,7 @@ const REGISTRY_READ_ABI = [
           { name: "windowEnd", type: "uint64" },
           { name: "kickoffTimestamp", type: "uint64" },
           { name: "kickoffRevealed", type: "bool" },
+          { name: "matchEndTimestamp", type: "uint64" }, // v0.2: pinned at reveal = kickoff + matchDuration
           { name: "settled", type: "bool" },
         ],
       },
@@ -75,6 +76,7 @@ export interface FixtureView {
   windowEndMs: number;
   kickoffMs: number; // 0 until revealed
   kickoffRevealed: boolean;
+  matchEndMs: number; // v0.2: 0 until revealed, then kickoff + matchDuration
   settled: boolean;
 }
 
@@ -130,6 +132,7 @@ class FixtureCache {
       windowEnd: bigint;
       kickoffTimestamp: bigint;
       kickoffRevealed: boolean;
+      matchEndTimestamp: bigint;
       settled: boolean;
     };
     return {
@@ -141,6 +144,7 @@ class FixtureCache {
       windowEndMs: Number(f.windowEnd) * 1000,
       kickoffMs: Number(f.kickoffTimestamp) * 1000,
       kickoffRevealed: f.kickoffRevealed,
+      matchEndMs: Number(f.matchEndTimestamp) * 1000,
       settled: f.settled,
     };
   }
@@ -235,8 +239,20 @@ export class MatchLifecycle {
     }
   }
 
-  // ------------------------------------------------------------- P2.5 reveal
+  // ------------------------------------------------------------- P2.5 reveal (v0.2 staggered)
 
+  /**
+   * v0.2 — staggered prime-time kickoff clusters. Fixtures due for reveal
+   * are grouped by matchday; each matchday's fixtures are spread across up
+   * to KICKOFF_STAGGER_MAX_SLOTS kickoff slots, KICKOFF_STAGGER_SLOT_MINUTES
+   * apart, starting at now + leadMinutes. The slot assignment is
+   * deterministic (fixtureId order → slot = index % maxSlots), so a backend
+   * restart re-derives the same kickoff times instead of double-scheduling.
+   *
+   * Legal reveal still requires kickoff within [now+30min, now+120min] AND
+   * inside the fixture's window — a slot that would land outside either
+   * bound is skipped and flagged for manual review.
+   */
   private async revealDueKickoffs(): Promise<void> {
     const now = Date.now();
     const due = this.cache
@@ -244,31 +260,62 @@ export class MatchLifecycle {
       .filter(
         (f) => !f.kickoffRevealed && !f.settled && f.windowStartMs <= now && now < f.windowEndMs
       );
+    if (due.length === 0) return;
+
+    const slotMs = config.kickoff.staggerSlotMinutes * 60 * 1000;
+    const maxSlots = Math.max(1, config.kickoff.staggerMaxSlots);
+
+    // Group by matchday so each matchday gets its own cluster schedule.
+    const byMatchday = new Map<number, FixtureView[]>();
     for (const f of due) {
-      const kickoffMs = now + this.leadMs;
-      // Legal reveal requires kickoff within [now+30min, now+120min] AND inside the window.
-      if (kickoffMs > f.windowEndMs || this.leadMs < 30 * 60 * 1000 || this.leadMs > 120 * 60 * 1000) {
-        logger.error("[MatchLifecycle] MISSED reveal window — manual review required", {
-          fixtureId: f.fixtureId.toString(),
-          matchday: f.matchdayIndex,
-          windowEnd: new Date(f.windowEndMs).toISOString(),
-        });
-        continue;
-      }
-      try {
-        const kickoffSec = BigInt(Math.floor(kickoffMs / 1000));
-        await this.submitter.revealKickoff(f.fixtureId, kickoffSec);
-        // Update the cache optimistically — the tx is queued; refresh() will confirm.
-        f.kickoffRevealed = true;
-        f.kickoffMs = kickoffMs;
-      } catch (err) {
-        logger.error("[MatchLifecycle] revealKickoff failed", {
-          fixtureId: f.fixtureId.toString(),
-          error: String(err),
-        });
+      const list = byMatchday.get(f.matchdayIndex) ?? [];
+      list.push(f);
+      byMatchday.set(f.matchdayIndex, list);
+    }
+
+    let revealed = 0;
+    for (const [, fixtures] of byMatchday) {
+      fixtures.sort((a, b) => (a.fixtureId < b.fixtureId ? -1 : 1));
+      for (let i = 0; i < fixtures.length; i++) {
+        const f = fixtures[i];
+        const slot = i % maxSlots;
+        const kickoffMs = now + this.leadMs + slot * slotMs;
+        // Legal reveal requires kickoff within [now+30min, now+120min] AND inside the window.
+        if (
+          kickoffMs > f.windowEndMs ||
+          this.leadMs + slot * slotMs < 30 * 60 * 1000 ||
+          this.leadMs + slot * slotMs > 120 * 60 * 1000
+        ) {
+          logger.error("[MatchLifecycle] MISSED reveal window — manual review required", {
+            fixtureId: f.fixtureId.toString(),
+            matchday: f.matchdayIndex,
+            staggerSlot: slot,
+            windowEnd: new Date(f.windowEndMs).toISOString(),
+          });
+          continue;
+        }
+        try {
+          const kickoffSec = BigInt(Math.floor(kickoffMs / 1000));
+          await this.submitter.revealKickoff(f.fixtureId, kickoffSec);
+          // Update the cache optimistically — the tx is queued; refresh() will confirm.
+          f.kickoffRevealed = true;
+          f.kickoffMs = kickoffMs;
+          revealed++;
+          logger.info("[MatchLifecycle] kickoff revealed (staggered)", {
+            fixtureId: f.fixtureId.toString(),
+            matchday: f.matchdayIndex,
+            staggerSlot: slot,
+            kickoff: new Date(kickoffMs).toISOString(),
+          });
+        } catch (err) {
+          logger.error("[MatchLifecycle] revealKickoff failed", {
+            fixtureId: f.fixtureId.toString(),
+            error: String(err),
+          });
+        }
       }
     }
-    if (due.length > 0) logger.info("[MatchLifecycle] reveal pass complete", { count: due.length });
+    logger.info("[MatchLifecycle] reveal pass complete", { due: due.length, revealed });
   }
 
   // ------------------------------------------------------------- P2.6 match timer

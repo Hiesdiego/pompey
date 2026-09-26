@@ -23,3 +23,7 @@ export function getPublicClient(): PublicClient {
   }) as PublicClient;
   return singleton;
 }
+
+export function usePublicClient(): PublicClient {
+  return getPublicClient();
+}

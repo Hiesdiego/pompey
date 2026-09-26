@@ -1,5 +1,5 @@
 /**
- * TICKR backend — Phase 2 engine entrypoint.
+ * TICKR backend — Phase 2 engine entrypoint (+ v0.2 services).
  *
  * Boot order:
  *   1. config (fails fast on missing env)
@@ -7,7 +7,9 @@
  *   3. price validator/aggregator
  *   4. snapshot submitter (backend signer + serialized tx queue)
  *   5. match lifecycle (kickoff monitor + match timer)
- *   6. REST API + live WebSocket server
+ *   6. v0.2: checkpoint submitter (hourly oracle checkpoints)
+ *   7. v0.2: factory keeper (MarketFactory resolution backstop)
+ *   8. REST API + live WebSocket server
  *
  * Copy packages/backend/.env.example → .env and fill in the secrets first.
  */
@@ -22,6 +24,8 @@ import { CoingeckoPoller } from "./services/coingecko.js";
 import { PriceFeed, type TeamPriceMap } from "./services/priceFeed.js";
 import { SnapshotSubmitter } from "./services/snapshotSubmitter.js";
 import { MatchLifecycle } from "./services/matchLifecycle.js";
+import { CheckpointSubmitter } from "./services/checkpointSubmitter.js";
+import { FactoryKeeper } from "./services/factoryKeeper.js";
 import { ChainReader } from "./api/readClient.js";
 import { buildRouter } from "./api/routes.js";
 import { LiveWsServer } from "./api/wsServer.js";
@@ -80,9 +84,32 @@ async function main(): Promise<void> {
   binanceRest.start();
   coingecko.start();
 
+  // v0.2 SOMI fix — per-symbol WS gap filler. The market-data mirror
+  // (data-stream.binance.vision) silently drops WS streams for some
+  // newly-listed symbols (verified: somiusdt@miniTicker connects but never
+  // ticks, while the REST ticker has the price). The REST poller stays
+  // paused while the WS is healthy overall, so without this a
+  // symbol-specific gap never gets covered and the team falls back to
+  // CoinGecko-only pricing. Every 60s, REST-poll exactly the missing
+  // symbols; the ticks flow through the normal pipeline as Binance-source.
+  const gapFillTimer = setInterval(() => {
+    try {
+      const gaps = priceFeed.binanceGapSymbols();
+      if (gaps.length > 0) {
+        logger.info("[backend] binance WS gap-fill", { symbols: gaps });
+        void binanceRest.pollSymbols(gaps);
+      }
+    } catch (err) {
+      logger.warn("[backend] gap-fill check failed", { error: String(err) });
+    }
+  }, 60_000);
+  gapFillTimer.unref?.();
+
   // --- chain writers -----------------------------------------------------
   const submitter = new SnapshotSubmitter();
   const lifecycle = new MatchLifecycle(priceFeed, submitter);
+  const checkpointSubmitter = new CheckpointSubmitter(priceFeed);
+  const factoryKeeper = new FactoryKeeper();
   const reader = new ChainReader();
 
   // --- HTTP + WS ----------------------------------------------------------
@@ -117,13 +144,26 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error("[backend] lifecycle failed to start", { error: String(err) });
     }
+    try {
+      checkpointSubmitter.start();
+    } catch (err) {
+      logger.error("[backend] checkpoint submitter failed to start", { error: String(err) });
+    }
+    try {
+      factoryKeeper.start();
+    } catch (err) {
+      logger.error("[backend] factory keeper failed to start", { error: String(err) });
+    }
   });
 
   // --- graceful shutdown ---------------------------------------------------
   const shutdown = (signal: string) => {
     logger.info("[backend] shutting down", { signal });
+    clearInterval(gapFillTimer);
     liveWs.stop();
     lifecycle.stop();
+    checkpointSubmitter.stop();
+    factoryKeeper.stop();
     binanceWs.stop();
     binanceRest.stop();
     coingecko.stop();

@@ -44,6 +44,10 @@ contract ResultEngine is Ownable {
     // seasonId => teamId => record
     mapping(uint256 => mapping(uint16 => TeamRecord)) public table;
     mapping(uint256 => bool) public resultRecorded; // globalFixtureId => recorded?
+    /// @notice seasonId => number of fixtures settled so far. Powers
+    /// isSeasonComplete, which outright markets (e.g. Season Champion) use
+    /// to prove the table is final before resolving.
+    mapping(uint256 => uint256) public seasonSettledCount;
 
     event ResultRecorded(
         uint256 indexed seasonId,
@@ -91,6 +95,7 @@ contract ResultEngine is Ownable {
         uint256 gid = SeasonMath.globalFixtureId(seasonId, fixtureId);
         if (resultRecorded[gid]) revert ResultAlreadyRecorded(seasonId, fixtureId);
         resultRecorded[gid] = true;
+        seasonSettledCount[seasonId] += 1;
 
         address matchRegistryAddr = seasonRegistry.getMatchRegistry(seasonId);
         Fixture memory f = IMatchRegistry(matchRegistryAddr).getFixture(fixtureId);
@@ -101,6 +106,28 @@ contract ResultEngine is Ownable {
         predictionPool.settleFixture(seasonId, fixtureId, outcome);
 
         emit ResultRecorded(seasonId, fixtureId, f.homeTeamId, f.awayTeamId, outcome, homeRoundedPct, awayRoundedPct);
+    }
+
+    /// @notice True once every fixture of the season has settled — i.e. the
+    /// league table is final and safe for outright resolution. Returns false
+    /// (rather than reverting) for unknown seasons so callers can treat it
+    /// as "not resolvable yet".
+    function isSeasonComplete(uint256 seasonId) external view returns (bool) {
+        address matchRegistryAddr = seasonRegistry.getMatchRegistry(seasonId);
+        if (matchRegistryAddr == address(0)) return false;
+        uint256 total = IMatchRegistry(matchRegistryAddr).fixtureCount();
+        return total > 0 && seasonSettledCount[seasonId] >= total;
+    }
+
+    /// @notice (points, goalDifferenceSum) for a team. Outright markets
+    /// break ties by points first, then goalDifferenceSum, then split.
+    function getTeamScore(uint256 seasonId, uint16 teamId)
+        external
+        view
+        returns (uint32 points, int32 goalDifferenceSum)
+    {
+        TeamRecord storage r = table[seasonId][teamId];
+        return (r.points, r.goalDifferenceSum);
     }
 
     function _applyResult(

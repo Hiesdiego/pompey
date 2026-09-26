@@ -64,35 +64,40 @@ export const config = {
   contracts: {
     tickToken: optional(
       "TICK_TOKEN_ADDRESS",
-      "0x9284ae11bFA0616177462D149fF3C6E803053FED"
+      "0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b"
     ) as `0x${string}`,
     playerStats: optional(
       "PLAYER_STATS_ADDRESS",
-      "0x7bEE9463A80Db25528548981a6FecfEC4942E789"
+      "0x6c6A1e8AA000527FdA6DEC9Ef3b9Cf77C37C650E"
     ) as `0x${string}`,
     priceOracle: optional(
       "PRICE_ORACLE_ADDRESS",
-      "0xC439Fc957041990E3CEBC7e327d4a135450A5DB6"
+      "0x8915F4919F6a2031A6aba16D9AAe639BE209b23b"
     ) as `0x${string}`,
     seasonRegistry: optional(
       "SEASON_REGISTRY_ADDRESS",
-      "0x9150456181e1EcAD4989e6A4aEAFaD6af184f0B6"
+      "0x38d5C94d2BAB4a40D9663c2042e7ea02388Fc6ab"
     ) as `0x${string}`,
     teamRegistrySeason1: optional(
       "TEAM_REGISTRY_S1_ADDRESS",
-      "0x5090FD25f46791a217153C3b10Cc0d850CEbA756"
+      "0xCeF503a73d507Fead4bB090537E884C76692B6eF"
     ) as `0x${string}`,
     matchRegistrySeason1: optional(
       "MATCH_REGISTRY_S1_ADDRESS",
-      "0x08F2929F2BA4a60c2b5485b4CC2c1881dE7C903c"
+      "0xf7954389d44B2DB3540A53331C1BAf08b70Ca1D6"
     ) as `0x${string}`,
     predictionPool: optional(
       "PREDICTION_POOL_ADDRESS",
-      "0x008d64439DD189480EDc9b74983db6D87fD8F48A"
+      "0x70deB4Cc3002813cEC623d4E289186f2949e7DA0"
     ) as `0x${string}`,
     resultEngine: optional(
       "RESULT_ENGINE_ADDRESS",
-      "0xA02Be4BDb0FF7E774FA3CFAa8D879bDbd06AF5D6"
+      "0xFA974C6ee13F2D38C6a7C56aaF595DB1352730bc"
+    ) as `0x${string}`,
+    /** v0.2: MarketFactory. Empty default — fill after the v0.2 redeploy. */
+    marketFactory: optional(
+      "MARKET_FACTORY_ADDRESS",
+      "0xb61933b364E65201Ac01C64f51aa29c51b8F5ed2"
     ) as `0x${string}`,
   },
 
@@ -114,23 +119,64 @@ export const config = {
   },
 
   leagues: {
-    /** Main league config. Duration is backend-side only — the contracts never enforce it. */
+    /**
+     * Main league config. v0.2: 60-minute matches (was 20). The contract's
+     * matchDurationSeconds is the on-chain source of truth — this must stay
+     * in sync with it (the deploy module takes matchDurationSeconds as a
+     * parameter, default 3600).
+     */
     main: {
       id: "main",
-      matchDurationMinutes: optionalInt("MAIN_LEAGUE_MATCH_DURATION_MINUTES", 20),
+      matchDurationMinutes: optionalInt("MAIN_LEAGUE_MATCH_DURATION_MINUTES", 60),
     },
   },
 
   kickoff: {
     /**
      * How far ahead of kickoff the reveal tx is sent. Must stay within the
-     * contract's 30–120 min lead-time bounds. All of a matchday's fixtures
-     * are revealed in the same monitor pass → they kick off together,
-     * like a real football matchday.
+     * contract's 30–120 min lead-time bounds.
+     *
+     * v0.2 — staggered prime-time kickoff clusters: instead of revealing a
+     * whole matchday at once, fixtures are revealed in clusters spread
+     * across the window (STAGGER_SLOT_MINUTES apart, up to
+     * STAGGER_MAX_SLOTS clusters). Kickoff times are staggered so matches
+     * don't all start/end simultaneously — better UX, steadier oracle load.
      */
     leadMinutes: optionalInt("KICKOFF_LEAD_MINUTES", 60),
     /** How often the lifecycle loop runs. */
     tickIntervalMs: 30_000,
+    /** Minutes between staggered kickoff clusters within a matchday window. */
+    staggerSlotMinutes: optionalInt("KICKOFF_STAGGER_SLOT_MINUTES", 30),
+    /** Max kickoff clusters per matchday (extra fixtures share the last slot). */
+    staggerMaxSlots: optionalInt("KICKOFF_STAGGER_MAX_SLOTS", 5),
+  },
+
+  /**
+   * v0.2 — hourly oracle checkpoint submitter. Submits PriceOracle
+   * checkpoints (one price per team per hour) that power MarketFactory
+   * resolution (TOP_GAINER, H2H, TARGET templates) and the transparency
+   * views. Retention is 720h (30 days); the submitter runs every
+   * CHECKPOINT_INTERVAL_MINUTES and is idempotent (skips hours already
+   * checkpointed).
+   */
+  checkpoints: {
+    intervalMinutes: optionalInt("CHECKPOINT_INTERVAL_MINUTES", 60),
+    /** Max teams per submitCheckpoints tx (gas-bounded). */
+    batchSize: optionalInt("CHECKPOINT_BATCH_SIZE", 20),
+  },
+
+  /**
+   * v0.2 — MarketFactory keeper. resolve() is permissionless (anyone may
+   * call and earn the resolver bounty), but a keeper guarantees markets
+   * resolve even when no bounty hunter shows up. Runs every
+   * KEEPER_INTERVAL_MINUTES and resolves any open market past its endTime
+   * whose data is available.
+   */
+  factoryKeeper: {
+    enabled: optional("FACTORY_KEEPER_ENABLED", "true") === "true",
+    intervalMinutes: optionalInt("FACTORY_KEEPER_INTERVAL_MINUTES", 15),
+    /** Max markets to attempt per keeper pass (gas-bounded). */
+    maxPerPass: optionalInt("FACTORY_KEEPER_MAX_PER_PASS", 10),
   },
 
   priceValidation: {

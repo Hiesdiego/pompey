@@ -64,7 +64,7 @@ export default function FixturesPage() {
       <SectionTitle title="Fixtures" />
       <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
         <CalendarDays className="h-4 w-4 text-[#2E7CF6]" />
-        Season 1 · 38 matchdays · 20-minute windows · dates show as TBA until revealed
+        Season 1 · 38 matchdays · 1-hour windows · dates show as TBA until revealed
       </p>
 
       {!fixtures || matchday === null ? (

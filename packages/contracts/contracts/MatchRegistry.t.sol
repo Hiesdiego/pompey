@@ -28,7 +28,7 @@ contract MatchRegistryScheduleTest is Test {
 
         vm.startPrank(owner);
         teamRegistry = new TeamRegistry(owner, names, symbols);
-        matchRegistry = new MatchRegistry(owner, address(teamRegistry), backend);
+        matchRegistry = new MatchRegistry(owner, address(teamRegistry), backend, 3600);
         vm.stopPrank();
     }
 

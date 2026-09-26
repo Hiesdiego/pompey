@@ -99,6 +99,70 @@ export class BinanceRestPoller extends EventEmitter {
     return this.latest.get(symbol);
   }
 
+  /**
+   * One-shot gap-fill poll for specific symbols (v0.2 SOMI fix).
+   *
+   * Background: the market-data mirror (data-stream.binance.vision) silently
+   * drops WS streams for some newly-listed symbols — the combined stream
+   * connects fine but never sends ticks for them (verified: somiusdt@miniTicker
+   * = 0 ticks in 12s while btcusdt@miniTicker ticks every second on the same
+   * host). The poller stays paused while the WS is healthy overall, so a
+   * symbol-specific gap like this never gets covered.
+   *
+   * pollSymbols() fills exactly those gaps: it fetches the given symbols
+   * from REST and emits the same "price" events as the normal poll, so
+   * PriceFeed treats them as Binance-source ticks. It never touches the
+   * paused/running state — it's safe to call while paused.
+   */
+  async pollSymbols(symbols: string[]): Promise<void> {
+    const targets = [...new Set(symbols.map((s) => s.toUpperCase()))].filter(Boolean);
+    if (targets.length === 0) return;
+    const symbolsParam = encodeURIComponent(JSON.stringify(targets));
+    const url = `${this.restBaseUrl.replace(/\/$/, "")}/api/v3/ticker/price?symbols=${symbolsParam}`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    } catch (err) {
+      logger.warn("[BinanceRestPoller] gap-fill poll failed", {
+        symbols: targets,
+        error: String(err),
+      });
+      return;
+    }
+    if (!res.ok) {
+      logger.warn("[BinanceRestPoller] gap-fill poll failed", {
+        symbols: targets,
+        status: res.status,
+      });
+      return;
+    }
+
+    let list: Array<{ symbol?: string; price?: string | number }>;
+    try {
+      list = (await res.json()) as typeof list;
+    } catch {
+      return;
+    }
+
+    const now = Date.now();
+    let count = 0;
+    for (const entry of list ?? []) {
+      const symbol = String(entry?.symbol ?? "").toUpperCase();
+      const price = entry?.price != null ? String(entry.price) : "";
+      if (!symbol || !price) continue;
+      this.latest.set(symbol, { price, receivedAtMs: now });
+      this.emit("price", { symbol, price, receivedAtMs: now });
+      count++;
+    }
+    if (count > 0) {
+      logger.info("[BinanceRestPoller] gap-fill prices updated", {
+        symbols: targets,
+        count,
+      });
+    }
+  }
+
   private armTimer(delayMs: number): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {

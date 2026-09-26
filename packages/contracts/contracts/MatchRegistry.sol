@@ -29,10 +29,21 @@ import { Fixture } from "./interfaces/ITickr.sol";
 ///    *shape* of the fairness rule on-chain (30-120 min lead time, must
 ///    land inside the matchday window) even though it trusts the backend
 ///    to pick the specific value — defense in depth, not blind trust.
+///
+/// 3. IN-PLAY BETTING — betting stays open after kickoff until
+///    INPLAY_CLOSE_BUFFER_SECONDS before the pinned match end. The match
+///    end is pinned per fixture at reveal (kickoff + matchDurationSeconds)
+///    so the betting window can never be moved under live bettors.
 contract MatchRegistry is Ownable {
     // --- Config (mirrors packages/shared/src/constants.ts) ---
     uint256 public constant KICKOFF_LEAD_MIN_SECONDS = 30 minutes;
     uint256 public constant KICKOFF_LEAD_MAX_SECONDS = 120 minutes;
+
+    /// @notice Betting closes this far before the pinned match end. A
+    /// constant (not settable) so the rule can never be changed under live
+    /// bettors mid-season. Prevents last-second risk-free sniping while
+    /// keeping the full in-play mechanic.
+    uint256 public constant INPLAY_CLOSE_BUFFER_SECONDS = 5 minutes;
 
     TeamRegistry public immutable teamRegistry;
 
@@ -40,6 +51,11 @@ contract MatchRegistry is Ownable {
     /// tier as PriceOracle.backendSigner — recommended to actually BE the
     /// same signer address in production for operational simplicity.
     address public backendSigner;
+
+    /// @notice Match length used to pin each fixture's matchEndTimestamp at
+    /// reveal. Owner-settable (applies to future reveals only); must match
+    /// the backend's MATCH_DURATION_SECONDS.
+    uint64 public matchDurationSeconds;
 
     // Fixture storage
     mapping(uint256 => Fixture) private _fixtures;
@@ -61,6 +77,7 @@ contract MatchRegistry is Ownable {
     event KickoffRevealed(uint256 indexed fixtureId, uint64 kickoffTimestamp);
     event FixtureSettled(uint256 indexed fixtureId);
     event BackendSignerUpdated(address indexed newSigner);
+    event MatchDurationUpdated(uint64 newDurationSeconds);
 
     error ScheduleAlreadyGenerated();
     error InvalidBatchRange(uint8 startMatchday, uint8 matchdayCount);
@@ -75,6 +92,7 @@ contract MatchRegistry is Ownable {
     error OnlyResultEngine();
     error ResultEngineAlreadySet();
     error AlreadySettled(uint256 fixtureId);
+    error InvalidMatchDuration(uint64 durationSeconds);
 
     modifier onlyBackend() {
         if (msg.sender != backendSigner) revert OnlyBackendSigner();
@@ -86,11 +104,16 @@ contract MatchRegistry is Ownable {
         _;
     }
 
-    constructor(address initialOwner, address teamRegistryAddress, address _backendSigner)
-        Ownable(initialOwner)
-    {
+    constructor(
+        address initialOwner,
+        address teamRegistryAddress,
+        address _backendSigner,
+        uint64 _matchDurationSeconds
+    ) Ownable(initialOwner) {
+        if (_matchDurationSeconds == 0) revert InvalidMatchDuration(_matchDurationSeconds);
         teamRegistry = TeamRegistry(teamRegistryAddress);
         backendSigner = _backendSigner;
+        matchDurationSeconds = _matchDurationSeconds;
     }
 
     function setResultEngine(address _resultEngine) external onlyOwner {
@@ -102,6 +125,15 @@ contract MatchRegistry is Ownable {
     function setBackendSigner(address newSigner) external onlyOwner {
         backendSigner = newSigner;
         emit BackendSignerUpdated(newSigner);
+    }
+
+    /// @notice Adjust the match length for fixtures revealed from now on.
+    /// Already-revealed fixtures keep their pinned matchEndTimestamp, so
+    /// live betting windows are never moved under bettors.
+    function setMatchDurationSeconds(uint64 newDurationSeconds) external onlyOwner {
+        if (newDurationSeconds == 0) revert InvalidMatchDuration(newDurationSeconds);
+        matchDurationSeconds = newDurationSeconds;
+        emit MatchDurationUpdated(newDurationSeconds);
     }
 
     // =========================================================================
@@ -269,7 +301,8 @@ contract MatchRegistry is Ownable {
             windowEnd: windowEnd,
             kickoffTimestamp: 0,
             kickoffRevealed: false,
-            settled: false
+            settled: false,
+            matchEndTimestamp: 0
         });
 
         fixturesByMatchday[matchdayIndex].push(fixtureId);
@@ -284,7 +317,9 @@ contract MatchRegistry is Ownable {
     /// revealed timestamp is 30-120 minutes in the future from right now,
     /// and falls within the fixture's matchday window — the backend picks
     /// WHICH value within those bounds, but cannot cheat the bounds
-    /// themselves, and cannot reveal a fixture twice.
+    /// themselves, and cannot reveal a fixture twice. The match end is
+    /// pinned here (kickoff + matchDurationSeconds) and drives the
+    /// in-play betting window.
     function revealKickoff(uint256 fixtureId, uint64 kickoffTimestamp) external onlyBackend {
         if (fixtureId >= fixtureCount) revert InvalidFixtureId(fixtureId);
         Fixture storage f = _fixtures[fixtureId];
@@ -301,6 +336,7 @@ contract MatchRegistry is Ownable {
 
         f.kickoffRevealed = true;
         f.kickoffTimestamp = kickoffTimestamp;
+        f.matchEndTimestamp = kickoffTimestamp + matchDurationSeconds;
 
         emit KickoffRevealed(fixtureId, kickoffTimestamp);
     }
@@ -318,15 +354,18 @@ contract MatchRegistry is Ownable {
         return fixturesByMatchday[matchdayIndex];
     }
 
-    /// @notice Betting stays open until the kickoff moment is both revealed
-    /// AND has arrived. Before reveal, betting is always open. After
-    /// reveal, it closes the instant kickoffTimestamp is reached.
+    /// @notice In-play betting: open until the pinned match end minus the
+    /// 5-minute close buffer. Before reveal, betting is always open (the
+    /// match hasn't started). After reveal, it stays open through kickoff
+    /// and most of the match, closing 5 minutes before the end so nobody
+    /// can snipe a near-certain outcome at the death. Settled fixtures are
+    /// always closed.
     function isBettingOpen(uint256 fixtureId) external view returns (bool) {
         if (fixtureId >= fixtureCount) revert InvalidFixtureId(fixtureId);
         Fixture memory f = _fixtures[fixtureId];
         if (f.settled) return false;
         if (f.kickoffTimestamp == 0) return true;
-        return block.timestamp < f.kickoffTimestamp;
+        return block.timestamp + INPLAY_CLOSE_BUFFER_SECONDS < f.matchEndTimestamp;
     }
 
     function markSettled(uint256 fixtureId) external onlyResultEngine {

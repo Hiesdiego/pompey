@@ -42,16 +42,19 @@ export function SkeletonCards({ cards = 3, className = "" }: { cards?: number; c
 export function EmptyState({
   icon,
   title,
+  message,
   children,
 }: {
   icon?: ReactNode;
   title: string;
+  message?: string;
   children?: ReactNode;
 }) {
   return (
     <div className="glass flex flex-col items-center gap-2 rounded-2xl px-6 py-12 text-center">
       {icon ?? <SearchX className="h-8 w-8 text-zinc-400 dark:text-zinc-600" />}
       <p className="font-display font-semibold text-zinc-800 dark:text-zinc-200">{title}</p>
+      {message && <p className="text-sm text-zinc-500 dark:text-zinc-400">{message}</p>}
       {children && <div className="text-sm text-zinc-500 dark:text-zinc-400">{children}</div>}
     </div>
   );

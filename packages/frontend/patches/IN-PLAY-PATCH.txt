@@ -1,0 +1,112 @@
+/**
+ * In-play staking UI (v0.2): patch notes for the match detail page.
+ *
+ * v0.2 keeps PredictionPool.stake open until 5 minutes before the match
+ * ends (MatchRegistry.isBettingOpen: open before reveal, then
+ * block.timestamp + 5 min < matchEndTimestamp, closed once settled).
+ *
+ * Frontend change: on the match page, when status === "live", render the
+ * StakePanel BELOW the LiveMatchPanel (instead of replacing it), with a
+ * countdown to the betting-close time (matchEnd - 5 min). The StakePanel
+ * itself needs no changes — the contract reverts if betting is closed.
+ *
+ * File: packages/frontend/src/app/match/[id]/page.tsx
+ *
+ * 1. Import the countdown + the v0.2 fixture ABI:
+ *
+ *    import { Countdown } from "../../../components/Countdown";
+ *    import { MATCH_REGISTRY_V2_ABI } from "../../../lib/marketFactory";
+ *    import { CONTRACTS } from "../../../lib/contracts";
+ *    import { getPublicClient } from "../../../hooks/usePublicClient";
+ *
+ * 2. Add state for the on-chain betting window (near the other useState):
+ *
+ *    const [bettingCloseMs, setBettingCloseMs] = useState<number | null>(null);
+ *    const [bettingOpen, setBettingOpen] = useState(false);
+ *
+ * 3. Fetch isBettingOpen + matchEndTimestamp when the fixture loads
+ *    (inside the existing fixture-load effect, after setFixture):
+ *
+ *    try {
+ *      const pc = getPublicClient();
+ *      const [open, f] = await Promise.all([
+ *        pc.readContract({
+ *          address: CONTRACTS.matchRegistryS1 as `0x${string}`,
+ *          abi: MATCH_REGISTRY_V2_ABI,
+ *          functionName: "isBettingOpen",
+ *          args: [BigInt(id)],
+ *        }),
+ *        pc.readContract({
+ *          address: CONTRACTS.matchRegistryS1 as `0x${string}`,
+ *          abi: MATCH_REGISTRY_V2_ABI,
+ *          functionName: "getFixture",
+ *          args: [BigInt(id)],
+ *        }),
+ *      ]);
+ *      setBettingOpen(open as boolean);
+ *      const matchEnd = (f as any).matchEndTimestamp as bigint;
+ *      // Betting closes 5 min before the pinned match end.
+ *      setBettingCloseMs(matchEnd > 0n ? Number(matchEnd) * 1000 - 5 * 60 * 1000 : null);
+ *    } catch { /* leave null — panel just won't show the countdown *\/ }
+ *
+ * 4. Replace the status === "live" branch:
+ *
+ *    BEFORE:
+ *      ) : status === "live" ? (
+ *        <LiveMatchPanel
+ *          fixture={fixture}
+ *          snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null}
+ *          prices={prices}
+ *          windowEndMs={windowEndMs}
+ *        />
+ *
+ *    AFTER (v0.2 — in-play staking below the live panel):
+ *      ) : status === "live" ? (
+ *        <div className="space-y-6">
+ *          <LiveMatchPanel
+ *            fixture={fixture}
+ *            snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null}
+ *            prices={prices}
+ *            windowEndMs={windowEndMs}
+ *          />
+ *          {bettingOpen && bettingCloseMs && bettingCloseMs > Date.now() ? (
+ *            <div className="glass rounded-2xl border-emerald-500/25! p-6">
+ *              <div className="mb-4 flex items-center justify-between">
+ *                <h3 className="font-display text-sm font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+ *                  <span className="live-badge mr-2">Live</span> In-play betting open
+ *                </h3>
+ *                <span className="text-xs text-zinc-500">
+ *                  Closes in <Countdown targetMs={bettingCloseMs} />
+ *                </span>
+ *              </div>
+ *              <StakePanel
+ *                fixture={fixture}
+ *                pool={pool}
+ *                playerAddress={playerAddress}
+ *                balance={balance}
+ *                authenticated={authenticated}
+ *                onLogin={login}
+ *                onStaked={handleStaked}
+ *              />
+ *            </div>
+ *          ) : bettingOpen ? (
+ *            <p className="text-center text-sm text-amber-600 dark:text-amber-400">
+ *              In-play betting closes 5 minutes before full time.
+ *            </p>
+ *          ) : null}
+ *        </div>
+ *
+ * 5. Also refresh bettingOpen/bettingCloseMs on each live tick (the existing
+ *    1-second tick): re-run the isBettingOpen read there so the panel
+ *    disappears exactly when the on-chain window closes.
+ *
+ * Notes:
+ * - The StakePanel component itself is UNCHANGED — it already handles
+ *   approve → stake; the contract is the source of truth for the window.
+ * - MATCH_MS in the page (used for windowEndMs fallback) should become 60
+ *   minutes to match the v0.2 1-hour matches: find
+ *     const MATCH_MS = 20 * 60 * 1000
+ *   and change to
+ *     const MATCH_MS = 60 * 60 * 1000
+ * - The fixtures page subtitle "20-minute windows" should read "1-hour windows".
+ */

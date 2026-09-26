@@ -258,6 +258,32 @@ export class PriceFeed {
     return { fresh, total: this.teams.length };
   }
 
+  /**
+   * Binance symbols with no fresh tick, returned only when the feed is
+   * healthy overall (majority of symbols fresh). A symbol-specific gap
+   * while the WS is healthy means the mirror silently dropped that
+   * stream (verified with SOMIUSDT on data-stream.binance.vision) — the
+   * caller should REST gap-fill exactly these symbols.
+   */
+  binanceGapSymbols(): string[] {
+    const health = this.binanceHealth();
+    if (health.total <= 1 || health.fresh < Math.ceil(health.total / 2)) return [];
+    const now = Date.now();
+    const gaps: string[] = [];
+    for (const t of this.teams) {
+      let fresh = false;
+      for (const feed of this.primaries) {
+        const tick = feed.getLatest(t.binanceSymbol);
+        if (tick && now - tick.receivedAtMs <= this.binanceStaleAfterMs) {
+          fresh = true;
+          break;
+        }
+      }
+      if (!fresh) gaps.push(t.binanceSymbol);
+    }
+    return gaps;
+  }
+
   /** Human-readable one-liner for logs / the live API. */
   describeQuote(q: ValidatedPrice): string {
     return (

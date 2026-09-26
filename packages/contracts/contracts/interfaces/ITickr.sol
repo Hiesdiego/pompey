@@ -17,11 +17,12 @@ struct Fixture {
     uint64 kickoffTimestamp; // 0 until backend-revealed
     bool kickoffRevealed;
     bool settled;
+    uint64 matchEndTimestamp; // pinned at reveal = kickoffTimestamp + matchDurationSeconds
 }
 
 /// @notice A season's TeamRegistry + MatchRegistry pair. TICK, PlayerStats,
-/// PredictionPool, PriceOracle, and ResultEngine are all persistent across
-/// seasons; TeamRegistry and MatchRegistry are redeployed fresh each season
+/// PredictionPool, and PriceOracle are all persistent across seasons;
+/// TeamRegistry and MatchRegistry are redeployed fresh each season
 /// (rosters can change) and registered here so the persistent contracts
 /// know which pair to talk to for a given seasonId.
 interface ISeasonRegistry {
@@ -35,6 +36,14 @@ interface IMatchRegistry {
     function fixtureCount() external view returns (uint256);
     function isBettingOpen(uint256 fixtureId) external view returns (bool);
     function markSettled(uint256 fixtureId) external;
+    function scheduleGenerated() external view returns (bool);
+    function matchdaysGenerated() external view returns (uint8);
+    function seasonStartTimestamp() external view returns (uint64);
+    function matchdayIntervalSeconds() external view returns (uint64);
+}
+
+interface ITeamRegistry {
+    function teamCount() external view returns (uint16);
 }
 
 interface IPredictionPool {
@@ -61,6 +70,39 @@ interface IResultEngine {
         int16 homeRoundedPct,
         int16 awayRoundedPct
     ) external;
+    /// @notice (points, goalDifferenceSum) for a team — tiebreak order for
+    /// outright markets is points first, then goalDifferenceSum.
+    function getTeamScore(uint256 seasonId, uint16 teamId)
+        external
+        view
+        returns (uint32 points, int32 goalDifferenceSum);
+    /// @notice True once every fixture of the season has settled.
+    function isSeasonComplete(uint256 seasonId) external view returns (bool);
+}
+
+/// @notice Read surface of PriceOracle used by the MarketFactory for
+/// trustless outright-market resolution.
+interface IPriceOracle {
+    /// @notice Price of `teamId` at time `timestamp`: the latest hourly
+    /// checkpoint at or before `timestamp`. `found` is false when no
+    /// checkpoint exists within the lookback window.
+    function getPriceAt(uint16 teamId, uint64 timestamp)
+        external
+        view
+        returns (bool found, uint256 price);
+    /// @notice Raw start/end prices of a fixture plus whether the end price
+    /// was submitted (i.e. the fixture's result is knowable on-chain).
+    function getFixtureEndPrices(uint256 seasonId, uint256 fixtureId)
+        external
+        view
+        returns (
+            bool endSubmitted,
+            uint256 homeStart,
+            uint256 awayStart,
+            uint256 homeEnd,
+            uint256 awayEnd
+        );
+    function PRICE_DECIMALS() external view returns (uint8);
 }
 
 /// @notice Persistent contracts (PredictionPool, PriceOracle, ResultEngine)
