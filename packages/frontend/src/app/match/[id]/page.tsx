@@ -8,8 +8,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import {
   CONTRACTS,
   PRICE_ORACLE_ABI,
@@ -26,7 +27,6 @@ import { useSettledScoreline } from "../../../hooks/useSettledScoreline";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
 import { getPublicClient } from "../../../hooks/usePublicClient";
 import { fixtureStatus, type FixtureStatus } from "../../../components/FixtureCard";
-import { StakeModal } from "../../../components/StakePanel";
 import { LiveMatchPanel } from "../../../components/LiveMatchPanel";
 import { PostMatchPanel, type FullSnapshot } from "../../../components/PostMatchPanel";
 import { Countdown } from "../../../components/Countdown";
@@ -36,6 +36,11 @@ import { ShareButtons } from "../../../components/ShareButtons";
 import { getMatchDurationMs } from "../../../lib/matchConfig";
 
 type OddsPoint = { pcts: [number, number, number]; raw: [string, string, string] };
+
+const StakeModal = dynamic(
+  () => import("../../../components/StakePanel").then((module) => module.StakeModal),
+  { ssr: false, loading: () => null }
+);
 
 function priceMovePct(start: bigint, current: bigint | number | null | undefined) {
   if (current === null || current === undefined || start <= 0n) return null;
@@ -81,6 +86,7 @@ export default function MatchPage() {
   const [matchEndMs, setMatchEndMs] = useState<number | null>(null);
   const [bettingOpen, setBettingOpen] = useState(false);
   const [stakeOpen, setStakeOpen] = useState(false);
+  const [stakeOpening, setStakeOpening] = useState(false);
   // Must be called before any early return (Rules of Hooks). Uses nullable
   // fixture — falls back to recomputation until the event loads.
   const { scoreline: settledScoreline } = useSettledScoreline(
@@ -247,6 +253,7 @@ export default function MatchPage() {
     loadPool();
     refreshBalance();
   }, [loadPool, refreshBalance]);
+  const handleStakeModalReady = useCallback(() => setStakeOpening(false), []);
 
   if (error) {
     return (
@@ -334,10 +341,22 @@ export default function MatchPage() {
           effectiveBettingCloseMs !== null &&
           effectiveBettingCloseMs > now)) && (
         <button
-          onClick={() => setStakeOpen(true)}
-          className="mb-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-4 py-3.5 font-display text-base font-extrabold text-white shadow-[0_0_28px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_40px_rgba(46,124,246,.55)] active:scale-[.98]"
+          onClick={() => {
+            setStakeOpening(true);
+            setStakeOpen(true);
+          }}
+          disabled={stakeOpening}
+          aria-busy={stakeOpening}
+          className="mb-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-4 py-3.5 font-display text-base font-extrabold text-white shadow-[0_0_28px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_40px_rgba(46,124,246,.55)] active:scale-[.98] disabled:cursor-wait disabled:opacity-80"
         >
-          Stake on this match
+          {stakeOpening ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+              Loading stake form…
+            </>
+          ) : (
+            "Stake on this match"
+          )}
         </button>
       )}
 
@@ -359,7 +378,11 @@ export default function MatchPage() {
           authenticated={authenticated}
           onLogin={login}
           onStaked={handleStaked}
-          onClose={() => setStakeOpen(false)}
+          onReady={handleStakeModalReady}
+          onClose={() => {
+            setStakeOpening(false);
+            setStakeOpen(false);
+          }}
         />
       )}
     </div>

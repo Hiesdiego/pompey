@@ -378,6 +378,7 @@ export function StakeModal({
   authenticated,
   onLogin,
   onStaked,
+  onReady,
   onClose,
 }: {
   fixture: ApiFixture;
@@ -387,14 +388,18 @@ export function StakeModal({
   authenticated: boolean;
   onLogin: () => void;
   onStaked: () => void;
+  onReady?: () => void;
   onClose: () => void;
 }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const r = requestAnimationFrame(() => setMounted(true));
+    const r = requestAnimationFrame(() => {
+      setMounted(true);
+      onReady?.();
+    });
     return () => cancelAnimationFrame(r);
-  }, []);
+  }, [onReady]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
