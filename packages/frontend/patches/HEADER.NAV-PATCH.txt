@@ -1,0 +1,11 @@
+# Header.tsx — add the Markets nav item (v0.2)
+# File: packages/frontend/src/components/Header.tsx
+# Find the NAV array and add the Markets entry:
+
+const NAV = [
+  { href: "/", label: "Home" },
+  { href: "/fixtures", label: "Fixtures" },
+  { href: "/markets", label: "Markets" },   // ← ADD THIS LINE (v0.2)
+  { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/claims", label: "Claims" },
+];

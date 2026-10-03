@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-accent: #2e7cf6;
+  --color-accent-hover: #4b93ff;
+  --color-accent-deep: #1d4ed8;
+  --color-accent-glow: rgba(46, 124, 246, 0.35);
+
+  --animate-marquee: marquee 36s linear infinite;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-page-in: page-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-gradient-pan: gradient-pan 7s ease infinite;
+  --animate-glow-pulse: glow-pulse 2.4s ease-in-out infinite;
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes page-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes gradient-pan {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 18px rgba(46, 124, 246, 0.35); }
+    50% { box-shadow: 0 0 34px rgba(46, 124, 246, 0.6); }
+  }
+}
+
+/* ── Ambient page background: fixed blue-tinted mesh + faint grid ───────── */
+body {
+  position: relative;
+  transition: background-color 0.35s ease, color 0.35s ease;
+}
+@media (max-width: 767px) {
+  html,
+  body {
+    overflow-x: clip;
+  }
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(640px 420px at 12% -4%, rgba(46, 124, 246, 0.13), transparent 62%),
+    radial-gradient(760px 520px at 88% 18%, rgba(29, 78, 216, 0.1), transparent 62%),
+    radial-gradient(900px 620px at 50% 108%, rgba(46, 124, 246, 0.08), transparent 64%);
+}
+.dark body::before {
+  background:
+    radial-gradient(640px 420px at 12% -4%, rgba(46, 124, 246, 0.17), transparent 62%),
+    radial-gradient(760px 520px at 88% 18%, rgba(29, 78, 216, 0.14), transparent 62%),
+    radial-gradient(900px 620px at 50% 108%, rgba(46, 124, 246, 0.1), transparent 64%);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(46, 124, 246, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46, 124, 246, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 20%, transparent 75%);
+}
+
+/* ── Glassmorphism ─────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.65);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.06);
+}
+.dark .glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 48px rgba(15, 23, 42, 0.1);
+}
+.dark .glass-strong {
+  background: rgba(10, 12, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* Interactive card: subtle lift + blue border glow on hover */
+.card-interactive {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+.card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: rgba(46, 124, 246, 0.45) !important;
+  box-shadow: 0 12px 40px rgba(46, 124, 246, 0.16);
+}
+.dark .card-interactive:hover {
+  box-shadow: 0 12px 40px rgba(46, 124, 246, 0.22);
+}
+
+/* ── Primary call-to-action button ─────────────────────────────────────── */
+/* One gradient, glow and press behaviour for every primary action (staking,
+   market creation, nav sign-in). Previously referenced but never defined,
+   which left these buttons with no background. */
+.gradient-cta {
+  background-image: linear-gradient(to bottom, var(--color-accent), var(--color-accent-deep));
+  color: #fff;
+  box-shadow: 0 0 20px var(--color-accent-glow);
+  transition: box-shadow 0.25s ease, transform 0.1s ease, filter 0.25s ease;
+}
+.gradient-cta:hover:not(:disabled) {
+  filter: brightness(1.07);
+  box-shadow: 0 0 30px rgba(46, 124, 246, 0.55);
+}
+.gradient-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.gradient-cta:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Shared surface card ───────────────────────────────────────────────── */
+/* Solid (non-glass) tile used for market/fixture cards — one radius, border
+   and shadow treatment instead of the same string re-declared inline. Kept in
+   @layer components so per-card `hover:border-*`/`hover:shadow-*` utilities
+   (utilities layer) still win over the base border/shadow here. */
+@layer components {
+  .surface-card {
+    border-radius: 1.5rem;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: #fff;
+    box-shadow: 0 14px 50px rgba(15, 23, 42, 0.05);
+  }
+  .dark .surface-card {
+    border-color: rgba(255, 255, 255, 0.09);
+    background: #0d1118;
+    box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+  }
+}
+
+/* ── Signature text treatments ─────────────────────────────────────────── */
+.text-gradient {
+  background: linear-gradient(100deg, #2e7cf6, #4b93ff 45%, #1d4ed8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.text-gradient-animate {
+  background: linear-gradient(100deg, #2e7cf6, #7db3ff, #1d4ed8, #2e7cf6);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-pan 7s ease infinite;
+}
+
+/* ── Loading skeletons ─────────────────────────────────────────────────── */
+.skeleton {
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    90deg,
+    rgba(130, 140, 160, 0.14) 25%,
+    rgba(130, 140, 160, 0.28) 50%,
+    rgba(130, 140, 160, 0.14) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+
+/* Live shimmer sweep across bars */
+.bar-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.bar-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.35) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: shimmer 2.2s linear infinite;
+}
+
+::selection {
+  background: rgba(46, 124, 246, 0.35);
+}
+
+/* Slim theme-aware scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 150, 0.35);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(46, 124, 246, 0.55);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Number inputs: hide spinners for stake amounts */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* ── Respect reduced-motion preferences ────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

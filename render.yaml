@@ -1,0 +1,115 @@
+# Render Blueprint — TICKR backend web service.
+# Spec: https://render.com/docs/blueprint-spec
+#
+# Deploys packages/backend as an always-on Node web service: the price
+# heartbeat, match lifecycle, checkpoint submitter, factory keeper and social
+# indexer, plus the REST + WebSocket API (/ws).
+#
+# IMPORTANT: the backend runs background schedulers (kickoff reveals, snapshot
+# submissions, keeper passes) that must run 24/7. The free tier spins down on
+# idle and would stall those jobs — use at least the Starter (always-on) plan.
+services:
+  - type: web
+    name: tickr-backend
+    runtime: node
+    plan: starter
+    region: oregon # change to the region closest to your users
+    branch: main
+    # Monorepo: install only the backend + its workspace dep (@tickr/shared).
+    buildCommand: pnpm install --frozen-lockfile --filter @tickr/backend...
+    # Run straight from TypeScript with tsx. @tickr/shared ships as .ts source
+    # (no build step), so `node dist/index.js` cannot resolve it — tsx loads the
+    # workspace source directly, exactly like `pnpm dev`.
+    startCommand: pnpm --filter @tickr/backend run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      # Render injects PORT automatically; the app reads process.env.PORT.
+
+      # --- CORS: your deployed frontend origin(s), comma-separated ------------
+      - key: CORS_ORIGIN
+        sync: false
+
+      # --- chain --------------------------------------------------------------
+      - key: TICKR_CHAIN_ENV
+        value: testnet
+      - key: BASE_SEPOLIA_RPC_URL
+        value: https://sepolia.base.org
+      - key: BASE_MAINNET_RPC_URL
+        value: https://mainnet.base.org
+      # Optional dedicated failover RPC (recommended so users don't share the
+      # throttled public endpoint).
+      - key: FALLBACK_RPC_URL
+        sync: false
+
+      # --- backend signer (REQUIRED, secret) ----------------------------------
+      - key: BACKEND_SIGNER_PRIVATE_KEY
+        sync: false
+
+      # --- season -------------------------------------------------------------
+      - key: SEASON_ID
+        value: "2"
+
+      # --- contract addresses (public; update on each redeploy) ---------------
+      - key: TICK_TOKEN_ADDRESS
+        value: "0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b"
+      - key: PLAYER_STATS_ADDRESS
+        value: "0x6d48c38c2036b3d31328b48bd8b72785ab2d15a9"
+      - key: PRICE_ORACLE_ADDRESS
+        value: "0x2814bd64f7774eccd5dc11a792f15fecdfebdf90"
+      - key: SEASON_REGISTRY_ADDRESS
+        value: "0xe6f2c8a55a3f4f34a7abd833afece63d9789c260"
+      - key: TEAM_REGISTRY_S1_ADDRESS
+        value: "0x352e6fce9c07de4bf3e187ce93a0120db05d2ea8"
+      - key: MATCH_REGISTRY_S1_ADDRESS
+        value: "0xd5b0d27bb9c523ed777f355191a9dd2dcbee0c62"
+      - key: PREDICTION_POOL_ADDRESS
+        value: "0xc47358e69d145f94728796a337ec14401641700f"
+      - key: RESULT_ENGINE_ADDRESS
+        value: "0x82e00f543ddf320eec4447fd16810852bda4ec12"
+      # REQUIRED — boot fails without it (a stale fallback serves empty markets).
+      - key: MARKET_FACTORY_ADDRESS
+        value: "0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1"
+
+      # --- price feeds (defaults are fine) ------------------------------------
+      - key: BINANCE_REST_BASE_URL
+        value: https://data-api.binance.vision
+      - key: BINANCE_REST_POLL_MS
+        value: "60000"
+      - key: COINGECKO_API_KEY # optional (keyless tier used when empty)
+        sync: false
+      - key: COINGECKO_BASE_URL
+        value: https://api.coingecko.com/api/v3
+
+      # --- league / scheduling ------------------------------------------------
+      - key: MAIN_LEAGUE_MATCH_DURATION_MINUTES
+        value: "60"
+      - key: KICKOFF_LEAD_MINUTES
+        value: "60"
+
+      # --- oracle checkpoints / factory keeper --------------------------------
+      - key: CHECKPOINT_INTERVAL_MINUTES
+        value: "60"
+      - key: CHECKPOINT_BATCH_SIZE
+        value: "20"
+      - key: FACTORY_KEEPER_ENABLED
+        value: "true"
+      - key: FACTORY_KEEPER_INTERVAL_MINUTES
+        value: "15"
+      - key: FACTORY_KEEPER_MAX_PER_PASS
+        value: "10"
+
+      # --- price validation / leaderboard -------------------------------------
+      - key: PRICE_DEVIATION_MAX_BPS
+        value: "200"
+      - key: LEADERBOARD_SCAN_START_BLOCK
+        value: "47283463"
+
+      # --- social layer (optional; leave unset to disable) --------------------
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: MARKET_FACTORY_DEPLOY_BLOCK
+        sync: false

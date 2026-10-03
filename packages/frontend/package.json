@@ -1,0 +1,42 @@
+{
+  "name": "@tickr/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node scripts/stamp-sw.mjs",
+    "start": "next start",
+    "lint": "eslint .",
+    "screenshots": "node scripts/gen-pwa-screenshots.mjs",
+    "clean": "rm -rf .next"
+  },
+  "dependencies": {
+    "@privy-io/server-auth": "1.32.5",
+    "@privy-io/react-auth": "3.46.0",
+    "@supabase/supabase-js": "2.117.2",
+    "@tailwindcss/postcss": "4.3.3",
+    "@tanstack/react-query": "5.104.1",
+    "@tickr/shared": "workspace:*",
+    "@vercel/og": "1.0.3",
+    "clsx": "2.1.1",
+    "lucide-react": "1.50.0",
+    "next": "16.3.8",
+    "permissionless": "0.2.57",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "0.0.1",
+    "tailwind-merge": "3.7.0",
+    "tailwindcss": "4.3.3",
+    "viem": "2.57.2",
+    "wagmi": "3.7.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "10.11.0",
+    "eslint-config-next": "16.3.8",
+    "typescript": "7.0.2"
+  }
+}

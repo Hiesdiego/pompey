@@ -1,0 +1,54 @@
+/**
+ * Countdown timer hook + component.
+ */
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { countdownParts } from "../lib/format";
+import { cn } from "../lib/cn";
+
+export function useCountdown(targetMs: number | null, tickMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (targetMs === null) return;
+    const t = setInterval(() => setNow(Date.now()), tickMs);
+    return () => clearInterval(t);
+  }, [targetMs, tickMs]);
+
+  if (targetMs === null) return { remaining: null as number | null, expired: false, parts: null };
+  const remaining = targetMs - now;
+  return {
+    remaining,
+    expired: remaining <= 0,
+    parts: countdownParts(remaining),
+  };
+}
+
+/** Compact "04:12:33" style countdown; renders "—" when target is null. */
+export function Countdown({
+  target,
+  targetMs,
+  compact: _compact,
+  className = "",
+}: {
+  target?: number | null;
+  targetMs?: number | null;
+  compact?: boolean;
+  className?: string;
+}) {
+  const targetValue = target ?? targetMs ?? null;
+  const { remaining, expired, parts } = useCountdown(targetValue);
+  if (targetValue === null || parts === null)
+    return <span className={cn("font-display tabular-nums", className)}>—</span>;
+  if (expired) return <span className={cn("font-display tabular-nums", className)}>00:00</span>;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const text =
+    parts.d > 0
+      ? `${parts.d}d ${pad(parts.h)}:${pad(parts.m)}:${pad(parts.s)}`
+      : parts.h > 0
+        ? `${pad(parts.h)}:${pad(parts.m)}:${pad(parts.s)}`
+        : `${pad(parts.m)}:${pad(parts.s)}`;
+  return <span className={cn("font-display tabular-nums", className)}>{text}</span>;
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@tickr/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build",
+    "test": "hardhat test",
+    "test:sol": "hardhat test solidity",
+    "test:ts": "hardhat test nodejs",
+    "coverage": "hardhat test --coverage",
+    "deploy:testnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia",
+    "deploy:market-factory:testnet": "hardhat run scripts/deploy-market-factory.ts --network baseSepolia",
+    "deploy:mainnet": "hardhat ignition deploy ignition/modules/Deploy.ts --network base",
+    "schedule:testnet": "hardhat run scripts/generate-schedule.ts --network baseSepolia",
+    "mint:tick:testnet": "hardhat run scripts/mint-tick.ts --network baseSepolia",
+    "deploy:v03:testnet": "hardhat run scripts/deploy-v03.ts --network baseSepolia",
+    "backfill:v03:testnet": "hardhat run scripts/backfill-checkpoints.ts --network baseSepolia",
+    "seed:v03:testnet": "hardhat run scripts/seed-fixtures.ts --network baseSepolia",
+    "deploy:season2:testnet": "hardhat run scripts/deploy-season2.ts --network baseSepolia",
+
+    "node": "hardhat node",
+    "clean": "hardhat clean"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "@tickr/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "3.1.8",
+    "@nomicfoundation/hardhat-toolbox-viem": "5.0.7",
+    "@types/node": "26.6.2",
+    "dotenv": "18.0.5",
+    "forge-std": "github:foundry-rs/forge-std#v1.11.0",
+    "hardhat": "3.18.1",
+    "typescript": "7.0.2",
+    "viem": "2.57.2"
+  }
+}

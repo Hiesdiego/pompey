@@ -1,0 +1,78 @@
+{
+  "id": "/",
+  "name": "TICKR — Crypto Price Prediction League",
+  "short_name": "TICKR",
+  "description": "Stake TICK on crypto teams. Match outcomes come from real price performance.",
+  "categories": ["finance", "sports", "entertainment"],
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0B1B3D",
+  "theme_color": "#0B1B3D",
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+  "icons": [
+    {
+      "purpose": "any",
+      "sizes": "192x192",
+      "src": "/icons/icon-192.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "any",
+      "sizes": "512x512",
+      "src": "/icons/icon-512.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "maskable",
+      "sizes": "512x512",
+      "src": "/icons/maskable-512.png",
+      "type": "image/png"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/narrow.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Balances, live fixtures and open markets"
+    },
+    {
+      "src": "/screenshots/wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Season standings and the leaderboard"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Fixtures",
+      "short_name": "Fixtures",
+      "description": "Today's live and upcoming matches",
+      "url": "/fixtures",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Markets",
+      "short_name": "Markets",
+      "description": "Open prediction markets",
+      "url": "/markets",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Leaderboard",
+      "short_name": "Ranks",
+      "description": "Season standings",
+      "url": "/leaderboard",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+.next/
+dist/
+artifacts/
+cache/
+.env
+.env.local
+*.log
+*.tsbuildinfo
+.turbo/
+.DS_Store
+ignition/deployments/
+**/ignition/deployments/
+typechain-types/
+*supabase
