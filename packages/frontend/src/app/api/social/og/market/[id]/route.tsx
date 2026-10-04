@@ -5,10 +5,10 @@
  *  - Unresolved: question, top outcomes + odds, "created by @creator", close time
  *  - Resolved: question, winning outcome, "resolved by @resolver", "created by @creator"
  *
- * 1200×630 PNG generated at request time via @vercel/og.
+ * 1200×630 PNG generated at request time via Next's ImageResponse.
  */
 
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import {
   createPublicClient,
   http,
@@ -33,6 +33,7 @@ import {
  * runtime, which broke all chain reads. OG images are cached by crawlers
  * anyway, so the edge speed advantage doesn't matter here.
  */
+export const runtime = "nodejs";
 
 const FACTORY = (process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS || "") as `0x${string}`;
 // `||` not `??` — an empty env var must fall back too; BigInt("") throws at module load.
@@ -113,10 +114,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    return await renderMarketCard(await params);
-  } catch {
-    // Never return an empty/broken image — crawlers drop the card.
-    return fallbackMarketCard("TICKR Market");
+    const response = await renderMarketCard(await params);
+    if (!(response instanceof ImageResponse)) return response;
+    // Rendering is lazy. Consume the image here so Satori errors reach this catch.
+    return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+  } catch (error) {
+    console.error("Market OG image failed", error);
+    const fallback = fallbackMarketCard("TICKR Market");
+    return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
@@ -163,7 +168,7 @@ async function renderMarketCard({ id }: { id: string }) {
 
   const client = createPublicClient({
     chain: baseSepolia,
-    transport: http("https://sepolia.base.org"),
+    transport: http("https://sepolia.base.org", { timeout: 5000, retryCount: 0 }),
   });
 
   // A non-existent market reverts — render the fallback card, not a 500.

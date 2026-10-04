@@ -5,10 +5,10 @@
  *  - Unresolved: teams + logos, VS (or live score), matchday, pool size
  *  - Resolved: FT score, winner highlight, payout distributed
  *
- * 1200×630 PNG generated at request time via @vercel/og.
+ * 1200×630 PNG generated at request time via Next's ImageResponse.
  */
 
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import { createPublicClient, http, parseAbi } from "viem";
 import { baseSepolia } from "viem/chains";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
@@ -28,6 +28,7 @@ import {
  * runtime, which broke all chain reads. OG images are cached by crawlers
  * anyway, so the edge speed advantage doesn't matter here.
  */
+export const runtime = "nodejs";
 
 const PRICE_ORACLE = (process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS || "") as `0x${string}`;
 // `||` not `??` — an empty env var must fall back too; BigInt("") throws at module load.
@@ -77,7 +78,7 @@ interface PoolDto {
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(url, { next: { revalidate: 30 } });
+    const res = await fetch(url, { next: { revalidate: 30 }, signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -90,10 +91,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    return await renderMatchCard(await params);
-  } catch {
-    // Never return an empty/broken image — crawlers drop the card.
-    return fallbackMatchCard("TICKR");
+    const response = await renderMatchCard(await params);
+    if (!(response instanceof ImageResponse)) return response;
+    // Rendering is lazy. Consume the image here so Satori errors reach this catch.
+    return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+  } catch (error) {
+    console.error("Match OG image failed", error);
+    const fallback = fallbackMatchCard("TICKR Match");
+    return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
@@ -138,29 +143,7 @@ async function renderMatchCard({ id }: { id: string }) {
   ]);
 
   if (!fixture?.home || !fixture?.away) {
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: OG_WIDTH,
-            height: OG_HEIGHT,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: c.bg,
-            color: c.white,
-            fontSize: 48,
-          }}
-        >
-          Match not found
-        </div>
-      ),
-      {
-        width: OG_WIDTH,
-        height: OG_HEIGHT,
-        headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300" },
-      }
-    );
+    return fallbackMatchCard("Match not found");
   }
 
   const homeTeam = TICKR_TEAMS.find((t) => t.teamId === fixture.home!.teamId);
@@ -180,7 +163,7 @@ async function renderMatchCard({ id }: { id: string }) {
     try {
       const client = createPublicClient({
         chain: baseSepolia,
-        transport: http("https://sepolia.base.org"),
+        transport: http("https://sepolia.base.org", { timeout: 5000, retryCount: 0 }),
       });
       const snap = await client.readContract({
         address: PRICE_ORACLE,

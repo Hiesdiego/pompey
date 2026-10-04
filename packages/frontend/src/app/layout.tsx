@@ -69,9 +69,9 @@ export const metadata: Metadata = {
       "Stake TICK on crypto teams. Match outcomes come from real price performance.",
     images: [
       {
-        url: "/og/og-card.png",
-        width: 1200,
-        height: 630,
+        url: "/tickr-hero.png",
+        width: 1774,
+        height: 887,
         alt: "TICKR - Crypto Price Prediction League",
       },
     ],
@@ -81,7 +81,7 @@ export const metadata: Metadata = {
     title: "TICKR - Crypto Price Prediction League",
     description:
       "Stake TICK on crypto teams. Match outcomes come from real price performance.",
-    images: ["/og/og-card.png"],
+    images: ["/tickr-hero.png"],
   },
 };
 

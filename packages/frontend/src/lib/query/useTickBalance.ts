@@ -21,6 +21,7 @@ import { getPublicClient } from "../../hooks/usePublicClient";
 import { useContractWrite } from "../../hooks/useContractWrite";
 import { qks } from "./keys";
 import { queryClient } from "./queryClient";
+import { celebrateClaim } from "../confetti";
 
 interface BalanceData {
   balance: bigint;
@@ -112,6 +113,7 @@ export function useTickBalance(playerAddress: Address | null) {
         label: "Faucet claim",
       });
       setFaucetTx(hash);
+      celebrateClaim();
       const cooldown = (await getPublicClient().readContract({
         address: CONTRACTS.tickToken,
         abi: TICK_TOKEN_ABI,

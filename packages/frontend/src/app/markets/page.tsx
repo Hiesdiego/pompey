@@ -36,6 +36,7 @@ import { SEASON_DISPLAY_NAME } from "../../lib/contracts";
 import { Countdown } from "../../components/Countdown";
 import { ShareButtons } from "../../components/ShareButtons";
 import { formatTick } from "../../lib/format";
+import { cn } from "../../lib/cn";
 import { TeamBadge } from "../../components/TeamBadge";
 import { SpreadFixtureBadges } from "../../components/SpreadFixtureBadges";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../../components/QuickStake";
@@ -253,6 +254,7 @@ function MarketCard({
 }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const bettingOpen = market.state === 0 && Number(market.bettingCloseTime) > nowSec;
+  const pendingSettlement = market.state === 0 && Number(market.endTime) <= nowSec;
   const secondsLeft = Number(market.bettingCloseTime) - nowSec;
   const closingSoon = bettingOpen && secondsLeft < 3600;
   const poolTick = market.totalStaked + market.seedAmount;
@@ -266,6 +268,8 @@ function MarketCard({
   }
   const statusClass = bettingOpen
     ? "bg-red-500/10 text-red-500"
+    : pendingSettlement
+      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
     : "bg-zinc-500/10 text-zinc-500";
 
   // Quick-stake: top outcomes by pool share, odds identical to the detail page.
@@ -291,7 +295,7 @@ function MarketCard({
     >
       <div className="relative flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[.16em] text-[#2E7CF6]"><span className="grid h-8 w-8 place-items-center rounded-xl bg-[#2E7CF6]/10"><Trophy className="h-4 w-4" /></span>{TEMPLATE_NAMES[market.templateId] ?? "Prediction market"}</span>
-        <span className={`mr-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider ${statusClass}`}><i className={`h-1.5 w-1.5 rounded-full ${bettingOpen ? "bg-red-500" : "bg-zinc-400"}`} />{bettingOpen ? closingSoon ? "Closing soon" : "Open" : market.state === 0 ? "Closed" : market.state === 1 ? "Resolved" : "Voided"}</span>
+        <span className={`mr-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider ${statusClass}`}><i className={`h-1.5 w-1.5 rounded-full ${bettingOpen ? "bg-red-500" : pendingSettlement ? "bg-amber-500" : "bg-zinc-400"}`} />{bettingOpen ? closingSoon ? "Closing soon" : "Open" : pendingSettlement ? "Pending settlement" : market.state === 0 ? "Closed" : market.state === 1 ? "Resolved" : "Voided"}</span>
       </div>
       <h3 className="relative mt-5 font-display text-lg font-bold leading-tight tracking-tight text-zinc-950 dark:text-white">
         {question}
@@ -342,6 +346,7 @@ function MarketCard({
 export default function MarketsPage() {
   const { markets, error } = useMarkets();
   const { teams } = useTeams();
+  const [tab, setTab] = useState<"all" | "featured" | "pending">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
   // matchday, kickoff. Fails soft — spread cards fall back to generic text.
@@ -362,16 +367,17 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const { featured, community } = useMemo(() => {
-    if (!markets) return { featured: null, community: null };
+  const { unresolved, featured, community, pending } = useMemo(() => {
+    if (!markets) return { unresolved: [], featured: [], community: [], pending: [] };
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const open = markets.filter((m) => m.state === 0 && m.bettingCloseTime > now);
+    const unresolved = markets.filter((m) => m.state === 0);
     // Featured = Matchday Top Gainer + Season Champion (league templates).
-    const featured = open.filter((m) => m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION);
-    const community = open.filter((m) => m.templateId !== TEMPLATES.TOP_GAINER && m.templateId !== TEMPLATES.CHAMPION);
-    return { featured, community };
+    const featured = unresolved.filter((m) => m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION);
+    const community = unresolved.filter((m) => m.templateId !== TEMPLATES.TOP_GAINER && m.templateId !== TEMPLATES.CHAMPION);
+    const pending = unresolved.filter((m) => m.endTime <= now);
+    return { unresolved, featured, community, pending };
   }, [markets]);
-  const openMarketCount = (featured?.length ?? 0) + (community?.length ?? 0);
+  const visible = tab === "all" ? unresolved : tab === "featured" ? featured : pending;
 
   if (!MARKET_FACTORY_ADDRESS) {
     return (
@@ -412,16 +418,44 @@ export default function MarketsPage() {
         </Link>
       </div>
 
+      <div role="tablist" aria-label="Market filters" className="mb-6 flex flex-wrap gap-2">
+        {([
+          ["all", "All markets", unresolved.length],
+          ["featured", "Featured", featured.length],
+          ["pending", "Pending settlement", pending.length],
+        ] as const).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={cn(
+              "rounded-xl border px-4 py-2 text-sm font-semibold transition-colors",
+              tab === key
+                ? "border-[#2E7CF6] bg-[#2E7CF6] text-white"
+                : "border-black/10 text-zinc-600 hover:border-[#2E7CF6]/50 dark:border-white/10 dark:text-zinc-300"
+            )}
+          >
+            {label} <span className="ml-1 opacity-70">{count}</span>
+          </button>
+        ))}
+      </div>
+
       {!markets ? (
         <SkeletonCards cards={6} />
-      ) : openMarketCount === 0 ? (
+      ) : visible.length === 0 ? (
         <EmptyState
-          title="No open markets right now"
-          message="New markets will appear here when they open for predictions."
+          title={tab === "pending" ? "No markets pending settlement" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
+          message={tab === "pending" ? "Markets will appear here after their end time until they are settled." : "New markets will appear here when they are created."}
         />
+      ) : tab === "pending" ? (
+        <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {pending.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />)}
+        </div>
       ) : (
-        <>
-          {featured && featured.length > 0 && (
+        <div role="tabpanel">
+          {featured.length > 0 && (
             <section className="mb-10">
               <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
                 <Trophy className="h-5 w-5 text-amber-500" />
@@ -434,15 +468,15 @@ export default function MarketsPage() {
               </div>
             </section>
           )}
-          <section>
+          {tab === "all" && <section>
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
               <Users className="h-5 w-5 text-[#2E7CF6]" />
               Community
               <span className="text-sm font-normal text-zinc-500">
-                ({community?.length ?? 0})
+                ({community.length})
               </span>
             </h2>
-            {community && community.length > 0 ? (
+            {community.length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {community.map((m) => (
                   <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />
@@ -454,8 +488,8 @@ export default function MarketsPage() {
                 message="Create the first one with the button above."
               />
             )}
-          </section>
-        </>
+          </section>}
+        </div>
       )}
     </div>
   );

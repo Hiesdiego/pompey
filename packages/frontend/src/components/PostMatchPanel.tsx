@@ -27,6 +27,7 @@ import {
   OUTCOME_SHORT,
 } from "../lib/format";
 import { cn } from "../lib/cn";
+import { celebrateClaim } from "../lib/confetti";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { useContractWrite } from "../hooks/useContractWrite";
 import { TeamBadge } from "./TeamBadge";
@@ -133,6 +134,7 @@ export function PostMatchPanel({
       });
       setClaimTx(hash);
       setClaimed(true);
+      celebrateClaim();
       onClaimed();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

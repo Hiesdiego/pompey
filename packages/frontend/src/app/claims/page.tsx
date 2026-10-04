@@ -27,6 +27,7 @@ import {
 import { api, type ApiFixture } from "../../lib/api";
 import { formatTick, OUTCOME_SHORT, outcomeLabel } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { celebrateClaim } from "../../lib/confetti";
 import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../components/States";
 import { TeamBadge } from "../../components/TeamBadge";
 
@@ -160,6 +161,7 @@ export default function ClaimsPage() {
           args: [BigInt(c.fixture.seasonId), BigInt(c.fixture.fixtureId)],
           label: `Claim match ${c.fixture.fixtureId}`,
         });
+        celebrateClaim();
         setProgress({ done: i + 1, total: items.length });
       }
       setDone(true);

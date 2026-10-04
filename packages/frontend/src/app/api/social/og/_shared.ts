@@ -98,7 +98,7 @@ export async function usernameForAddress(
       `/api/social/profiles/by-wallet/${encodeURIComponent(address)}?usernameOnly=1`,
       siteUrl()
     );
-    const response = await fetch(url, { next: { revalidate: 60 } });
+    const response = await fetch(url, { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) });
     if (!response.ok) return null;
     const data = (await response.json()) as { username?: unknown };
     const u = typeof data.username === "string" ? data.username.trim() : "";

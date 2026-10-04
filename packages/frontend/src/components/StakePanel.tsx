@@ -147,6 +147,7 @@ export function StakePanel({
       setError("Insufficient TICK balance — use the faucet in the header.");
       return;
     }
+    setStep("staking");
     try {
       // Improvement B — when the allowance is short, batch approve+stake:
       // one userOp on smart wallets, sequential sponsored txs on embedded.
@@ -342,6 +343,7 @@ export function StakePanel({
       <button
         onClick={handleStake}
         disabled={busy || !minOk || !balanceOk}
+        aria-busy={busy}
         className={cn(
           "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
           busy || !minOk || !balanceOk

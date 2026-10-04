@@ -82,7 +82,7 @@ export async function Footer() {
           <Link href="/fixtures" className="transition-colors hover:text-[#2E7CF6]">Fixtures</Link>
           <Link href="/markets" className="transition-colors hover:text-[#2E7CF6]">Markets</Link>
           <Link href="/leaderboard" className="transition-colors hover:text-[#2E7CF6]">Leaderboard</Link>
-          <a href="https://x.com/tickertop" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#2E7CF6]">Follow on X</a>
+          <a href="https://x.com/tickrtop" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#2E7CF6]">Follow on X</a>
         </nav>
         {dynamicLinks.length > 0 && (
           <nav aria-label="Featured matches and markets" className="flex max-w-4xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-zinc-500 dark:text-zinc-400">

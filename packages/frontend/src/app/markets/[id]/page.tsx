@@ -48,6 +48,7 @@ import { useMarket } from "../../../lib/query/useMarket";
 import { useFactoryEvents } from "../../../lib/query/useFactoryEvents";
 import { qks } from "../../../lib/query/keys";
 import { queryClient } from "../../../lib/query/queryClient";
+import { celebrateClaim } from "../../../lib/confetti";
 import {
   MARKET_FACTORY_ADDRESS,
   MARKET_FACTORY_ABI,
@@ -525,6 +526,7 @@ export default function MarketDetailPage() {
       functionName: "claim",
       args: [id],
     });
+    celebrateClaim();
     void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
   }
 
