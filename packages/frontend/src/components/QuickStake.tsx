@@ -40,6 +40,7 @@ import { queryClient } from "../lib/query/queryClient";
 import { qks } from "../lib/query/keys";
 import { toast } from "./Toast";
 import { TeamBadge } from "./TeamBadge";
+import { StakeDialog } from "./StakeDialog";
 
 const QUICK_AMOUNTS = [25, 100, 250, 1000];
 
@@ -118,21 +119,10 @@ export function QuickStakeSheet({
   const { balance } = useTickBalance(playerAddress ?? null);
   const { writeBatch, pending: busy, clearError } = useContractWrite();
   const [amountStr, setAmountStr] = useState("25");
-  const [mounted, setMounted] = useState(false);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   /** "form" → direct submit; "confirm" → explicit step for large stakes. */
   const [stage, setStage] = useState<"form" | "confirm">("form");
-
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const amountNum = Number(amountStr) || 0;
   const amountWei = BigInt(Math.round(amountNum * 1e18));
@@ -266,20 +256,7 @@ export function QuickStakeSheet({
   if (!outcome) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div
-        className={cn(
-          "absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300",
-          mounted ? "opacity-100" : "opacity-0"
-        )}
-        onClick={onClose}
-      />
-      <div
-        className={cn(
-          "relative max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-[1.5rem] border border-black/10 bg-white p-5 text-zinc-900 shadow-[0_28px_100px_rgba(0,0,0,.45)] transition-all duration-300 dark:border-white/10 dark:bg-[#101722] dark:text-white",
-          mounted ? "translate-y-0 opacity-100 scale-100" : "translate-y-4 opacity-0 scale-95"
-        )}
-      >
+    <StakeDialog title={`Quick stake: ${question}`} onClose={onClose}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-black/5 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-200"
@@ -363,7 +340,7 @@ export function QuickStakeSheet({
 
             {!authenticated ? (
               <button
-                onClick={() => login()}
+                onClick={() => { onClose(); login(); }}
                 className="gradient-cta mt-4 w-full rounded-xl py-3 text-sm font-bold text-white"
               >
                 Sign in to stake
@@ -488,8 +465,7 @@ export function QuickStakeSheet({
             )}
           </>
         )}
-      </div>
-    </div>
+    </StakeDialog>
   );
 }
 

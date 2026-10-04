@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { ShareButtons } from "../../../components/ShareButtons";
+import { StakeDialog } from "../../../components/StakeDialog";
 import { getPublicClient } from "../../../hooks/usePublicClient";
 import { useTickr } from "../../../hooks/useTickr";
 import { useTeams } from "../../../hooks/useTeams";
@@ -1089,19 +1090,6 @@ function StakeModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   if (outcome === null) return null;
 
   const stakedTotal = outcomeTotals.reduce((s, v) => s + v, 0n);
@@ -1116,20 +1104,7 @@ function StakeModal({
   const selectedTeamId = outcomeTeamId(market, outcome, fixtures);
 
   return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div
-        className={cn(
-          "absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300",
-          mounted ? "opacity-100" : "opacity-0"
-        )}
-        onClick={onClose}
-      />
-      <div
-        className={cn(
-          "relative max-h-[88dvh] w-full max-w-lg overflow-y-auto rounded-[1.5rem] border border-black/10 bg-white p-4 text-zinc-900 shadow-[0_28px_100px_rgba(0,0,0,.45)] transition-all duration-300 dark:border-white/10 dark:bg-[#101722] dark:text-white sm:p-5",
-          mounted ? "translate-y-0 opacity-100 scale-100" : "translate-y-4 opacity-0 scale-95"
-        )}
-      >
+    <StakeDialog title={`Stake on ${question}`} size="lg" onClose={onClose}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-black/5 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-200"
@@ -1234,8 +1209,7 @@ function StakeModal({
             )}
           </>
         )}
-      </div>
-    </div>
+    </StakeDialog>
   );
 }
 

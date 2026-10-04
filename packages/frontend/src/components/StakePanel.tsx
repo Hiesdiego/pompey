@@ -33,6 +33,7 @@ import {
 import { cn } from "../lib/cn";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { useContractWrite } from "../hooks/useContractWrite";
+import { StakeDialog } from "./StakeDialog";
 
 const OUTCOME_ACTIVE = [
   "border-[#2E7CF6] bg-[#2E7CF6]/12 text-[#1D4ED8] shadow-[0_0_18px_rgba(46,124,246,.25)] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]",
@@ -366,11 +367,7 @@ export function StakePanel({
 }
 
 /**
- * StakeModal — the match staking form in a fixed, viewport-centered modal.
- *
- * Opens wherever the user is on the page: fixed overlay, backdrop-click and
- * Escape to close, body scroll locked while open. Same shell pattern as
- * QuickStakeSheet (bottom sheet on mobile, centered card on desktop).
+ * StakeModal — the match staking form in the shared viewport anchored shell.
  */
 export function StakeModal({
   fixture,
@@ -393,52 +390,13 @@ export function StakeModal({
   onReady?: () => void;
   onClose: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const r = requestAnimationFrame(() => {
-      setMounted(true);
-      onReady?.();
-    });
-    return () => cancelAnimationFrame(r);
-  }, [onReady]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  // Lock body scroll while the modal is open.
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
-
   const title =
     fixture.home && fixture.away
       ? `${fixture.home.name} vs ${fixture.away.name}`
       : "Stake on this match";
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div
-        className={cn(
-          "absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300",
-          mounted ? "opacity-100" : "opacity-0"
-        )}
-        onClick={onClose}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cn(
-          "relative max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-[1.5rem] border border-black/10 bg-white p-5 pt-4 text-zinc-900 shadow-[0_28px_100px_rgba(0,0,0,.45)] transition-all duration-300 dark:border-white/10 dark:bg-[#101722] dark:text-white sm:p-6",
-          mounted ? "translate-y-0 opacity-100 scale-100" : "translate-y-4 opacity-0 scale-95"
-        )}
-      >
+    <StakeDialog title={title} onClose={onClose} onReady={onReady}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-[#2E7CF6]">
@@ -463,13 +421,12 @@ export function StakeModal({
           playerAddress={playerAddress}
           balance={balance}
           authenticated={authenticated}
-          onLogin={onLogin}
+          onLogin={() => { onClose(); onLogin(); }}
           onStaked={() => {
             onStaked();
             onClose();
           }}
         />
-      </div>
-    </div>
+    </StakeDialog>
   );
 }

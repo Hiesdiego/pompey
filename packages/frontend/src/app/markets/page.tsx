@@ -21,7 +21,9 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
+import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
+import { useTickr } from "../../hooks/useTickr";
 import { useTeams } from "../../hooks/useTeams";
 import {
   MARKET_FACTORY_ADDRESS,
@@ -346,6 +348,7 @@ function MarketCard({
 export default function MarketsPage() {
   const { markets, error } = useMarkets();
   const { teams } = useTeams();
+  const { playerAddress } = useTickr();
   const [tab, setTab] = useState<"all" | "featured" | "bounty">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
@@ -367,18 +370,64 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const { unresolved, featured, community, bounty } = useMemo(() => {
-    if (!markets) return { unresolved: [], featured: [], community: [], bounty: [] };
+  const { unresolved, featured, community, bountyCandidates } = useMemo(() => {
+    if (!markets) return { unresolved: [], featured: [], community: [], bountyCandidates: [] };
     const unresolved = markets.filter((m) => m.state === 0);
     // Featured = Matchday Top Gainer + Season Champion (league templates).
     const featured = unresolved.filter((m) => m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION);
     const community = unresolved.filter((m) => m.templateId !== TEMPLATES.TOP_GAINER && m.templateId !== TEMPLATES.CHAMPION);
-    // Resolved markets with winning stakes have winnings available to claim.
-    const bounty = markets.filter((m) => m.state === 1 && m.outcomeTotals.some(
+    // Only markets with winning stakes can have outstanding claims.
+    const bountyCandidates = markets.filter((m) => m.state === 1 && m.outcomeTotals.some(
       (total, index) => total > 0n && (m.winnerBitmap & (1n << BigInt(index))) !== 0n
     ));
-    return { unresolved, featured, community, bounty };
+    return { unresolved, featured, community, bountyCandidates };
   }, [markets]);
+  const claimQuery = useQuery({
+    queryKey: ["marketClaims", playerAddress?.toLowerCase(), bountyCandidates.map((m) => m.id.toString())],
+    enabled: Boolean(playerAddress && MARKET_FACTORY_ADDRESS && bountyCandidates.length),
+    gcTime: 0,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      if (!playerAddress || !MARKET_FACTORY_ADDRESS) return [] as string[];
+      const client = getPublicClient();
+      const claimable: string[] = [];
+      for (let offset = 0; offset < bountyCandidates.length; offset += 25) {
+        const chunk = bountyCandidates.slice(offset, offset + 25);
+        const claimedResults = await client.multicall({
+          contracts: chunk.map((market) => ({
+            address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI,
+            functionName: "claimed" as const, args: [market.id, playerAddress] as const,
+          })),
+          allowFailure: true,
+        });
+        if (claimedResults.some((result) => result.status !== "success")) throw new Error("Could not check market claims.");
+        const unclaimed = chunk.filter((_, index) => claimedResults[index].result === false);
+        if (unclaimed.length === 0) continue;
+        const winningOutcomes = unclaimed.map((market) => market.outcomeTotals.flatMap((_, index) =>
+          (market.winnerBitmap & (1n << BigInt(index))) !== 0n ? [index] : []
+        ));
+        const stakeResults = await client.multicall({
+          contracts: unclaimed.flatMap((market, index) => winningOutcomes[index].map((outcome) => ({
+            address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI,
+            functionName: "stakes" as const, args: [market.id, playerAddress, BigInt(outcome)] as const,
+          }))),
+          allowFailure: true,
+        });
+        if (stakeResults.some((result) => result.status !== "success")) throw new Error("Could not check winning stakes.");
+        let resultIndex = 0;
+        unclaimed.forEach((market, index) => {
+          const count = winningOutcomes[index].length;
+          const hasWinningStake = stakeResults.slice(resultIndex, resultIndex + count)
+            .some((result) => result.status === "success" && result.result > 0n);
+          if (hasWinningStake) claimable.push(market.id.toString());
+          resultIndex += count;
+        });
+      }
+      return claimable;
+    },
+  });
+  const bounty = bountyCandidates.filter((market) => claimQuery.data?.includes(market.id.toString()));
+  const bountyLoading = Boolean(playerAddress && bountyCandidates.length && claimQuery.isPending);
   const visible = tab === "all" ? unresolved : tab === "featured" ? featured : bounty;
 
   if (!MARKET_FACTORY_ADDRESS) {
@@ -424,7 +473,7 @@ export default function MarketsPage() {
         {([
           ["all", "All markets", unresolved.length],
           ["featured", "Featured", featured.length],
-          ["bounty", "Bounty", bounty.length],
+          ["bounty", "Bounty", bountyLoading ? "…" : bounty.length],
         ] as const).map(([key, label, count]) => (
           <button
             key={key}
@@ -444,12 +493,16 @@ export default function MarketsPage() {
         ))}
       </div>
 
-      {!markets ? (
+      {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolver bounties are paid when a market resolves. This tab shows your unclaimed winnings.</p>}
+
+      {!markets || (tab === "bounty" && bountyLoading) ? (
         <SkeletonCards cards={6} />
+      ) : tab === "bounty" && claimQuery.isError ? (
+        <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />
       ) : visible.length === 0 ? (
         <EmptyState
-          title={tab === "bounty" ? "No resolved markets with winnings" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
-          message={tab === "bounty" ? "Resolved markets with winning stakes will appear here for claims." : "New markets will appear here when they are created."}
+          title={tab === "bounty" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
+          message={tab === "bounty" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : "New markets will appear here when they are created."}
         />
       ) : tab === "bounty" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
