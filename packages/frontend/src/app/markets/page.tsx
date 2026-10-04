@@ -346,7 +346,7 @@ function MarketCard({
 export default function MarketsPage() {
   const { markets, error } = useMarkets();
   const { teams } = useTeams();
-  const [tab, setTab] = useState<"all" | "featured" | "pending">("all");
+  const [tab, setTab] = useState<"all" | "featured" | "bounty">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
   // matchday, kickoff. Fails soft — spread cards fall back to generic text.
@@ -367,17 +367,19 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const { unresolved, featured, community, pending } = useMemo(() => {
-    if (!markets) return { unresolved: [], featured: [], community: [], pending: [] };
-    const now = BigInt(Math.floor(Date.now() / 1000));
+  const { unresolved, featured, community, bounty } = useMemo(() => {
+    if (!markets) return { unresolved: [], featured: [], community: [], bounty: [] };
     const unresolved = markets.filter((m) => m.state === 0);
     // Featured = Matchday Top Gainer + Season Champion (league templates).
     const featured = unresolved.filter((m) => m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION);
     const community = unresolved.filter((m) => m.templateId !== TEMPLATES.TOP_GAINER && m.templateId !== TEMPLATES.CHAMPION);
-    const pending = unresolved.filter((m) => m.endTime <= now);
-    return { unresolved, featured, community, pending };
+    // Resolved markets with winning stakes have winnings available to claim.
+    const bounty = markets.filter((m) => m.state === 1 && m.outcomeTotals.some(
+      (total, index) => total > 0n && (m.winnerBitmap & (1n << BigInt(index))) !== 0n
+    ));
+    return { unresolved, featured, community, bounty };
   }, [markets]);
-  const visible = tab === "all" ? unresolved : tab === "featured" ? featured : pending;
+  const visible = tab === "all" ? unresolved : tab === "featured" ? featured : bounty;
 
   if (!MARKET_FACTORY_ADDRESS) {
     return (
@@ -422,7 +424,7 @@ export default function MarketsPage() {
         {([
           ["all", "All markets", unresolved.length],
           ["featured", "Featured", featured.length],
-          ["pending", "Pending settlement", pending.length],
+          ["bounty", "Bounty", bounty.length],
         ] as const).map(([key, label, count]) => (
           <button
             key={key}
@@ -446,12 +448,12 @@ export default function MarketsPage() {
         <SkeletonCards cards={6} />
       ) : visible.length === 0 ? (
         <EmptyState
-          title={tab === "pending" ? "No markets pending settlement" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
-          message={tab === "pending" ? "Markets will appear here after their end time until they are settled." : "New markets will appear here when they are created."}
+          title={tab === "bounty" ? "No resolved markets with winnings" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
+          message={tab === "bounty" ? "Resolved markets with winning stakes will appear here for claims." : "New markets will appear here when they are created."}
         />
-      ) : tab === "pending" ? (
+      ) : tab === "bounty" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {pending.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />)}
+          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />)}
         </div>
       ) : (
         <div role="tabpanel">
