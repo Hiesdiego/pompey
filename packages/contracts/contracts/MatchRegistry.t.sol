@@ -44,13 +44,13 @@ contract MatchRegistryScheduleTest is Test {
     }
 
     function test_GeneratesExactly380Fixtures() public {
-                _generateFullSchedule(uint64(block.timestamp + 1 days));
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         require(matchRegistry.fixtureCount() == EXPECTED_FIXTURES, "wrong total fixture count");
     }
 
     function test_GeneratesExactly38Matchdays() public {
-                _generateFullSchedule(uint64(block.timestamp + 1 days));
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         for (uint8 md = 0; md < EXPECTED_MATCHDAYS; md++) {
             uint256[] memory ids = matchRegistry.getFixturesByMatchday(md);
@@ -59,7 +59,7 @@ contract MatchRegistryScheduleTest is Test {
     }
 
     function test_EachTeamPlaysExactly38Matches() public {
-                _generateFullSchedule(uint64(block.timestamp + 1 days));
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         uint16[TEAM_COUNT] memory appearances;
 
@@ -75,7 +75,7 @@ contract MatchRegistryScheduleTest is Test {
     }
 
     function test_NoTeamPlaysItself() public {
-                _generateFullSchedule(uint64(block.timestamp + 1 days));
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         for (uint256 i = 0; i < EXPECTED_FIXTURES; i++) {
             Fixture memory f = matchRegistry.getFixture(i);
@@ -84,7 +84,7 @@ contract MatchRegistryScheduleTest is Test {
     }
 
     function test_EachTeamPlaysEveryOpponentExactlyTwice() public {
-                _generateFullSchedule(uint64(block.timestamp + 1 days));
+        _generateFullSchedule(uint64(block.timestamp + 1 days));
 
         uint8[TEAM_COUNT][TEAM_COUNT] memory directedCount;
 
@@ -169,7 +169,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_BackendCanRevealKickoffWithinBounds() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
 
         vm.warp(seasonStart); // enter matchday 0's window
 
@@ -184,7 +184,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_RevealRejectsTimestampBelowMinLeadTime() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         uint64 tooSoon = uint64(block.timestamp) + 10 minutes; // below 30 min minimum
@@ -195,7 +195,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_RevealRejectsTimestampAboveMaxLeadTime() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         uint64 tooFar = uint64(block.timestamp) + 200 minutes; // above 120 min maximum
@@ -206,7 +206,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_OnlyBackendCanReveal() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         vm.prank(address(0xBAD));
@@ -216,7 +216,7 @@ contract MatchRegistryScheduleTest is Test {
 
     function test_CannotRevealSameFixtureTwice() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
         vm.warp(seasonStart);
 
         vm.startPrank(backend);
@@ -227,9 +227,9 @@ contract MatchRegistryScheduleTest is Test {
         vm.stopPrank();
     }
 
-    function test_BettingOpenBeforeRevealAndClosesAtKickoff() public {
+    function test_BettingOpenBeforeRevealAndClosesNearMatchEnd() public {
         uint64 seasonStart = uint64(block.timestamp + 1 days);
-                _generateFullSchedule(seasonStart);
+        _generateFullSchedule(seasonStart);
 
         require(matchRegistry.isBettingOpen(0), "betting should be open before reveal");
 
@@ -240,8 +240,20 @@ contract MatchRegistryScheduleTest is Test {
 
         require(matchRegistry.isBettingOpen(0), "betting should still be open before kickoff arrives");
 
+        // In-play: betting stays open through kickoff, it no longer closes there
         vm.warp(kickoff);
-        require(!matchRegistry.isBettingOpen(0), "betting should close once kickoff arrives");
+        require(matchRegistry.isBettingOpen(0), "betting should stay open at kickoff (in-play)");
+
+        Fixture memory f = matchRegistry.getFixture(0);
+        uint64 closeTime = f.matchEndTimestamp - 5 minutes; // INPLAY_CLOSE_BUFFER_SECONDS
+
+        // Still open one second before the close buffer kicks in
+        vm.warp(closeTime - 1);
+        require(matchRegistry.isBettingOpen(0), "betting should be open just before the close buffer");
+
+        // Closed once inside the 5-minute close buffer before match end
+        vm.warp(closeTime);
+        require(!matchRegistry.isBettingOpen(0), "betting should close 5 minutes before match end");
     }
 }
 
