@@ -45,6 +45,8 @@ import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../../
 import { api, type ApiFixture, type ApiFixtureTeam } from "../../lib/api";
 import { useMarkets as useCachedMarkets } from "../../lib/query/useMarkets";
 import { useFactoryEvents } from "../../lib/query/useFactoryEvents";
+import { usePriceFeed } from "../../lib/price/usePriceFeed";
+import { TargetCardStatus } from "../../components/TargetCardStatus";
 
 export interface MarketSummary {
   id: bigint;
@@ -224,7 +226,7 @@ function describeCardMarket(
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, price, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params);
       const symbol = teamSymbol(teams, team);
-      return `Will ${symbol} finish ${above ? "above" : "below"} $${(Number(price) / 1e8).toLocaleString()}?`;
+      return `Will ${symbol} finish ${above ? "at or above" : "at or below"} $${(Number(price) / 1e8).toLocaleString()}?`;
     }
     // Spread: name the teams in home/away order and state the number.
     // Home covers iff (homeGoals − awayGoals) > spread.
@@ -249,10 +251,14 @@ function MarketCard({
   market,
   teams,
   fixtures,
+  prices,
+  priceFresh,
 }: {
   market: MarketSummary;
   teams: TeamRef[];
   fixtures: Map<string, ApiFixture>;
+  prices: Record<string, number>;
+  priceFresh: boolean;
 }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const bettingOpen = market.state === 0 && Number(market.bettingCloseTime) > nowSec;
@@ -304,6 +310,7 @@ function MarketCard({
       </h3>
       {market.templateId !== TEMPLATES.TARGET && <p className="relative mt-2 text-sm text-zinc-500 dark:text-zinc-400">{meta}</p>}
       {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && <div className="relative mt-4 flex items-center gap-3"><TeamBadge teamId={targetTeamId} size={40} showName={false} showSymbol /><span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target coin</span></div>}
+      {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && market.state === 0 && <TargetCardStatus params={market.params} symbol={teamSymbol(teams, targetTeamId)} price={prices[teamSymbol(teams, targetTeamId)]} fresh={priceFresh} />}
       {market.templateId === TEMPLATES.SPREAD && <SpreadFixtureBadges market={market} fixtures={fixtures} className="relative mt-4" />}
       {market.templateId === TEMPLATES.TARGET ? <div className="relative mt-5 grid grid-cols-1 gap-2.5">
         {ranked.map(({ amount, index }) => {
@@ -349,6 +356,7 @@ export default function MarketsPage() {
   const { markets, error } = useMarkets();
   const { teams } = useTeams();
   const { playerAddress } = useTickr();
+  const { prices, status: priceStatus } = usePriceFeed(true);
   const [tab, setTab] = useState<"all" | "featured" | "bounty">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
@@ -506,7 +514,7 @@ export default function MarketsPage() {
         />
       ) : tab === "bounty" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />)}
+          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}
         </div>
       ) : (
         <div role="tabpanel">
@@ -518,7 +526,7 @@ export default function MarketsPage() {
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featured.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />
+                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />
                 ))}
               </div>
             </section>
@@ -534,7 +542,7 @@ export default function MarketsPage() {
             {community.length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {community.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} />
+                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />
                 ))}
               </div>
             ) : (

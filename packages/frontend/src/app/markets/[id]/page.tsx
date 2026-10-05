@@ -69,6 +69,9 @@ import { toast } from "../../../components/Toast";
 import { api, type ApiFixture, type ApiFixtureTeam } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
 import { formatTick } from "../../../lib/format";
+import { TargetTracker } from "../../../components/TargetTracker";
+import { TargetSettlementReplay } from "../../../components/TargetSettlementReplay";
+import { WatchButton } from "../../../components/WatchButton";
 
 interface MarketDetail {
   id: bigint;
@@ -243,7 +246,7 @@ function describeMarket(
         market.params
       );
       const s = teamName(teams, teamId);
-      return `Will ${s} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return `Will ${s} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
     if (t === TEMPLATES.SPREAD) {
       const si = getSpreadInfo(market, fixtures);
@@ -568,7 +571,7 @@ export default function MarketDetailPage() {
         <Link href="/markets" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-[#2E7CF6]">
           <ArrowLeft className="h-4 w-4" /> All markets
         </Link>
-        {market && <ShareButtons path={`/markets/${id}`} text={`${question} — predict on TICKR`} compact />}
+        {market && <div className="flex items-center gap-2"><WatchButton marketId={id.toString()} /><ShareButtons path={`/markets/${id}`} text={`${question} — predict on TICKR`} compact /></div>}
       </div>
 
       {/* Market hero */}
@@ -609,6 +612,8 @@ export default function MarketDetailPage() {
           </div>
         </div>
       </section>
+
+      {market.templateId === TEMPLATES.TARGET && (() => { const targetTeam = outcomeTeamId(market, 0); const symbol = teams?.find((t) => t.teamId === targetTeam)?.symbol; return symbol ? <><TargetTracker params={market.params} symbol={symbol} settled={market.state !== 0} /><TargetSettlementReplay marketId={id.toString()} params={market.params} symbol={symbol} state={market.state} winnerBitmap={market.winnerBitmap} payoutPerShare={market.payoutPerShare} userStakes={userStakes} /></> : null; })()}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -723,7 +728,7 @@ export default function MarketDetailPage() {
                 </>
               ) : (
                 <div className="mt-1 font-display text-lg font-extrabold text-zinc-500">
-                  Early predictors get the best odds
+                  Pool shares change as people stake
                 </div>
               )}
             </div>
@@ -947,7 +952,7 @@ function OddsBoard({
       </div>
       {stakedTotal === 0n && (
         <p className="mb-4 rounded-xl bg-amber-500/[.07] px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-          No stakes yet — be first and lock in the best implied odds.
+          No stakes yet — the displayed pool shares will change as people stake.
         </p>
       )}
       <div className="space-y-3">

@@ -8,6 +8,7 @@ import { Footer } from "../components/Footer";
 import { OnboardingGate } from "../components/OnboardingGate";
 import { PwaRegister } from "../components/PwaRegister";
 import { ToastViewport } from "../components/Toast";
+import { WatchAlertMonitor } from "../components/WatchAlertMonitor";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const spaceGrotesk = Space_Grotesk({
@@ -124,6 +125,7 @@ export default function RootLayout({
             <Footer />
             <OnboardingGate />
             <ToastViewport />
+            <WatchAlertMonitor />
           </Providers>
         </ThemeProvider>
       </body>

@@ -27,7 +27,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet } from "lucide-react";
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters } from "viem";
 import { useTickr } from "../../../hooks/useTickr";
 import { useMyProfile } from "../../../hooks/useMyProfile";
@@ -43,7 +43,7 @@ import {
   CREATION_SEED_TICK,
 } from "../../../lib/marketFactory";
 import { CONTRACTS, TICK_TOKEN_ABI, SEASON_DISPLAY_NAME } from "../../../lib/contracts";
-import { SectionTitle, ErrorState } from "../../../components/States";
+import { ErrorState } from "../../../components/States";
 import { cn } from "../../../lib/cn";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
@@ -342,6 +342,18 @@ export default function CreateMarketPage() {
   }
 
   const busy = approveStatus === "pending" || createStatus === "pending";
+  const selectedTeam = teams?.find((team) => team.teamId === Number(targetTeam));
+  const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
+  const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
+  const previewTitle = templateId === TEMPLATES.TARGET
+    ? targetPrice ? `Will ${selectedTeam?.name ?? "this coin"} finish ${targetAbove ? "at or above" : "at or below"} $${Number(targetPrice).toLocaleString()}?` : "Set a target price to preview the question"
+    : templateId === TEMPLATES.SPREAD
+      ? `Will ${selectedFixture?.home?.symbol ?? "home"} cover a ${spreadPoints} goal spread against ${selectedFixture?.away?.symbol ?? "away"}?`
+      : templateId === TEMPLATES.TOP_GAINER
+        ? `Which coin gains the most on matchday ${Number(matchdayIndex) + 1}?`
+        : templateId === TEMPLATES.CHAMPION
+          ? `Who wins ${SEASON_DISPLAY_NAME}?`
+          : "Pick the format to preview your market";
 
   async function handleCreate() {
     if (templateId === null || !address || !publicClient || paramsError) return;
@@ -427,7 +439,7 @@ export default function CreateMarketPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-6xl pb-16">
       <button
         onClick={() => (step > 1 ? setStep(step - 1) : router.back())}
         className="mb-4 flex items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-[#2E7CF6]"
@@ -435,15 +447,16 @@ export default function CreateMarketPage() {
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
 
-      <SectionTitle title="Create a prediction market" />
-      <p className="mb-8 text-sm text-zinc-500 dark:text-zinc-400">
-        Pick a template, set the terms, pay the {CREATION_SEED_TICK} TICK seed —
-        your market is live and anyone can stake on it. Resolution is automatic
-        and fully on-chain.
-      </p>
+      <div className="relative mb-8 overflow-hidden rounded-[2rem] bg-[#0d224b] p-7 text-white sm:p-10">
+        <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#2E7CF6]/40 blur-3xl" />
+        <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">5 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
+      </div>
+
+      <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div>
 
       {/* Step indicator */}
-      <div className="mb-8 flex items-center gap-2">
+      <div className="mb-8 flex flex-wrap items-center gap-2" aria-label={`Step ${step} of 3`}>
         {[1, 2, 3].map((s) => (
           <div key={s} className="flex items-center gap-2">
             <div
@@ -459,8 +472,8 @@ export default function CreateMarketPage() {
             {s < 3 && <div className="h-0.5 w-12 bg-zinc-200 dark:bg-zinc-800" />}
           </div>
         ))}
-        <div className="ml-2 text-sm text-zinc-500">
-          {step === 1 ? "Choose template" : step === 2 ? "Set terms" : "Launch"}
+        <div className="ml-2 text-sm font-semibold text-zinc-500">
+          {step === 1 ? "01 · Choose format" : step === 2 ? "02 · Define result" : "03 · Review & launch"}
         </div>
       </div>
 
@@ -479,7 +492,7 @@ export default function CreateMarketPage() {
                 setStep(2);
               }}
               className={cn(
-                "glass group rounded-2xl border border-transparent p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[#2E7CF6]/50 hover:shadow-[0_0_30px_rgba(46,124,246,0.15)]",
+                "group min-h-48 rounded-[1.5rem] border border-black/[.08] bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:border-[#2E7CF6]/50 hover:shadow-[0_15px_40px_rgba(46,124,246,0.12)] dark:border-white/[.08] dark:bg-[#101821]",
                 templateId === id && "border-[#2E7CF6]/60",
                 unavailable && "cursor-not-allowed opacity-50 grayscale"
               )}
@@ -503,8 +516,9 @@ export default function CreateMarketPage() {
       )}
 
       {step === 2 && templateId !== null && (
-        <div className="glass rounded-2xl p-6">
-          <h3 className="mb-1 font-semibold">{TEMPLATE_NAMES[templateId]}</h3>
+        <div className="rounded-[1.5rem] border border-black/[.08] bg-white p-6 shadow-sm dark:border-white/[.08] dark:bg-[#101821] sm:p-8">
+          <p className="text-xs font-extrabold uppercase tracking-[.17em] text-[#2E7CF6]">Define the result</p>
+          <h3 className="mb-1 mt-2 font-display text-2xl font-black">{TEMPLATE_NAMES[templateId]}</h3>
           <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
             {TEMPLATE_DESCRIPTIONS[templateId]}
           </p>
@@ -557,8 +571,9 @@ export default function CreateMarketPage() {
       )}
 
       {step === 3 && templateId !== null && (
-        <div className="glass rounded-2xl p-6">
-          <h3 className="mb-4 font-semibold">Launch your market</h3>
+        <div className="rounded-[1.5rem] border border-black/[.08] bg-white p-6 shadow-sm dark:border-white/[.08] dark:bg-[#101821] sm:p-8">
+          <p className="text-xs font-extrabold uppercase tracking-[.17em] text-[#2E7CF6]">Final review</p>
+          <h3 className="mb-4 mt-2 font-display text-2xl font-black">Launch your market</h3>
 
           <label className="mb-1 block text-sm font-medium">
             Display name <span className="text-zinc-400">(shown as “created by”, max 32 chars)</span>
@@ -634,6 +649,20 @@ export default function CreateMarketPage() {
           )}
         </div>
       )}
+        </div>
+        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          <div className="overflow-hidden rounded-[1.5rem] border border-[#2E7CF6]/20 bg-gradient-to-br from-[#2E7CF6]/[.08] to-white p-5 dark:to-[#101821]">
+            <p className="text-[11px] font-extrabold uppercase tracking-[.17em] text-[#2E7CF6]">Live preview</p>
+            <div className="mt-4 flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2E7CF6]/15 text-[#2E7CF6]"><Target className="h-4 w-4" /></span><span className="text-xs font-bold text-zinc-500">{templateId === null ? "Choose a market format" : TEMPLATE_NAMES[templateId]}</span></div>
+            <h2 className="mt-4 min-h-20 font-display text-xl font-black leading-snug">{previewTitle}</h2>
+            {templateId === TEMPLATES.TARGET && liveTargetPrice && <div className="mt-2 rounded-xl bg-white/80 p-3 text-sm dark:bg-white/[.05]"><p className="text-xs text-zinc-500">Current {selectedTeam?.symbol} spot price</p><p className="font-bold tabular-nums">${liveTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</p><p className="mt-1 text-xs text-zinc-500">{priceFeedStatus === "stale" ? "Price feed stale" : "Guide only · oracle checkpoint settles"}</p></div>}
+            {templateId === TEMPLATES.TARGET && <p className="mt-3 text-xs text-zinc-500">Result checked {formatDateTimeLocal(targetTime)}. Betting closes before that checkpoint.</p>}
+            {paramsError && step > 1 && <p className="mt-3 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">{paramsError}</p>}
+            <div className="mt-5 border-t border-black/[.08] pt-4 text-xs text-zinc-500 dark:border-white/[.08]">Created by {myProfile?.username ? `@${myProfile.username}` : creatorName || "you"}</div>
+          </div>
+          <div className="rounded-[1.5rem] border border-black/[.08] bg-white p-5 dark:border-white/[.08] dark:bg-[#101821]"><p className="flex items-center gap-2 font-bold"><Wallet className="h-4 w-4 text-[#2E7CF6]" /> Launch economics</p><div className="mt-4 flex justify-between text-sm"><span className="text-zinc-500">Pool seed</span><strong>{CREATION_SEED_TICK} TICK</strong></div><div className="mt-2 flex justify-between text-sm"><span className="text-zinc-500">Creator share</span><strong>2% of staked volume</strong></div><p className="mt-4 flex items-start gap-2 border-t border-black/[.08] pt-4 text-xs leading-5 text-zinc-500 dark:border-white/[.08]"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" /> The seed is pool liquidity, not a prediction stake. Terms are validated again by the contract.</p></div>
+        </aside>
+      </div>
     </div>
   );
 }
@@ -874,6 +903,7 @@ function TemplateParamsForm({
             placeholder="e.g. 100000"
             className={inputCls}
           />
+          {currentTargetPrice !== null && priceFeedStatus !== "stale" && <div className="mt-2 flex flex-wrap gap-2">{[-10, -5, 5, 10].map((pct) => <button key={pct} type="button" onClick={() => v.setTargetPrice(Number((currentTargetPrice * (1 + pct / 100)).toPrecision(8)).toString())} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{pct > 0 ? "+" : ""}{pct}% from spot</button>)}</div>}
         </div>
         <div>
           <label className={labelCls}>At time <span className="font-normal text-zinc-400">(earliest {formatDateTimeLocal(targetMin)})</span></label>

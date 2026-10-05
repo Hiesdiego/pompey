@@ -24,6 +24,8 @@ import { getMatchDurationMs } from "../lib/matchConfig";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
+import { MyPicksDashboard } from "../components/MyPicksDashboard";
+import { TargetCardStatus } from "../components/TargetCardStatus";
 
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
@@ -68,7 +70,7 @@ function marketQuestion(market: MarketSummary, teams: { symbol: string }[], fixt
     }
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, target, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
-      return `Will ${teams[Number(team)]?.symbol ?? `Team ${team}`} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return `Will ${teams[Number(team)]?.symbol ?? `Team ${team}`} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
     if (market.templateId === TEMPLATES.SPREAD) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), market.params as `0x${string}`);
@@ -108,7 +110,7 @@ function marketSubheading(market: MarketSummary, teams: { symbol: string }[]) {
   return `${market.outcomeCount} outcomes`;
 }
 
-function MarketCard({ market, teams, fixtures, featured = false }: { market: MarketSummary; teams: { symbol: string }[]; fixtures: ApiFixture[]; featured?: boolean }) {
+function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = false }: { market: MarketSummary; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; featured?: boolean }) {
   const total = market.outcomeTotals.reduce((a, v) => a + BigInt(v), 0n);
   const poolAmount = pool(market);
   const largest = market.outcomeTotals.reduce((best, v, i, arr) => BigInt(v) > BigInt(arr[best] ?? "0") ? i : best, 0);
@@ -152,6 +154,7 @@ function MarketCard({ market, teams, fixtures, featured = false }: { market: Mar
       </h3>
       {market.templateId !== TEMPLATES.TARGET && <p className="relative mt-2 text-sm text-zinc-500 dark:text-zinc-400">{marketSubheading(market, teams)}</p>}
       {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && <div className="relative mt-4 flex items-center gap-3"><TeamBadge teamId={targetTeamId} size={40} showName={false} showSymbol /><span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target coin</span></div>}
+      {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && market.state === 0 && <TargetCardStatus params={market.params as `0x${string}`} symbol={teams[targetTeamId]?.symbol ?? `#${targetTeamId}`} price={prices[teams[targetTeamId]?.symbol ?? ""]} fresh={priceFresh} />}
       {market.templateId === TEMPLATES.SPREAD && <SpreadFixtureBadges market={market} fixtures={fixtures} className="relative mt-4" />}
       {market.templateId === TEMPLATES.TARGET ? <div className="relative mt-5 grid grid-cols-1 gap-2.5">
         {rankedOutcomes.map(({ amount, index }) => {
@@ -201,7 +204,7 @@ function MarketCard({ market, teams, fixtures, featured = false }: { market: Mar
   );
 }
 
-function FeaturedCarousel({ markets, teams, fixtures, loading }: { markets: MarketSummary[]; teams: { symbol: string }[]; fixtures: ApiFixture[]; loading: boolean }) {
+function FeaturedCarousel({ markets, teams, fixtures, prices, priceFresh, loading }: { markets: MarketSummary[]; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; loading: boolean }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   useEffect(() => { if (markets.length < 2 || paused) return; const timer = window.setInterval(() => setIndex((i) => (i + 1) % markets.length), 7000); return () => window.clearInterval(timer); }, [markets.length, paused]);
@@ -209,7 +212,7 @@ function FeaturedCarousel({ markets, teams, fixtures, loading }: { markets: Mark
   if (!markets.length) return <div className={`${card} flex min-h-64 flex-col justify-center p-8`}><Sparkles className="h-6 w-6 text-[#2E7CF6]" /><h2 className="mt-4 font-display text-xl font-bold">No featured markets are open</h2><p className="mt-1 text-sm text-zinc-500">Top Gainer and Season Champion markets will appear here when available.</p></div>;
   const market = markets[index % markets.length];
   return <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocusCapture={() => setPaused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false); }}>
-    <MarketCard key={market.id} market={market} teams={teams} fixtures={fixtures} featured />
+    <MarketCard key={market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured />
     {markets.length > 1 && <div className="absolute bottom-5 right-6 z-10 flex items-center gap-2 sm:bottom-9 sm:right-8"><button aria-label="Previous featured market" onClick={() => setIndex((i) => (i - 1 + markets.length) % markets.length)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronLeft className="h-4 w-4" /></button><span className="min-w-10 text-center text-xs font-bold tabular-nums text-zinc-500">{index + 1} / {markets.length}</span><button aria-label="Next featured market" onClick={() => setIndex((i) => (i + 1) % markets.length)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronRight className="h-4 w-4" /></button></div>}
     <div className="mt-3 flex justify-center gap-1.5">{markets.map((m, i) => <button key={m.id} aria-label={`Show featured market ${i + 1}`} onClick={() => setIndex(i)} className={`h-1.5 rounded-full transition-all ${i === index ? "w-7 bg-[#2E7CF6]" : "w-1.5 bg-zinc-300 dark:bg-zinc-700"}`} />)}</div>
   </div>;
@@ -259,7 +262,7 @@ export default function HomePage() {
   const { markets, isLoading } = useMarkets();
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
-  const { prices } = usePriceFeed(true);
+  const { prices, status: priceStatus } = usePriceFeed(true);
   const teams = teamData ?? [];
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
   const [table, setTable] = useState<ApiTableRow[] | null>(null);
@@ -283,8 +286,9 @@ export default function HomePage() {
 
   return <div className="space-y-10 pb-14">
     <PriceTicker prices={prices} />
+    {authenticated && <MyPicksDashboard markets={markets ?? []} fixtures={fixtures} teams={teams} />}
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_350px]">
-      <section><div className="mb-4"><p className="text-[11px] font-extrabold uppercase tracking-[.2em] text-[#2E7CF6]">The market is moving</p><h1 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white sm:text-3xl">Featured markets</h1></div><FeaturedCarousel markets={featured} teams={names} fixtures={fixtures} loading={isLoading && !markets} /></section>
+      <section><div className="mb-4"><p className="text-[11px] font-extrabold uppercase tracking-[.2em] text-[#2E7CF6]">The market is moving</p><h1 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white sm:text-3xl">Featured markets</h1></div><FeaturedCarousel markets={featured} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} loading={isLoading && !markets} /></section>
       <aside className="space-y-5"><section><div className="mb-3 flex items-center justify-between">{table === null ? <div className="skeleton h-5 w-28 rounded-md" aria-hidden /> : <h2 className="font-display text-base font-bold">League table</h2>}<Link href="/standings" className="text-xs font-bold text-[#2E7CF6]">Full table</Link></div><div className={card + " overflow-hidden p-2"}>{table === null ? <LeagueTableSkeleton rows={8} compact /> : <LeagueTable rows={table} limit={8} compact />}</div></section>
         {authenticated && <Link href="/markets/create" className="group block overflow-hidden rounded-3xl bg-gradient-to-br from-[#1765dc] via-[#2E7CF6] to-[#6ea7ff] p-5 text-white shadow-lg shadow-[#2E7CF6]/20 transition hover:-translate-y-0.5"><div className="flex items-start justify-between"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-white/15"><Zap className="h-5 w-5" /></span><ArrowUpRight className="h-5 w-5 transition-transform group-hover:translate-x-1 group-hover:-translate-y-1" /></div><h3 className="mt-4 max-w-[16rem] font-display text-lg font-extrabold leading-snug">Get others to stake on your market.</h3><p className="mt-1 text-sm text-white/75">Make your call. Bring the crowd.</p><span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-[#1d5fc9]">Create a market <ArrowRight className="h-4 w-4" /></span></Link>}
         {players.length > 0 && <section><div className="mb-3 flex items-center justify-between"><h2 className="font-display text-base font-bold">Top predictors</h2><Link href="/leaderboard" className="text-xs font-bold text-[#2E7CF6]">Leaderboard</Link></div><div className={`${card} divide-y divide-black/[.05] p-2 dark:divide-white/[.06]`}>{players.map((p, i) => <Link key={p.walletAddress} href={p.username ? `/${p.username}` : `/${p.walletAddress}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-black/[.03] dark:hover:bg-white/[.04]"><span className={`w-5 text-xs font-extrabold tabular-nums ${i < 3 ? "text-[#2E7CF6]" : "text-zinc-400"}`}>{String(i + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-xs font-bold">{p.username ? `@${p.username}` : `${p.walletAddress.slice(0, 6)}…${p.walletAddress.slice(-4)}`}</span><span className="text-xs font-extrabold text-zinc-500">{p.points.toLocaleString()} pts</span></Link>)}</div></section>}</aside>
@@ -294,8 +298,8 @@ export default function HomePage() {
 
     {upcoming.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming matches" subtitle="The next fixtures on the schedule" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcoming.map((f) => <FixtureCard key={f.fixtureId} fixture={f} />)}</div></section>}
 
-    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : sorted.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sorted.slice(0, 6).map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
+    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : sorted.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sorted.slice(0, 6).map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 
-    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} />)}</div></section>}
+    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div></section>}
   </div>;
 }

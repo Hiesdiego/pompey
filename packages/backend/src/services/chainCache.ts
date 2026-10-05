@@ -30,6 +30,11 @@ import { runLoop, type LoopHandle } from "../lib/loop.js";
 import { config } from "../config.js";
 import { logger } from "../lib/logger.js";
 import { meter } from "../lib/net.js";
+import { parseAbiItem } from "viem";
+
+const MARKET_STAKED_EVENT = parseAbiItem(
+  "event MarketStaked(uint256 indexed marketId, address indexed user, uint256 outcome, uint256 amount)"
+);
 
 const FACTORY_READ_ABI = [
   {
@@ -487,8 +492,7 @@ export class ChainCache {
       const logs = await withRpcRetry(`odds(${marketId}):getLogs`, () =>
         publicClient.getLogs({
           address: this.factory,
-          abi: FACTORY_READ_ABI,
-          eventName: "MarketStaked",
+          event: MARKET_STAKED_EVENT,
           args: { marketId },
           fromBlock: from,
           toBlock: to,
@@ -519,7 +523,7 @@ export class ChainCache {
     // throws "returned no data". No stakes can predate deployment, so
     // clamping is exact, not approximate. Requires MARKET_FACTORY_DEPLOY_BLOCK
     // in the backend .env (set it on every factory redeploy).
-    const deployBlock = config.marketFactoryDeployBlock ? BigInt(config.marketFactoryDeployBlock) : 0n;
+    const deployBlock = config.social.marketFactoryDeployBlock ? BigInt(config.social.marketFactoryDeployBlock) : 0n;
     const anchoredSeedFrom = seedFrom < deployBlock ? deployBlock : seedFrom;
     let totals = Array<bigint>(outcomeCount).fill(0n);
     try {

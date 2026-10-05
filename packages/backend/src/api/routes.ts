@@ -46,6 +46,8 @@ import type { CoingeckoPoller } from "../services/coingecko.js";
 import { ChainCache, ChainApiError } from "../services/chainCache.js";
 import { scaledToPrice } from "../lib/priceMath.js";
 
+const priceHistoryCache = new Map<string, { at: number; points: Array<{ t: number; p: number }> }>();
+
 export interface HealthReport {
   status: "ok" | "degraded";
   uptimeSec: number;
@@ -302,6 +304,32 @@ export function buildRouter(deps: ApiDeps): Router {
     } catch (err) {
       logger.warn("[api] getPlayer failed", { error: String(err) });
       res.status(502).json({ error: "failed to read player stats from chain" });
+    }
+  });
+
+  router.get("/api/price-history/:symbol", async (req: Request, res: Response) => {
+    const team = TICKR_TEAMS.find((t) => t.symbol === String(req.params.symbol).toUpperCase());
+    if (!team) { res.status(404).json({ error: "unknown team" }); return; }
+    const cached = priceHistoryCache.get(team.symbol);
+    if (cached && Date.now() - cached.at < 60_000) { res.json(cached.points); return; }
+    try {
+      const url = `https://api.binance.com/api/v3/klines?symbol=${team.binanceSymbol}&interval=5m&limit=288`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) throw new Error(`history source ${response.status}`);
+      const rows = await response.json() as unknown;
+      if (!Array.isArray(rows)) throw new Error("invalid history response");
+      const points = rows.map((row) => {
+        const candle = row as unknown[];
+        return { t: Number(candle[0]), p: Number(candle[4]) };
+      }).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.p) && p.p > 0);
+      if (!points.length) throw new Error("empty history response");
+      priceHistoryCache.set(team.symbol, { at: Date.now(), points });
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json(points);
+    } catch (err) {
+      if (cached && Date.now() - cached.at < 5 * 60_000) { res.json(cached.points); return; }
+      logger.warn("[api] price history unavailable", { symbol: team.symbol, error: String(err) });
+      res.status(502).json({ error: "price history unavailable" });
     }
   });
 

@@ -210,7 +210,9 @@ class FixtureCache {
       for (let k = 0; k < chunk.length; k++) {
         const r = results[k];
         if (r.status === "success") {
-          out.push(this.toFixtureView(chunk[k], r.result));
+          // The ABI returns a Fixture tuple; multicall's broad PublicClient
+          // type erases that shape, so restore it at this contract boundary.
+          out.push(this.toFixtureView(chunk[k], r.result as Parameters<FixtureCache["toFixtureView"]>[1]));
         } else {
           logger.debug("[FixtureCache] modern read failed, trying legacy ABI", {
             fixtureId: chunk[k].toString(),

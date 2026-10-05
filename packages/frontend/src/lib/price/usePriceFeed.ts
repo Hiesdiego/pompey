@@ -33,6 +33,8 @@ export interface PriceFeed {
   status: PriceFeedStatus;
   /** ms epoch of the last successful price update, 0 if never. */
   lastUpdated: number;
+  /** Last successful quote time per symbol; used when an individual coin stops updating. */
+  updatedAt: Record<string, number>;
 }
 
 /** binanceSymbol (BTCUSDT) → team symbol (BTC). */
@@ -81,6 +83,7 @@ export function usePriceFeed(enabled = true): PriceFeed {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [status, setStatus] = useState<PriceFeedStatus>("polling");
   const [lastUpdated, setLastUpdated] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState<Record<string, number>>({});
 
   const pricesRef = useRef<Record<string, number>>({});
   const eventTimeRef = useRef<Record<string, number>>({});
@@ -127,6 +130,7 @@ export function usePriceFeed(enabled = true): PriceFeed {
       pricesRef.current = { ...pricesRef.current, [symbol]: price };
       setPrices(pricesRef.current);
       const now = Date.now();
+      setUpdatedAt((previous) => ({ ...previous, [symbol]: now }));
       lastUpdatedRef.current = now;
       setLastUpdated(now);
       noteBinanceSuccess();
@@ -143,6 +147,7 @@ export function usePriceFeed(enabled = true): PriceFeed {
       const now = Date.now();
       let touched = false;
       const next = { ...pricesRef.current };
+      const freshSymbols: string[] = [];
       for (const row of rows) {
         if (row.ok === false) continue;
         // Accept Binance-shaped rows ("BTCUSDT") and backend-shaped rows ("BTC").
@@ -152,12 +157,18 @@ export function usePriceFeed(enabled = true): PriceFeed {
         const price = Number(row.price);
         if (key && Number.isFinite(price)) {
           next[key] = price;
+          freshSymbols.push(key);
           touched = true;
         }
       }
       if (touched) {
         pricesRef.current = next;
         setPrices(next);
+        setUpdatedAt((previous) => {
+          const timestamps = { ...previous };
+          for (const symbol of freshSymbols) timestamps[symbol] = now;
+          return timestamps;
+        });
         lastUpdatedRef.current = now;
         setLastUpdated(now);
         if (markBinanceOk) noteBinanceSuccess();
@@ -300,5 +311,5 @@ export function usePriceFeed(enabled = true): PriceFeed {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  return { prices, status, lastUpdated };
+  return { prices, status, lastUpdated, updatedAt };
 }
