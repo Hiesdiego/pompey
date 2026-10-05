@@ -47,6 +47,8 @@ import { useMarkets as useCachedMarkets } from "../../lib/query/useMarkets";
 import { useFactoryEvents } from "../../lib/query/useFactoryEvents";
 import { usePriceFeed } from "../../lib/price/usePriceFeed";
 import { TargetCardStatus } from "../../components/TargetCardStatus";
+import { marketOdds, formatMarketOdds, isHighPayout } from "../../lib/marketOdds";
+import { useMarketFees } from "../../lib/query/useMarketFees";
 
 export interface MarketSummary {
   id: bigint;
@@ -69,7 +71,7 @@ export interface MarketSummary {
 type TeamRef = { teamId: number; name: string; symbol: string };
 
 function useMarkets() {
-  const { markets: summaries, error: queryError } = useCachedMarkets();
+  const { markets: summaries, error: queryError, dataUpdatedAt } = useCachedMarkets();
   useFactoryEvents();
   const markets = useMemo<MarketSummary[] | null>(() => summaries?.map((s) => ({
     id: BigInt(s.id),
@@ -87,7 +89,7 @@ function useMarkets() {
     outcomeTotals: s.outcomeTotals.map((t) => BigInt(t)),
     lastStakeAt: 0,
   })) ?? null, [summaries]);
-  return { markets, error: queryError?.message ?? null };
+  return { markets, error: queryError?.message ?? null, updatedAt: dataUpdatedAt };
 }
 
 // ── outcome identity ────────────────────────────────────────────────
@@ -253,12 +255,16 @@ function MarketCard({
   fixtures,
   prices,
   priceFresh,
+  feesBps,
+  quoteAsOf,
 }: {
   market: MarketSummary;
   teams: TeamRef[];
   fixtures: Map<string, ApiFixture>;
   prices: Record<string, number>;
   priceFresh: boolean;
+  feesBps: readonly [number, number, number] | null;
+  quoteAsOf: number;
 }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const bettingOpen = market.state === 0 && Number(market.bettingCloseTime) > nowSec;
@@ -286,6 +292,7 @@ function MarketCard({
     index,
     label: outcomeLabel(market, index, teams, fixtures),
     share: stakedTotal > 0n ? Number((total * 10_000n) / stakedTotal) / 100 : 0,
+    odds: bettingOpen && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null,
     total,
     teamId: outcomeTeamId(market, index, fixtures),
   }));
@@ -316,15 +323,20 @@ function MarketCard({
         {ranked.map(({ amount, index }) => {
           const pct = stakedTotal > 0n ? Number((amount * 10_000n) / stakedTotal) / 100 : 0;
           const leading = index === market.outcomeTotals.reduce((best, value, i, all) => value > (all[best] ?? 0n) ? i : best, 0) && stakedTotal > 0n;
-          return <div key={index} className={`min-w-0 rounded-2xl border px-4 py-3.5 ${leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}><div className="flex items-center gap-3"><span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams, fixtures)}</span><span className="ml-auto font-display text-lg font-extrabold tabular-nums text-zinc-950 dark:text-white">{pct.toFixed(0)}%</span></div><div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div></div>;
+          const odds = quickOutcomes[index].odds ?? null;
+          const high = bettingOpen && isHighPayout(odds, market.totalStaked, 10n * 10n ** 18n, amount);
+          return <div key={index} className={`min-w-0 rounded-2xl border px-4 py-3.5 ${high ? "border-amber-500/40 bg-amber-500/[.07]" : leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}><div className="flex items-center gap-3"><span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams, fixtures)}</span><span className="ml-auto text-right"><span className="block font-display text-xl font-black tabular-nums text-zinc-950 dark:text-white">{formatMarketOdds(odds)}</span>{high && <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-300">High payout</span>}</span></div><div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div></div>;
         })}
       </div> : <div className="relative mt-6 grid grid-cols-2 gap-2">
         {ranked.slice(0, 4).map(({ amount, index }) => {
           const pct = stakedTotal > 0n ? Number((amount * 10_000n) / stakedTotal) / 100 : 0;
           const leading = index === market.outcomeTotals.reduce((best, value, i, all) => value > (all[best] ?? 0n) ? i : best, 0) && stakedTotal > 0n;
-          return <div key={index} className={`min-w-0 rounded-2xl border p-3 ${leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}><div className="flex items-center gap-2.5">{(market.templateId === TEMPLATES.TOP_GAINER || market.templateId === TEMPLATES.CHAMPION) && <TeamBadge teamId={index} size={26} showName={false} />}<span className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams, fixtures)}</span><span className="ml-auto shrink-0 font-display text-sm font-extrabold tabular-nums text-zinc-950 dark:text-white">{pct.toFixed(0)}%</span></div><div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div></div>;
+          const odds = quickOutcomes[index].odds ?? null;
+          const high = bettingOpen && isHighPayout(odds, market.totalStaked, 10n * 10n ** 18n, amount);
+          return <div key={index} className={`min-w-0 rounded-2xl border p-3 ${high ? "border-amber-500/40 bg-amber-500/[.07]" : leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}><div className="flex items-center gap-2.5">{(market.templateId === TEMPLATES.TOP_GAINER || market.templateId === TEMPLATES.CHAMPION) && <TeamBadge teamId={index} size={26} showName={false} />}<span className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams, fixtures)}</span><span className="ml-auto shrink-0 text-right"><span className="block font-display text-base font-black tabular-nums text-zinc-950 dark:text-white">{formatMarketOdds(odds)}</span>{high && <span className="block text-[9px] font-bold uppercase text-amber-600 dark:text-amber-300">High payout</span>}</span></div><div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div></div>;
         })}
       </div>}
+      <p className="mt-3 text-[10px] text-zinc-500">{bettingOpen ? `Projected for 10 TICK, assuming one winner · ${quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move` : "Betting closed · no new stake quote"}</p>
       <div className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]" style={{ marginTop: 18 }}>
         <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(poolTick)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
         {bettingOpen ? <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500"><Clock className="h-3.5 w-3.5" /><Countdown target={Number(market.bettingCloseTime) * 1000} /></div> : <span className="text-xs font-semibold text-zinc-500">View market</span>}
@@ -346,6 +358,7 @@ function MarketCard({
         outcomeTotals={market.outcomeTotals}
         totalStaked={market.totalStaked}
         seedAmount={market.seedAmount}
+        feesBps={feesBps}
         onClose={() => setQuickPick(null)}
       />
     </div>
@@ -353,7 +366,8 @@ function MarketCard({
 }
 
 export default function MarketsPage() {
-  const { markets, error } = useMarkets();
+  const { markets, error, updatedAt } = useMarkets();
+  const { feesBps } = useMarketFees();
   const { teams } = useTeams();
   const { playerAddress } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
@@ -514,7 +528,7 @@ export default function MarketsPage() {
         />
       ) : tab === "bounty" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}
+          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />)}
         </div>
       ) : (
         <div role="tabpanel">
@@ -526,7 +540,7 @@ export default function MarketsPage() {
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featured.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />
+                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}
               </div>
             </section>
@@ -542,7 +556,7 @@ export default function MarketsPage() {
             {community.length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {community.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />
+                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}
               </div>
             ) : (

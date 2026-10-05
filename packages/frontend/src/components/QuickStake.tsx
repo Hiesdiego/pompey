@@ -8,9 +8,9 @@
  * detail page: approve-if-needed → stake, both gas-sponsored via
  * useContractWrite.
  *
- * Odds shown are implied probabilities (share of the pool), same math as
- * the detail page's OddsBoard. Estimated payout mirrors PredictionPool:
- *   payout ≈ a · (T + a) · (1 − fee) / (w + a)
+ * MarketFactory chips show a seed-aware, post-fee 10 TICK projection.
+ * The sheet recalculates for the entered stake; match pools use their own
+ * fee rule and show no chip quote before the pool is loaded.
  */
 
 "use client";
@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, ShieldCheck, X, Zap } from "lucide-react";
 import type { Address } from "viem";
+import { marketOdds, formatMarketOdds } from "../lib/marketOdds";
 import { PLATFORM_FEE_BPS } from "@tickr/shared/constants";
 import {
   CONTRACTS,
@@ -66,14 +67,11 @@ export type QuickStakeVariant = "factory" | "match";
 export interface QuickStakeOutcome {
   index: number;
   label: string;
-  /** 0–100 implied probability (share of staked pool). */
+  /** 0–100 share of staked volume, used only for the thin pool bar. */
   share: number;
+  odds?: number | null;
   total: bigint;
   teamId: number | null;
-}
-
-function oddsOf(share: number): string {
-  return share > 0 ? `${(100 / share).toFixed(2)}×` : "—";
 }
 
 /** Estimated payout if the picked outcome wins (detail-page formula). */
@@ -81,16 +79,12 @@ function potentialWin(
   amountTick: number,
   outcomeTotal: bigint,
   totalStaked: bigint,
-  seedAmount: bigint
+  seedAmount: bigint,
+  feesBps: readonly [number, number, number] | null
 ): { win: number; multiple: number } {
-  if (amountTick <= 0) return { win: 0, multiple: 0 };
-  const A = BigInt(Math.round(amountTick * 1e18));
-  const newTo = outcomeTotal + A;
-  if (newTo === 0n) return { win: 0, multiple: 0 };
-  const feeMultiplier = 10_000n - BigInt(PLATFORM_FEE_BPS);
-  const payoutPool = ((totalStaked + A) * feeMultiplier) / 10_000n + seedAmount;
-  const win = Number((A * payoutPool) / newTo) / 1e18;
-  return { win, multiple: win / amountTick };
+  if (amountTick <= 0 || !feesBps) return { win: 0, multiple: 0 };
+  const quote = marketOdds({ stake: BigInt(Math.round(amountTick * 1e18)), sideStaked: outcomeTotal, totalStaked, seed: seedAmount, feesBps });
+  return quote ? { win: Number(quote.payout) / 1e18, multiple: quote.multiplier } : { win: 0, multiple: 0 };
 }
 
 // ── the sheet ───────────────────────────────────────────────────────
@@ -102,6 +96,7 @@ export function QuickStakeSheet({
   outcomeTotals,
   totalStaked,
   seedAmount,
+  feesBps = null,
   variant = "factory",
   onClose,
 }: {
@@ -112,6 +107,7 @@ export function QuickStakeSheet({
   outcomeTotals: bigint[];
   totalStaked: bigint;
   seedAmount: bigint;
+  feesBps?: readonly [number, number, number] | null;
   variant?: QuickStakeVariant;
   onClose: () => void;
 }) {
@@ -149,15 +145,17 @@ export function QuickStakeSheet({
   const needsApproval = amountWei > 0n && (allowance === null || allowance < amountWei);
   const balanceOk = balance === null || amountWei <= balance;
   const minTick = variant === "match" ? MIN_STAKE_TICK : FACTORY_MIN_STAKE_TICK;
-  const valid = amountNum >= minTick && balanceOk;
+  const valid = amountNum >= minTick && balanceOk && (variant === "match" || feesBps !== null);
   const balanceTick = balance !== null ? Number(balance) / 1e18 : null;
 
   const est = useMemo(
     () =>
       outcome
-        ? potentialWin(amountNum, outcome.total, totalStaked, seedAmount)
+        ? variant === "match"
+          ? (() => { const stake = BigInt(Math.round(amountNum * 1e18)); const side = (outcomeTotals[outcome.index] ?? 0n) + stake; if (stake <= 0n || side <= 0n) return { win: 0, multiple: 0 }; const pool = (totalStaked + stake + seedAmount) * BigInt(10_000 - PLATFORM_FEE_BPS) / 10_000n; const win = Number(stake * pool / side) / 1e18; return { win, multiple: win / amountNum }; })()
+          : potentialWin(amountNum, outcomeTotals[outcome.index] ?? 0n, totalStaked, seedAmount, feesBps)
         : { win: 0, multiple: 0 },
-    [amountNum, outcome, totalStaked, seedAmount]
+    [amountNum, outcome, outcomeTotals, totalStaked, seedAmount, feesBps, variant]
   );
 
   async function submit() {
@@ -325,15 +323,15 @@ export function QuickStakeSheet({
                 )}
                 <div className="min-w-0">
                   <div className="truncate font-display text-base font-extrabold">{outcome.label}</div>
-                  <div className="text-xs text-zinc-500 dark:text-white/50">Implied odds</div>
+                  <div className="text-xs text-zinc-500 dark:text-white/50">Projected payout odds</div>
                 </div>
               </div>
               <div className="ml-3 text-right">
                 <div className="font-display text-2xl font-black tabular-nums text-[#1D4ED8] dark:text-[#75aaff]">
-                  {outcome.share.toFixed(1)}%
+                  {formatMarketOdds(est.multiple > 0 ? est.multiple : null)}
                 </div>
                 <div className="text-[10px] font-bold tabular-nums text-zinc-500">
-                  {oddsOf(outcome.share)}
+                  {amountNum > 0 ? `For ${amountNum} TICK` : "Enter a stake"} · includes fees and seed
                 </div>
               </div>
             </div>
@@ -421,12 +419,14 @@ export function QuickStakeSheet({
                     )}
                   </span>
                 </div>
+                <p className="mt-2 text-[11px] text-zinc-500">Projection at the latest pool snapshot. Final odds can move before betting closes; multi-winner results may pay less.</p>
 
                 {!balanceOk && (
                   <p className="mt-3 rounded-xl bg-amber-500/[.07] px-4 py-2.5 text-xs font-semibold text-amber-600 dark:text-amber-400">
                     Not enough TICK. Grab some from the faucet in the header.
                   </p>
                 )}
+                {variant === "factory" && !feesBps && <p className="mt-3 text-xs font-semibold text-amber-600 dark:text-amber-300">Fetching current market fees before staking…</p>}
                 {amountNum > 0 && amountNum < minTick && (
                   <p className="mt-3 rounded-xl bg-amber-500/[.07] px-4 py-2.5 text-xs font-semibold text-amber-600 dark:text-amber-400">
                     Minimum stake is {minTick} TICK.
@@ -510,7 +510,7 @@ export function QuickStakeChips({
             "hover:border-[#2E7CF6] hover:bg-[#2E7CF6]/15 hover:text-[#1D4ED8]",
             "dark:border-[#2E7CF6]/30 dark:bg-[#2E7CF6]/10 dark:text-zinc-200 dark:hover:border-[#2E7CF6] dark:hover:text-[#7db3ff]"
           )}
-          title={`Quick-stake on ${o.label} — ${oddsOf(o.share)}`}
+          title={`Quick-stake on ${o.label}${o.odds != null ? ` — projected ${formatMarketOdds(o.odds)} for 10 TICK` : ""}`}
         >
           {o.teamId !== null ? (
             <TeamBadge teamId={o.teamId} size={16} showName={false} />
@@ -519,7 +519,7 @@ export function QuickStakeChips({
           )}
           <span className="max-w-20 truncate">{o.label}</span>
           <span className="font-display tabular-nums text-[#2E7CF6] dark:text-[#7db3ff]">
-            {oddsOf(o.share)}
+            {o.odds == null ? "Pick" : formatMarketOdds(o.odds)}
           </span>
         </button>
       ))}

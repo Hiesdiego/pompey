@@ -19,12 +19,11 @@ export type PredictionStatusFilter = "all" | "open" | "settled";
 export type MarketState = "open" | "resolved" | "voided";
 
 export interface SocialProfileStats {
-  predictions: number;
-  settled: number;
-  wins: number;
-  winRateBps: number;
-  pnlTick: string; // raw 18-decimal integer units
-  rank: number | null;
+  marketsBacked: number;
+  openMarkets: number;
+  resolvedMarkets: number;
+  voidedMarkets: number;
+  marketsCreated: number;
 }
 
 export interface SocialProfile {
@@ -51,7 +50,7 @@ export interface SocialPrediction {
   templateId: number;
   params: string; // 0x hex abi-encoded template params
   outcome: number;
-  amountTick: string; // raw 18-decimal integer units
+  amountTick: string | null; // private; null on public profile views
   oddsBps: number | null; // implied win probability (bps) at stake time
   status: MarketState;
   won: boolean | null;
@@ -79,28 +78,24 @@ export interface PnlPoint {
 
 export interface TemplateWinRate {
   templateId: number;
-  wins: number;
-  settled: number;
-}
-
-export interface CalibrationBucket {
-  bucketBps: number;
-  predictedBps: number;
-  actualBps: number;
-  n: number;
+  profitable: number;
+  resolved: number;
 }
 
 export interface SocialAnalytics {
+  netPnlTick: string;
+  volumeTick: string;
+  resolvedStakeTick: string;
+  openStakeTick: string;
+  resolvedMarkets: number;
+  profitableMarkets: number;
+  incompleteSettlements: number;
+  undatedSettlements: number;
+  bestMarketTick: string | null;
+  worstMarketTick: string | null;
   pnlCurve: PnlPoint[];
-  winRateByTemplate: TemplateWinRate[];
-  calibration: CalibrationBucket[];
-  currentStreak: number;
-  bestStreak: number;
-  bestWinTick: string; // raw 18-decimal integer units
-  worstLossTick: string; // raw 18-decimal integer units
-  volumeTick: string; // raw 18-decimal integer units
-  avgOddsBps: number | null;
-  settled: number;
+  byTemplate: TemplateWinRate[];
+  recentResults: Array<{ marketId: string; templateId: number; stakeTick: string; netTick: string; resolvedAt: string }>;
 }
 
 export interface LeaderboardRow {
@@ -223,10 +218,13 @@ export const social = {
     username: string,
     status: PredictionStatusFilter = "all",
     limit = 25,
-    cursor?: number | null
+    cursor?: number | null,
+    getToken?: TokenGetter
   ) =>
-    get<PageResult<SocialPrediction>>(
-      `/api/social/profiles/${encodeURIComponent(username)}/predictions?status=${status}&limit=${limit}${cursor != null ? `&cursor=${cursor}` : ""}`
+    request<PageResult<SocialPrediction>>(
+      `/api/social/profiles/${encodeURIComponent(username)}/predictions?status=${status}&limit=${limit}${cursor != null ? `&cursor=${cursor}` : ""}`,
+      undefined,
+      getToken
     ),
 
   /** Paginated created markets for a username. */

@@ -26,6 +26,9 @@ import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
 import { MyPicksDashboard } from "../components/MyPicksDashboard";
 import { TargetCardStatus } from "../components/TargetCardStatus";
+import { marketOdds, formatMarketOdds, isHighPayout } from "../lib/marketOdds";
+import { useMarketFees } from "../lib/query/useMarketFees";
+import { useFactoryEvents } from "../lib/query/useFactoryEvents";
 
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
@@ -111,6 +114,8 @@ function marketSubheading(market: MarketSummary, teams: { symbol: string }[]) {
 }
 
 function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = false }: { market: MarketSummary; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; featured?: boolean }) {
+  const { feesBps } = useMarketFees();
+  const { dataUpdatedAt: quoteAsOf } = useMarkets();
   const total = market.outcomeTotals.reduce((a, v) => a + BigInt(v), 0n);
   const poolAmount = pool(market);
   const largest = market.outcomeTotals.reduce((best, v, i, arr) => BigInt(v) > BigInt(arr[best] ?? "0") ? i : best, 0);
@@ -134,6 +139,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
       index,
       label: outcomeLabel(market, index, teams),
       share: total_ > 0n ? Number((BigInt(amount) * 10_000n) / total_) / 100 : 0,
+      odds: feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: BigInt(amount), totalStaked: BigInt(market.totalStaked), seed: BigInt(market.seedAmount), feesBps })?.multiplier ?? null : null,
       total: BigInt(amount),
       teamId,
     };
@@ -163,7 +169,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
           return <div key={index} className={`min-w-0 rounded-2xl border px-4 py-3.5 ${leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}>
             <div className="flex items-center gap-3">
               <span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams)}</span>
-              <span className="ml-auto font-display text-lg font-extrabold tabular-nums text-zinc-950 dark:text-white">{pct.toFixed(0)}%</span>
+              <span className="ml-auto text-right"><span className="block font-display text-xl font-black tabular-nums text-zinc-950 dark:text-white">{formatMarketOdds(quickOutcomes[index].odds ?? null)}</span>{open(market) && isHighPayout(quickOutcomes[index].odds ?? null, BigInt(market.totalStaked), 10n * 10n ** 18n, BigInt(amount)) && <span className="block text-[10px] font-bold uppercase text-amber-600 dark:text-amber-300">High payout</span>}</span>
             </div>
             <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div>
           </div>;
@@ -176,12 +182,13 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
             <div className="flex items-center gap-2.5">
               {(market.templateId === TEMPLATES.TOP_GAINER || market.templateId === TEMPLATES.CHAMPION) && <TeamBadge teamId={index} size={26} showName={false} />}
               <span className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100">{outcomeLabel(market, index, teams)}</span>
-              <span className="ml-auto shrink-0 font-display text-sm font-extrabold tabular-nums text-zinc-950 dark:text-white">{pct.toFixed(0)}%</span>
+              <span className="ml-auto shrink-0 text-right"><span className="block font-display text-base font-black tabular-nums text-zinc-950 dark:text-white">{formatMarketOdds(quickOutcomes[index].odds ?? null)}</span>{open(market) && isHighPayout(quickOutcomes[index].odds ?? null, BigInt(market.totalStaked), 10n * 10n ** 18n, BigInt(amount)) && <span className="block text-[9px] font-bold uppercase text-amber-600 dark:text-amber-300">High payout</span>}</span>
             </div>
             <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div>
           </div>;
         })}
       </div>}
+      <p className="mt-3 text-[10px] text-zinc-500">Projected for 10 TICK, assuming one winner · {quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move</p>
       <div className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]" style={{ marginTop: featured ? 24 : 18 }}>
         <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(poolAmount)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
         {open(market) ? <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500"><Clock3 className="h-3.5 w-3.5" /><Countdown target={closeTime} /></div> : <span className="text-xs font-semibold text-zinc-500">View market</span>}
@@ -198,6 +205,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
         outcomeTotals={market.outcomeTotals.map((v) => BigInt(v))}
         totalStaked={BigInt(market.totalStaked)}
         seedAmount={BigInt(market.seedAmount)}
+        feesBps={feesBps}
         onClose={() => setQuickPick(null)}
       />
     </div>
@@ -259,6 +267,7 @@ function LiveFixtureCard({ fixture, prices }: { fixture: ApiFixture; prices: Rec
 }
 
 export default function HomePage() {
+  useFactoryEvents();
   const { markets, isLoading } = useMarkets();
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();

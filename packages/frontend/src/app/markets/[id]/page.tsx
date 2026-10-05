@@ -72,6 +72,8 @@ import { formatTick } from "../../../lib/format";
 import { TargetTracker } from "../../../components/TargetTracker";
 import { TargetSettlementReplay } from "../../../components/TargetSettlementReplay";
 import { WatchButton } from "../../../components/WatchButton";
+import { marketOdds, formatMarketOdds, isHighPayout } from "../../../lib/marketOdds";
+import { useMarketFees } from "../../../lib/query/useMarketFees";
 
 interface MarketDetail {
   id: bigint;
@@ -268,7 +270,7 @@ function describeMarket(
 
 /**
  * Estimated payout for staking `amountTick` on an outcome right now.
- * Winners share 94% of all stakes plus 100% of the seed.
+ * Winners share post-fee stakes plus 100% of the seed.
  * Display-only estimate — the real payout is computed on-chain at settlement.
  */
 function potentialWin(
@@ -276,17 +278,12 @@ function potentialWin(
   outcomeIdx: number,
   outcomeTotals: bigint[],
   totalStaked: bigint,
-  seedAmount: bigint
+  seedAmount: bigint,
+  feesBps: readonly [number, number, number] | null
 ): { win: number; multiple: number } {
-  if (amountTick <= 0) return { win: 0, multiple: 0 };
-  const A = BigInt(Math.round(amountTick * 1e18));
-  const To = outcomeTotals[outcomeIdx] ?? 0n;
-  const newTo = To + A;
-  if (newTo === 0n) return { win: 0, multiple: 0 };
-  const payoutPool = ((totalStaked + A) * 94n) / 100n + seedAmount;
-  const winWei = (A * payoutPool) / newTo;
-  const win = Number(winWei) / 1e18;
-  return { win, multiple: win / amountTick };
+  if (amountTick <= 0 || !feesBps) return { win: 0, multiple: 0 };
+  const quote = marketOdds({ stake: BigInt(Math.round(amountTick * 1e18)), sideStaked: outcomeTotals[outcomeIdx] ?? 0n, totalStaked, seed: seedAmount, feesBps });
+  return quote ? { win: Number(quote.payout) / 1e18, multiple: quote.multiplier } : { win: 0, multiple: 0 };
 }
 
 function StatePill({
@@ -349,7 +346,8 @@ export default function MarketDetailPage() {
   const { write, writeBatch, status } = useContractWrite();
   const { balance } = useTickBalance(address ?? null);
 
-  const { market: summary, isLoading: marketLoading, error: marketError } = useMarket(id);
+  const { market: summary, isLoading: marketLoading, error: marketError, dataUpdatedAt: marketUpdatedAt } = useMarket(id);
+  const { feesBps } = useMarketFees();
   useFactoryEvents();
   const market: MarketDetail | null = useMemo(() => summary ? {
     id: BigInt(summary.id), templateId: summary.templateId, creator: summary.creator,
@@ -433,6 +431,10 @@ export default function MarketDetailPage() {
     outcomeTotals && stakedTotal > 0n
       ? outcomeTotals.reduce((best, v, i, vs) => (v > (vs[best] ?? 0n) ? i : best), 0)
       : 0;
+  const referenceStake = 10n * 10n ** 18n;
+  const projectedOdds = outcomeTotals?.map((total) => bettingOpen && feesBps ? marketOdds({ stake: referenceStake, sideStaked: total, totalStaked: market?.totalStaked ?? 0n, seed: market?.seedAmount ?? 0n, feesBps })?.multiplier ?? null : null) ?? [];
+  const highPayoutIndex = market && bettingOpen ? projectedOdds.reduce<number | null>((best, odds, index) => isHighPayout(odds, market.totalStaked, referenceStake, outcomeTotals?.[index] ?? 0n) && (best === null || odds! > (projectedOdds[best] ?? 0)) ? index : best, null) : null;
+  const featuredIndex = highPayoutIndex ?? leadingIndex;
 
   async function handleStake() {
     if (!market || !address || !publicClient || stakeSel === null) return;
@@ -620,6 +622,8 @@ export default function MarketDetailPage() {
           {/* ── Odds board ── */}
           <OddsBoard
             market={market}
+            feesBps={feesBps}
+            quoteAsOf={marketUpdatedAt}
             outcomeTotals={outcomeTotals}
             outcomeLabels={outcomeLabels}
             teams={teams ?? []}
@@ -638,6 +642,7 @@ export default function MarketDetailPage() {
           {userStakes && userStakes.some((s) => s > 0n) && (
             <PositionPanel
               market={market}
+              feesBps={feesBps}
               outcomeTotals={outcomeTotals}
               outcomeLabels={outcomeLabels}
               teams={teams ?? []}
@@ -711,29 +716,29 @@ export default function MarketDetailPage() {
           <div className="glass relative z-20 mb-6 self-start rounded-2xl p-5 lg:sticky lg:top-4">
             <div className="text-center">
               <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-                {stakedTotal > 0n ? "Leading" : "No stakes yet"}
+                {highPayoutIndex !== null ? "High payout" : "Featured outcome"}
               </div>
-              {stakedTotal > 0n ? (
+              {bettingOpen && feesBps ? (
                 <>
                   <div className="mt-1 font-display text-4xl font-black tabular-nums text-zinc-900 dark:text-white">
-                    {(Number((outcomeTotals[leadingIndex] ?? 0n) * 10_000n / stakedTotal) / 100).toFixed(1)}%
+                    {formatMarketOdds(projectedOdds[featuredIndex])}
                   </div>
                   <div className="mt-1 flex items-center justify-center gap-2 text-sm font-bold">
                     {(() => {
-                      const tid = outcomeTeamId(market, leadingIndex, fixtures);
+                      const tid = outcomeTeamId(market, featuredIndex, fixtures);
                       return tid !== null ? <TeamBadge teamId={tid} size={22} showName={false} /> : null;
                     })()}
-                    {outcomeLabels[leadingIndex]}
+                    {outcomeLabels[featuredIndex]} · for 10 TICK
                   </div>
                 </>
               ) : (
                 <div className="mt-1 font-display text-lg font-extrabold text-zinc-500">
-                  Pool shares change as people stake
+                  {bettingOpen ? "Odds loading" : market.state === 0 ? "Betting closed" : "Market settled"}
                 </div>
               )}
             </div>
             <button
-              onClick={() => bettingOpen && setStakeSel(leadingIndex)}
+              onClick={() => bettingOpen && setStakeSel(featuredIndex)}
               disabled={!bettingOpen}
               className="gradient-cta mt-5 w-full rounded-2xl py-4 font-display text-lg font-extrabold text-white shadow-[0_0_24px_rgba(46,124,246,0.45)] transition-all hover:shadow-[0_0_36px_rgba(46,124,246,0.65)] active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
             >
@@ -753,6 +758,7 @@ export default function MarketDetailPage() {
       {/* ── Stake modal ── */}
       <StakeModal
         market={market}
+        feesBps={feesBps}
         outcomeTotals={outcomeTotals}
         outcomeLabels={outcomeLabels}
         teams={teams ?? []}
@@ -780,19 +786,19 @@ export default function MarketDetailPage() {
             <div className="mx-auto flex max-w-5xl items-center gap-3 px-4">
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-                  {stakedTotal > 0n ? "Leading" : "No stakes yet"}
+                  {highPayoutIndex !== null ? "High payout" : "Featured outcome"}
                 </div>
                 <div className="truncate font-display text-sm font-extrabold">
-                  {stakedTotal > 0n && (
+                  {bettingOpen && feesBps && (
                     <span className="tabular-nums text-[#1D4ED8] dark:text-[#75aaff]">
-                      {(Number((outcomeTotals[leadingIndex] ?? 0n) * 10_000n / stakedTotal) / 100).toFixed(1)}%{" "}
+                      {formatMarketOdds(projectedOdds[featuredIndex])}{" "}
                     </span>
                   )}
-                  {outcomeLabels[leadingIndex]}
+                  {outcomeLabels[featuredIndex]}
                 </div>
               </div>
               <button
-                onClick={() => setStakeSel(leadingIndex)}
+                onClick={() => setStakeSel(featuredIndex)}
                 className="gradient-cta shrink-0 rounded-xl px-6 py-2.5 font-display text-sm font-extrabold text-white shadow-[0_0_20px_rgba(46,124,246,0.45)] active:scale-[0.98]"
               >
                 Stake
@@ -812,6 +818,9 @@ function OutcomeRow({
   label,
   total,
   share,
+  odds,
+  highPayout,
+  marketState,
   teamId,
   userStake,
   selectable,
@@ -822,6 +831,9 @@ function OutcomeRow({
   label: string;
   total: bigint;
   share: number;
+  odds: number | null;
+  highPayout: boolean;
+  marketState: number;
   teamId: number | null;
   userStake: bigint;
   selectable: boolean;
@@ -829,6 +841,7 @@ function OutcomeRow({
   isWinner: boolean;
 }) {
   const animated = useAnimatedValue(share);
+  const animatedOdds = useAnimatedValue(odds ?? 0);
   return (
     <button
       onClick={onSelect}
@@ -872,10 +885,9 @@ function OutcomeRow({
           </div>
         </div>
         <div className="text-right">
-          <div className="font-display text-2xl font-black tabular-nums text-zinc-900 dark:text-white">
-            {animated.toFixed(1)}<span className="text-sm text-zinc-400">%</span>
-          </div>
-          <div className="text-[11px] font-bold tabular-nums text-zinc-500">{share > 0 ? `${(100 / share).toFixed(2)}×` : "—"} odds</div>
+          <div className="font-display text-2xl font-black tabular-nums text-zinc-900 dark:text-white">{odds === null ? "—" : formatMarketOdds(animatedOdds)}</div>
+          <div className="text-[11px] font-bold tabular-nums text-zinc-500">{marketState === 1 ? "Final payout odds" : marketState === 2 ? "Stake refundable" : selectable ? "Projected for 10 TICK" : "Betting closed"}</div>
+          {highPayout && <div className="text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-300">High payout</div>}
           {selectable && (
             <div className="text-[11px] font-bold text-[#2E7CF6] opacity-0 transition-opacity group-hover:opacity-100">
               Tap to stake →
@@ -900,6 +912,8 @@ function OutcomeRow({
 
 function OddsBoard({
   market,
+  feesBps,
+  quoteAsOf,
   outcomeTotals,
   outcomeLabels,
   teams,
@@ -911,6 +925,8 @@ function OddsBoard({
   selectable,
 }: {
   market: MarketDetail;
+  feesBps: readonly [number, number, number] | null;
+  quoteAsOf: number;
   outcomeTotals: bigint[];
   outcomeLabels: string[];
   teams: TeamRef[];
@@ -952,9 +968,10 @@ function OddsBoard({
       </div>
       {stakedTotal === 0n && (
         <p className="mb-4 rounded-xl bg-amber-500/[.07] px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-          No stakes yet — the displayed pool shares will change as people stake.
+          No stakes yet. These first-staker quotes include the creation seed.
         </p>
       )}
+      <p className="mb-4 text-xs text-zinc-500">{market.state === 0 ? selectable ? `Projected payout after fees and seed, assuming one winning outcome. Quote refreshed ${quoteAsOf ? new Date(quoteAsOf).toLocaleTimeString() : "soon"}; final odds can move.` : "Betting closed. New stake quotes are unavailable." : market.state === 1 ? "Final payout multiplier for each winning outcome." : "Voided market: stakes are refundable."}</p>
       <div className="space-y-3">
         {visible.map((r) => (
           <OutcomeRow
@@ -963,6 +980,9 @@ function OddsBoard({
             label={outcomeLabels[r.i] ?? `Outcome ${r.i}`}
             total={r.total}
             share={r.share}
+            odds={market.state === 1 ? winnerIndex.includes(r.i) ? Number(market.payoutPerShare) / 1e18 : null : selectable && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: r.total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null}
+            highPayout={selectable && isHighPayout(market.state === 0 && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: r.total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null, market.totalStaked, 10n * 10n ** 18n, r.total)}
+            marketState={market.state}
             teamId={r.teamId}
             userStake={userStakes?.[r.i] ?? 0n}
             selectable={selectable}
@@ -988,6 +1008,7 @@ function OddsBoard({
 
 function PositionPanel({
   market,
+  feesBps,
   outcomeTotals,
   outcomeLabels,
   teams,
@@ -995,6 +1016,7 @@ function PositionPanel({
   userStakes,
 }: {
   market: MarketDetail;
+  feesBps: readonly [number, number, number] | null;
   outcomeTotals: bigint[];
   outcomeLabels: string[];
   teams: TeamRef[];
@@ -1007,8 +1029,12 @@ function PositionPanel({
     .filter((r) => r.s > 0n)
     .map((r) => {
       const To = outcomeTotals[r.i] ?? 0n;
-      const payoutPool = (stakedTotal * 94n) / 100n + market.seedAmount;
-      const win = To > 0n ? Number((r.s * payoutPool) / To) / 1e18 : 0;
+      const fees = feesBps ? feesBps.reduce((sum, fee) => sum + stakedTotal * BigInt(fee) / 10_000n, 0n) : null;
+      const payoutPool = fees === null ? null : stakedTotal - fees + market.seedAmount;
+      const payout = market.state === 2 ? r.s : market.state === 1
+        ? ((market.winnerBitmap & (1n << BigInt(r.i))) !== 0n ? r.s * market.payoutPerShare / 10n ** 18n : 0n)
+        : payoutPool !== null && To > 0n ? r.s * (payoutPool * 10n ** 18n / To) / 10n ** 18n : null;
+      const win = payout === null ? null : Number(payout) / 1e18;
       return { ...r, win };
     });
   if (!rows.length) return null;
@@ -1034,9 +1060,9 @@ function PositionPanel({
                 <div className="text-xs text-zinc-500">{formatTick(r.s)} TICK staked</div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Wins →</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{market.state === 2 ? "Refund" : "Wins →"}</div>
                 <div className="font-display text-base font-extrabold tabular-nums text-emerald-500">
-                  {formatTick(BigInt(Math.round(r.win * 1e18)))} TICK
+                  {r.win === null ? "—" : `${formatTick(BigInt(Math.round(r.win * 1e18)))} TICK`}
                 </div>
               </div>
             </div>
@@ -1044,7 +1070,7 @@ function PositionPanel({
         })}
       </div>
       <p className="px-6 py-3 text-[11px] text-zinc-400">
-        Est. payout if this outcome wins — final amounts are settled on-chain (94% of stakes + full seed, split pro-rata).
+        {market.state === 2 ? "Voided market: the full stake is refundable." : market.state === 1 ? "Final payout from the on-chain settlement." : "Projected payout at the current pool, after fees and with the full seed. Final odds may move; multiple winning outcomes share the payout."}
       </p>
     </div>
   );
@@ -1066,6 +1092,7 @@ function quickChipClass(active: boolean): string {
 
 function StakeModal({
   market,
+  feesBps,
   outcomeTotals,
   outcomeLabels,
   teams,
@@ -1081,6 +1108,7 @@ function StakeModal({
   onConfirm,
 }: {
   market: MarketDetail;
+  feesBps: readonly [number, number, number] | null;
   outcomeTotals: bigint[];
   outcomeLabels: string[];
   teams: TeamRef[];
@@ -1097,15 +1125,13 @@ function StakeModal({
 }) {
   if (outcome === null) return null;
 
-  const stakedTotal = outcomeTotals.reduce((s, v) => s + v, 0n);
   const amountNum = Number(amount) || 0;
-  const { win, multiple } = potentialWin(amountNum, outcome, outcomeTotals, market.totalStaked, market.seedAmount);
-  const valid = amountNum >= FACTORY_MIN_STAKE_TICK && (balance === null || BigInt(Math.round(amountNum * 1e18)) <= balance);
+  const { win, multiple } = potentialWin(amountNum, outcome, outcomeTotals, market.totalStaked, market.seedAmount, feesBps);
+  const valid = feesBps !== null && amountNum >= FACTORY_MIN_STAKE_TICK && (balance === null || BigInt(Math.round(amountNum * 1e18)) <= balance);
   const label = outcomeLabels[outcome] ?? `Outcome ${outcome}`;
   const balanceTick = balance !== null ? Number(balance) / 1e18 : 0;
   const question = describeMarket(market, teams, fixtures);
 
-  const selectedShare = stakedTotal > 0n ? Number(((outcomeTotals[outcome] ?? 0n) * 10_000n) / stakedTotal) / 100 : 0;
   const selectedTeamId = outcomeTeamId(market, outcome, fixtures);
 
   return (
@@ -1138,11 +1164,12 @@ function StakeModal({
             <div className="mt-3 flex items-center justify-between rounded-xl border border-[#2E7CF6]/30 bg-[#2E7CF6]/10 px-3 py-2.5">
               <div className="flex min-w-0 items-center gap-3">
                 {selectedTeamId !== null && <TeamBadge teamId={selectedTeamId} size={34} showName={false} />}
-                <div className="min-w-0"><div className="truncate font-display text-base font-extrabold">{label}</div><div className="text-xs text-zinc-500 dark:text-white/50">Current implied odds</div></div>
+                <div className="min-w-0"><div className="truncate font-display text-base font-extrabold">{label}</div><div className="text-xs text-zinc-500 dark:text-white/50">Projected payout odds</div></div>
               </div>
-              <div className="ml-3 font-display text-2xl font-black tabular-nums text-[#1D4ED8] dark:text-[#75aaff]">{selectedShare.toFixed(1)}%</div>
+              <div className="ml-3 font-display text-2xl font-black tabular-nums text-[#1D4ED8] dark:text-[#75aaff]">{formatMarketOdds(multiple > 0 ? multiple : null)}</div>
             </div>
             <button onClick={onClose} className="mt-1 text-xs font-bold text-[#1D4ED8] hover:underline dark:text-[#75aaff]">Choose a different outcome</button>
+            {!feesBps && <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-300">Fetching current market fees before staking…</p>}
 
             <div className="mt-3">
               <div className="mb-2 flex items-center justify-between">
@@ -1195,9 +1222,10 @@ function StakeModal({
               </div>
               {win > 0 && (
                 <div className="mt-1 text-sm font-extrabold text-emerald-500">
-                  +{((multiple - 1) * 100).toFixed(0)}% · {multiple.toFixed(2)}× your stake
+                  {multiple >= 1 ? "+" : ""}{((multiple - 1) * 100).toFixed(0)}% · {formatMarketOdds(multiple)} your stake
                 </div>
               )}
+              <p className="mt-2 text-[11px] text-zinc-500">Includes your stake, the seed and current contract fees. Final odds may move; tied winning outcomes share the pool.</p>
             </div>
 
               <button

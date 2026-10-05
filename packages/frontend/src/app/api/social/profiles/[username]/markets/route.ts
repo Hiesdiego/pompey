@@ -6,6 +6,7 @@
 
 import { dbOr503 } from "../../../_shared";
 import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
+import { currentSeasonId } from "@/lib/seasonServer";
 
 export const revalidate = 60;
 export const runtime = "nodejs";
@@ -27,6 +28,7 @@ export async function GET(
     .maybeSingle();
   if (!hit) return Response.json({ error: "not_found" }, { status: 404 });
   const wallet = (hit as { wallet_address: string }).wallet_address;
+  const season = await currentSeasonId();
 
   const sp = new URL(req.url).searchParams;
   const status = sp.get("status") ?? "all";
@@ -39,6 +41,7 @@ export async function GET(
       "market_id, template_id, params, creator_name, state, betting_close_time, end_time"
     )
     .eq("chain_id", ACTIVE_CHAIN_ID)
+    .eq("season_id", season)
     .eq("creator", wallet)
     .order("market_id", { ascending: false })
     .limit(limit + 1);

@@ -6,8 +6,10 @@
 
 import { dbOr503 } from "../../../_shared";
 import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
+import { requireLinkedWallet } from "@/lib/privyServer";
+import { currentSeasonId } from "@/lib/seasonServer";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(
@@ -27,6 +29,8 @@ export async function GET(
     .maybeSingle();
   if (!hit) return Response.json({ error: "not_found" }, { status: 404 });
   const wallet = (hit as { wallet_address: string }).wallet_address;
+  const owner = req.headers.has("authorization") && (await requireLinkedWallet(req, wallet)).ok;
+  const season = await currentSeasonId();
 
   const sp = new URL(req.url).searchParams;
   const status = sp.get("status") ?? "all";
@@ -39,6 +43,7 @@ export async function GET(
       "id, market_id, outcome, amount_tick, odds_bps, pnl_tick, won, block_timestamp, template_id, markets!inner(state, params, creator_name)"
     )
     .eq("chain_id", ACTIVE_CHAIN_ID)
+    .eq("season_id", season)
     .eq("staker", wallet)
     .order("id", { ascending: false })
     .limit(limit + 1);
@@ -75,11 +80,11 @@ export async function GET(
       templateId: s.template_id,
       params: s.markets.params,
       outcome: s.outcome,
-      amountTick: String(s.amount_tick),
-      oddsBps: s.odds_bps,
+      amountTick: owner ? String(s.amount_tick) : null,
+      oddsBps: owner ? s.odds_bps : null,
       status: s.markets.state,
       won: s.won,
-      pnlTick: s.pnl_tick === null ? null : String(s.pnl_tick),
+      pnlTick: owner && s.pnl_tick !== null ? String(s.pnl_tick) : null,
       stakedAt: s.block_timestamp,
       creatorName: s.markets.creator_name,
     })),

@@ -77,7 +77,7 @@ export function marketQuestion(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         paramsHex as `0x${string}`
       );
-      return `Will ${teamSymbol(teams, team)} finish ${above ? "above" : "below"} $${(
+      return `Will ${teamSymbol(teams, team)} finish ${above ? "at or above" : "at or below"} $${(
         Number(price) / 1e8
       ).toLocaleString()}?`;
     }

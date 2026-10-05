@@ -7,6 +7,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabaseServer";
 import { currentSeasonId } from "@/lib/seasonServer";
+import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
 
 /** Returns { db } or { response } (503 when Supabase isn't configured). */
 export function dbOr503(): { db: SupabaseClient } | { response: Response } {
@@ -21,12 +22,11 @@ export interface ProfileDto {
   favouriteTeamId: number;
   bio: string;
   stats: {
-    predictions: number;
-    settled: number;
-    wins: number;
-    winRateBps: number;
-    pnlTick: string;
-    rank: number | null;
+    marketsBacked: number;
+    openMarkets: number;
+    resolvedMarkets: number;
+    voidedMarkets: number;
+    marketsCreated: number;
   };
   seasonId: number;
 }
@@ -42,8 +42,10 @@ interface ProfileRow {
 
 /**
  * Public profile DTO + raw row for a wallet address (lowercase). Null when
- * the wallet has no profile. Stats come from user_season_stats for the
- * current season; rank is the dense PnL rank within that season.
+ * the wallet has no profile. Counts come from indexed market rows in the
+ * current season, so repeated
+ * stakes in one market count as one backed market. Financial data stays in
+ * the owner-only analytics endpoint.
  */
 export async function profileWithStats(
   db: SupabaseClient,
@@ -52,35 +54,39 @@ export async function profileWithStats(
   const wallet = walletAddress.toLowerCase();
   const season = await currentSeasonId();
 
-  const { data: p } = await db
+  const { data: p, error: profileError } = await db
     .from("profiles")
     .select(
       "wallet_address, username, username_set_season, favourite_team_id, favourite_team_set_season, bio"
     )
     .eq("wallet_address", wallet)
     .maybeSingle();
+  if (profileError) throw new Error(`profile query failed: ${profileError.message}`);
   if (!p) return null;
   const row = p as ProfileRow;
 
-  const { data: s } = await db
-    .from("user_season_stats")
-    .select("predictions, settled, wins, pnl_tick")
-    .eq("wallet_address", wallet)
-    .eq("season_id", season)
-    .maybeSingle();
-
-  let rank: number | null = null;
-  if (s) {
-    const { count } = await db
-      .from("user_season_stats")
-      .select("wallet_address", { count: "exact", head: true })
+  const states = new Map<string, string>();
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await db.from("stakes")
+      .select("market_id, markets!inner(state)")
+      .eq("chain_id", ACTIVE_CHAIN_ID)
       .eq("season_id", season)
-      .gt("pnl_tick", String(s.pnl_tick ?? "0"));
-    rank = (count ?? 0) + 1;
+      .eq("staker", wallet)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw new Error(`profile stakes query failed: ${error.message}`);
+    const rows = (data ?? []) as unknown as Array<{ market_id: number | string; markets: { state: string } }>;
+    for (const stake of rows) states.set(String(stake.market_id), stake.markets.state);
+    if (rows.length < pageSize) break;
   }
-
-  const settled = Number(s?.settled ?? 0);
-  const wins = Number(s?.wins ?? 0);
+  const { count: marketsCreated, error: marketsError } = await db.from("markets")
+    .select("market_id", { count: "exact", head: true })
+    .eq("chain_id", ACTIVE_CHAIN_ID)
+    .eq("season_id", season)
+    .eq("creator", wallet);
+  if (marketsError) throw new Error(`profile markets query failed: ${marketsError.message}`);
+  const stateValues = [...states.values()];
 
   return {
     dto: {
@@ -89,12 +95,11 @@ export async function profileWithStats(
       favouriteTeamId: row.favourite_team_id,
       bio: row.bio ?? "",
       stats: {
-        predictions: Number(s?.predictions ?? 0),
-        settled,
-        wins,
-        winRateBps: settled > 0 ? Math.round((wins / settled) * 10000) : 0,
-        pnlTick: String(s?.pnl_tick ?? "0"),
-        rank,
+        marketsBacked: states.size,
+        openMarkets: stateValues.filter((state) => state === "open").length,
+        resolvedMarkets: stateValues.filter((state) => state === "resolved").length,
+        voidedMarkets: stateValues.filter((state) => state === "voided").length,
+        marketsCreated: marketsCreated ?? 0,
       },
       seasonId: season,
     },

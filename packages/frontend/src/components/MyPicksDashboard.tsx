@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { ArrowRight, Clock3, ListChecks, Wallet } from "lucide-react";
 import { useMyProfile } from "../hooks/useMyProfile";
@@ -23,6 +24,7 @@ export function MyPicksDashboard({ markets, fixtures, teams }: {
   teams: Array<{ teamId: number; symbol: string }>;
 }) {
   const { authenticated, playerAddress } = useTickr();
+  const { getAccessToken } = usePrivy();
   const { profile } = useMyProfile();
   const { notices, entries } = useWatchlist();
   const [predictions, setPredictions] = useState<SocialPrediction[]>([]);
@@ -33,11 +35,11 @@ export function MyPicksDashboard({ markets, fixtures, teams }: {
   useEffect(() => {
     if (!profile?.username) { setPredictions([]); return; }
     let alive = true;
-    const load = () => social.predictions(profile.username, "all", 100).then((r) => { if (alive) setPredictions(r.items); }).catch(() => {});
+    const load = () => social.predictions(profile.username, "all", 100, undefined, getAccessToken).then((r) => { if (alive) setPredictions(r.items); }).catch(() => {});
     void load();
     const timer = window.setInterval(load, 30_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [profile?.username]);
+  }, [profile?.username, getAccessToken]);
 
   const relevant = useMemo(() => fixtures.filter((f) => {
     const time = Date.parse(f.kickoff ?? f.scheduledKickoff ?? "");
@@ -72,10 +74,10 @@ export function MyPicksDashboard({ markets, fixtures, teams }: {
       let firstId: number | null = null;
       byMarket.forEach(({ id, market }, i) => {
         if (!market || results[i]?.status !== "success" || results[i].result === true) return;
-        const positions = predictions.filter((p) => p.marketId === id);
+        const positions = predictions.filter((p) => p.marketId === id && p.amountTick !== null);
         const value = market.state === 2
-          ? positions.reduce((sum, p) => sum + BigInt(p.amountTick), 0n)
-          : positions.reduce((sum, p) => (BigInt(market.winnerBitmap) & (1n << BigInt(p.outcome))) !== 0n ? sum + BigInt(p.amountTick) * BigInt(market.payoutPerShare) / 10n ** 18n : sum, 0n);
+          ? positions.reduce((sum, p) => sum + BigInt(p.amountTick!), 0n)
+          : positions.reduce((sum, p) => (BigInt(market.winnerBitmap) & (1n << BigInt(p.outcome))) !== 0n ? sum + BigInt(p.amountTick!) * BigInt(market.payoutPerShare) / 10n ** 18n : sum, 0n);
         if (value > 0n) { count++; amount += value; firstId ??= id; }
       });
       if (alive) setClaimable({ count, amount, firstId });
@@ -92,7 +94,7 @@ export function MyPicksDashboard({ markets, fixtures, teams }: {
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[11px] font-extrabold uppercase tracking-[.2em] text-[#2E7CF6]">Your matchday</p><h2 className="mt-1 font-display text-2xl font-black">Your picks today</h2><p className="mt-1 text-xs text-zinc-500">Markets and fixtures you have joined, with live closing and settlement status.</p></div><Link href="/watchlist" className="rounded-xl border border-[#2E7CF6]/30 px-3 py-2 text-xs font-bold text-[#2E7CF6]">Watchlist · {entries.length}{notices.length ? ` · ${notices.length} updates` : ""}</Link></div>
     <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">{[["Open markets", active.length], ["Upcoming fixtures", nextFixture.length], ["Recent claims", claimable.count]].map(([label, count]) => <div key={label} className="rounded-2xl bg-white/90 p-3 dark:bg-white/[.05]"><p className="text-[11px] text-zinc-500">{label}</p><p className="mt-1 font-display text-2xl font-black tabular-nums">{count}</p></div>)}</div>
     {claimable.amount > 0n && <Link href={`/markets/${claimable.firstId}`} className="mt-3 flex items-center justify-between rounded-xl bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-700 dark:text-emerald-300"><span>{formatTick(claimable.amount)} TICK ready to claim from recent market picks</span><ArrowRight className="h-4 w-4" /></Link>}
-    <div className="mt-5 grid gap-3 md:grid-cols-2">{active.slice(0, 3).map(({ prediction, market }) => { if (!market) return null; const terms = market.templateId === TEMPLATES.TARGET ? decodeTargetTerms(market.params as `0x${string}`) : null; const symbol = teams.find((t) => t.teamId === terms?.teamId)?.symbol; return <Link key={prediction.marketId} href={`/markets/${prediction.marketId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]"><div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">{TEMPLATE_NAMES[market.templateId] ?? "Market"} #{market.id}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div><p className="mt-2 font-bold">{terms && symbol ? `${symbol} ${terms.above ? "≥" : "≤"} ${formatUsd(terms.target)}` : `Your pick: outcome ${prediction.outcome + 1}`}</p><p className="mt-2 flex items-center gap-1 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Closes {new Date(market.bettingCloseTime * 1000).toLocaleString()} · {formatTick(BigInt(prediction.amountTick))} TICK staked</p></Link>; })}{nextFixture.slice(0, 2).map(({ fixture, stakes }) => <Link key={fixture.fixtureId} href={`/match/${fixture.fixtureId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]"><div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">Fixture #{fixture.fixtureId}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div><p className="mt-2 font-bold">{fixture.home?.symbol ?? "TBA"} vs {fixture.away?.symbol ?? "TBA"}</p><p className="mt-2 text-xs text-zinc-500">{stakes.map((s, i) => s > 0n ? `${["Home", "Draw", "Away"][i]} ${formatTick(s)} TICK` : "").filter(Boolean).join(" · ")}</p></Link>)}</div>
+    <div className="mt-5 grid gap-3 md:grid-cols-2">{active.slice(0, 3).map(({ prediction, market }) => { if (!market) return null; const terms = market.templateId === TEMPLATES.TARGET ? decodeTargetTerms(market.params as `0x${string}`) : null; const symbol = teams.find((t) => t.teamId === terms?.teamId)?.symbol; return <Link key={prediction.marketId} href={`/markets/${prediction.marketId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]"><div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">{TEMPLATE_NAMES[market.templateId] ?? "Market"} #{market.id}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div><p className="mt-2 font-bold">{terms && symbol ? `${symbol} ${terms.above ? "≥" : "≤"} ${formatUsd(terms.target)}` : `Your pick: outcome ${prediction.outcome + 1}`}</p><p className="mt-2 flex items-center gap-1 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Closes {new Date(market.bettingCloseTime * 1000).toLocaleString()}{prediction.amountTick !== null ? ` · ${formatTick(BigInt(prediction.amountTick))} TICK staked` : ""}</p></Link>; })}{nextFixture.slice(0, 2).map(({ fixture, stakes }) => <Link key={fixture.fixtureId} href={`/match/${fixture.fixtureId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]"><div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">Fixture #{fixture.fixtureId}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div><p className="mt-2 font-bold">{fixture.home?.symbol ?? "TBA"} vs {fixture.away?.symbol ?? "TBA"}</p><p className="mt-2 text-xs text-zinc-500">{stakes.map((s, i) => s > 0n ? `${["Home", "Draw", "Away"][i]} ${formatTick(s)} TICK` : "").filter(Boolean).join(" · ")}</p></Link>)}</div>
     {loaded && !active.length && !fixturePicks.length && <p className="mt-5 flex items-center gap-2 text-sm text-zinc-500"><ListChecks className="h-4 w-4" /> No picks in the current window. <Link href="/markets" className="font-bold text-[#2E7CF6]">Explore markets</Link></p>}
     <div className="mt-5 flex flex-wrap gap-3 border-t border-black/[.08] pt-4 text-xs font-bold dark:border-white/[.08]"><Link href="/claims" className="inline-flex items-center gap-1 text-[#2E7CF6]"><Wallet className="h-4 w-4" /> Check claimable payouts <ArrowRight className="h-3 w-3" /></Link>{profile?.username && <Link href={`/${profile.username}`} className="text-zinc-500">Full prediction record →</Link>}</div>
   </section>;
