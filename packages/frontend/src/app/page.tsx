@@ -144,6 +144,9 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
       teamId,
     };
   });
+  const hasHighPayout = isOpen && quickOutcomes.some((outcome) =>
+    isHighPayout(outcome.odds ?? null, BigInt(market.totalStaked), 10n * 10n ** 18n, outcome.total)
+  );
 
   // Chips are buttons, so they sit outside the <Link> (invalid nesting
   // otherwise); the wrapper carries `group` for hover reveal.
@@ -162,7 +165,8 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
       {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && <div className="relative mt-4 flex items-center gap-3"><TeamBadge teamId={targetTeamId} size={40} showName={false} showSymbol /><span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target coin</span></div>}
       {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && market.state === 0 && <TargetCardStatus params={market.params as `0x${string}`} symbol={teams[targetTeamId]?.symbol ?? `#${targetTeamId}`} price={prices[teams[targetTeamId]?.symbol ?? ""]} fresh={priceFresh} />}
       {market.templateId === TEMPLATES.SPREAD && <SpreadFixtureBadges market={market} fixtures={fixtures} className="relative mt-4" />}
-      {market.templateId === TEMPLATES.TARGET ? <div className="relative mt-5 grid grid-cols-1 gap-2.5">
+      {hasHighPayout && <span className="relative mt-3 w-fit rounded-full bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300 sm:hidden">High payout available</span>}
+      {market.templateId === TEMPLATES.TARGET ? <div className="relative mt-5 hidden grid-cols-1 gap-2.5 sm:grid">
         {rankedOutcomes.map(({ amount, index }) => {
           const pct = total ? Number(BigInt(amount) * 10000n / total) / 100 : 0;
           const leading = index === largest && total > 0n;
@@ -174,7 +178,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
             <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div>
           </div>;
         })}
-      </div> : <div className={`relative mt-6 grid gap-2 ${featured ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2"}`}>
+      </div> : <div className={`relative mt-6 hidden gap-2 sm:grid ${featured ? "sm:grid-cols-4" : "sm:grid-cols-2"}`}>
         {rankedOutcomes.slice(0, featured ? 8 : 4).map(({ amount, index }) => {
           const pct = total ? Number(BigInt(amount) * 10000n / total) / 100 : 0;
           const leading = index === largest && total > 0n;
@@ -188,14 +192,15 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
           </div>;
         })}
       </div>}
-      <p className="mt-3 text-[10px] text-zinc-500">Projected for 10 TICK, assuming one winner · {quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move</p>
+      <p className="mt-3 hidden text-[10px] text-zinc-500 sm:block">Projected for 10 TICK, assuming one winner · {quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move</p>
       <div className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]" style={{ marginTop: featured ? 24 : 18 }}>
         <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(poolAmount)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
         {open(market) ? <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500"><Clock3 className="h-3.5 w-3.5" /><Countdown target={closeTime} /></div> : <span className="text-xs font-semibold text-zinc-500">View market</span>}
-        <span className="grid h-9 w-9 place-items-center rounded-full bg-[#2E7CF6] text-white transition-transform group-hover:translate-x-1"><ArrowUpRight className="h-4 w-4" /></span>
+        <span className="hidden h-9 w-9 place-items-center rounded-full bg-[#2E7CF6] text-white transition-transform group-hover:translate-x-1 sm:grid"><ArrowUpRight className="h-4 w-4" /></span>
       </div>
+      <span className="mt-4 flex items-center justify-between rounded-xl bg-[#2E7CF6]/10 px-4 py-2.5 text-sm font-bold text-[#1D4ED8] dark:text-[#8ab8ff] sm:hidden">{isOpen ? "View odds" : "View market"} <ArrowUpRight className="h-4 w-4" /></span>
     </Link>
-      <div className="relative -mt-2 px-1 pb-1">
+      <div className="relative -mt-2 hidden px-1 pb-1 sm:block">
         <QuickStakeChips outcomes={quickOutcomes} bettingOpen={isOpen} onPick={setQuickPick} />
       </div>
       <QuickStakeSheet
