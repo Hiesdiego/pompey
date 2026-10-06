@@ -14,12 +14,17 @@ export function getPublicClient(): PublicClient {
   const rpcUrl =
     env === "mainnet"
       ? process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org"
-      : process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
-  const publicFallback = env === "mainnet" ? "https://base-rpc.publicnode.com" : "https://base-sepolia-rpc.publicnode.com";
+      : process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL ?? "https://base-sepolia-rpc.publicnode.com";
+  const publicFallbacks = env === "mainnet"
+    ? ["https://base-rpc.publicnode.com"]
+    : ["https://base-sepolia-rpc.publicnode.com", "https://base-sepolia.drpc.org"];
   const configured = env === "mainnet"
     ? process.env.NEXT_PUBLIC_BASE_MAINNET_FALLBACK_RPC_URLS
     : process.env.NEXT_PUBLIC_BASE_SEPOLIA_FALLBACK_RPC_URLS;
-  const urls = [...new Set([rpcUrl, ...(configured ?? "").split(",").map((url) => url.trim()).filter(Boolean), publicFallback])];
+  // The legacy public Base Sepolia endpoint now returns 401 for some requests.
+  // Ignore it even when an older deployment still has it in its environment.
+  const urls = [...new Set([rpcUrl, ...(configured ?? "").split(",").map((url) => url.trim()).filter(Boolean), ...publicFallbacks])]
+    .filter((url) => { try { return new URL(url).hostname !== "sepolia.base.org"; } catch { return false; } });
   singleton = createPublicClient({
     // @tickr/shared and the frontend may resolve separate viem patch versions;
     // the runtime chain shape is identical.

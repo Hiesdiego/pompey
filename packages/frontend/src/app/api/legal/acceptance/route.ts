@@ -25,9 +25,9 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await authenticate(req);
   if ("response" in auth) return auth.response;
-  let body: { terms?: boolean; privacy?: boolean; version?: string };
+  let body: { terms?: boolean; privacy?: boolean; adult?: boolean; eligibleLocation?: boolean; version?: string };
   try { body = await req.json(); } catch { return Response.json({ error: "invalid_body" }, { status: 400 }); }
-  if (body.terms !== true || body.privacy !== true || body.version !== LEGAL_VERSION) {
+  if (body.terms !== true || body.privacy !== true || body.adult !== true || body.eligibleLocation !== true || body.version !== LEGAL_VERSION) {
     return Response.json({ error: "acceptance_required" }, { status: 400 });
   }
   (await cookies()).set(LEGAL_COOKIE, createLegalCookie(auth.userId, auth.secret), {

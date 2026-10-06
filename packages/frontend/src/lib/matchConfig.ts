@@ -33,16 +33,13 @@ export function initMatchDuration(): Promise<void> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
-      const { createPublicClient, http, parseAbi } = await import("viem");
-      const { baseSepolia } = await import("viem/chains");
+      const { parseAbi } = await import("viem");
+      const { getPublicClient } = await import("../hooks/usePublicClient");
       const address = process.env.NEXT_PUBLIC_MATCH_REGISTRY_ADDRESS as
         | `0x${string}`
         | undefined;
       if (!address) return;
-      const client = createPublicClient({
-        chain: baseSepolia,
-        transport: http("https://sepolia.base.org"),
-      });
+      const client = getPublicClient();
       const secs = await client.readContract({
         address,
         abi: parseAbi([

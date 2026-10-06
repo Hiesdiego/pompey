@@ -53,7 +53,7 @@ export const config = {
     .filter(Boolean),
 
   chainEnv: optional("TICKR_CHAIN_ENV", "testnet") as "testnet" | "mainnet",
-  baseSepoliaRpcUrl: optional("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org"),
+  baseSepoliaRpcUrl: optional("BASE_SEPOLIA_RPC_URL", "https://base-sepolia-rpc.publicnode.com"),
   baseMainnetRpcUrl: optional("BASE_MAINNET_RPC_URL", "https://mainnet.base.org"),
   /** Optional RPC endpoints, in priority order. Empty entries are ignored. */
   fallbackRpcUrls: ["FALLBACK_RPC_URL", ...Array.from({ length: 7 }, (_, i) => `FALLBACK_RPC_URL_${i + 2}`)]

@@ -34,6 +34,6 @@ export async function GET(req: Request) {
   }
   const scores = calculatePredictorRanks(stakes);
   const own = scores.find((score) => score.wallet === wallet);
-  return Response.json({ season, rank: own?.rank ?? null, participants: scores.length, points: own?.points ?? 0,
+  return Response.json({ season, rank: own?.rank ?? null, points: own?.points ?? 0,
     correct: own?.correct ?? 0, settled: own?.settled ?? 0 }, { headers: { "Cache-Control": "no-store" } });
 }

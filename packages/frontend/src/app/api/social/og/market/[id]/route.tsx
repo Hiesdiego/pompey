@@ -10,13 +10,11 @@
 
 import { ImageResponse } from "next/og";
 import {
-  createPublicClient,
-  http,
   parseAbi,
   decodeAbiParameters,
   parseAbiParameters,
 } from "viem";
-import { baseSepolia } from "viem/chains";
+import { getPublicClient } from "@/hooks/usePublicClient";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
   OG_WIDTH,
@@ -166,10 +164,7 @@ async function renderMarketCard({ id }: { id: string }) {
     return fallbackMarketCard("TICKR Market");
   }
 
-  const client = createPublicClient({
-    chain: baseSepolia,
-    transport: http("https://sepolia.base.org", { timeout: 5000, retryCount: 0 }),
-  });
+  const client = getPublicClient();
 
   // A non-existent market reverts — render the fallback card, not a 500.
   const reads = await Promise.all([

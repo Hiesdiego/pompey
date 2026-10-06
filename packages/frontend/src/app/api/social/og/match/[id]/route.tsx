@@ -9,8 +9,8 @@
  */
 
 import { ImageResponse } from "next/og";
-import { createPublicClient, http, parseAbi } from "viem";
-import { baseSepolia } from "viem/chains";
+import { parseAbi } from "viem";
+import { getPublicClient } from "@/hooks/usePublicClient";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
   OG_WIDTH,
@@ -161,10 +161,7 @@ async function renderMatchCard({ id }: { id: string }) {
   let score: [number, number] | null = null;
   if (settled && PRICE_ORACLE) {
     try {
-      const client = createPublicClient({
-        chain: baseSepolia,
-        transport: http("https://sepolia.base.org", { timeout: 5000, retryCount: 0 }),
-      });
+      const client = getPublicClient();
       const snap = await client.readContract({
         address: PRICE_ORACLE,
         abi: SNAPSHOT_ABI,

@@ -7,6 +7,7 @@
 import { dbOr503 } from "../../../_shared";
 import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
 import { currentSeasonId } from "@/lib/seasonServer";
+import { integerString } from "@/lib/integerString";
 
 export const revalidate = 60;
 export const runtime = "nodejs";
@@ -87,7 +88,7 @@ export async function GET(
     }>) {
       const id = Number(s.market_id);
       totals.set(id, {
-        staked: String(s.total_staked_tick ?? "0"),
+        staked: integerString(s.total_staked_tick) ?? "0",
         bettors: Number(s.bettors) || 0,
       });
     }

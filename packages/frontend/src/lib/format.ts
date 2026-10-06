@@ -5,11 +5,14 @@
 import { formatUnits, parseUnits } from "viem";
 import { TICK_DECIMALS } from "./contracts";
 import { OUTCOME } from "@tickr/shared/constants";
+import { integerString } from "./integerString";
 
 /** "1234.56" from 18-decimal TICK wei. */
 export function formatTick(wei: bigint | string | null | undefined, digits = 2): string {
   if (wei === null || wei === undefined) return "—";
-  const v = typeof wei === "string" ? BigInt(wei) : wei;
+  const normalized = typeof wei === "string" ? integerString(wei) : null;
+  if (typeof wei === "string" && normalized === null) return "—";
+  const v = typeof wei === "string" ? BigInt(normalized!) : wei;
   const s = formatUnits(v, TICK_DECIMALS);
   const n = Number(s);
   if (!Number.isFinite(n)) return s;

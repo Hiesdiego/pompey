@@ -4,8 +4,8 @@
  */
 
 import type { Metadata } from "next";
-import { createPublicClient, http, parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
-import { baseSepolia } from "viem/chains";
+import { parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
+import { getPublicClient } from "../../../hooks/usePublicClient";
 import { isNumericId, siteUrl } from "../../api/social/og/_shared";
 
 const FACTORY_ABI = parseAbi([
@@ -16,10 +16,7 @@ async function marketQuestion(marketId: bigint): Promise<string | null> {
   try {
     const factory = process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS as `0x${string}`;
     if (!factory) return null;
-    const client = createPublicClient({
-      chain: baseSepolia,
-      transport: http("https://sepolia.base.org"),
-    });
+    const client = getPublicClient();
     const info = await client.readContract({
       address: factory,
       abi: FACTORY_ABI,

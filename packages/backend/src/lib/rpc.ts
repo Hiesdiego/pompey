@@ -52,7 +52,9 @@ let sharedTransport: Transport | null = null;
 /** Build (once) the resilient transport every client in the backend shares. */
 function getSharedTransport(): Transport {
   if (sharedTransport) return sharedTransport;
-  const urls = [...new Set([primaryRpcUrl(), ...config.fallbackRpcUrls])];
+  const urls = [...new Set([primaryRpcUrl(), ...config.fallbackRpcUrls,
+    config.chainEnv === "mainnet" ? "https://base-rpc.publicnode.com" : "https://base-sepolia-rpc.publicnode.com"])]
+    .filter((url) => config.chainEnv === "mainnet" || new URL(url).hostname !== "sepolia.base.org");
   const transports = urls.map((url) => http(url, {
       batch: true,
       timeout: RPC_TIMEOUT_MS,

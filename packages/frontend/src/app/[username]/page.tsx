@@ -17,6 +17,7 @@ import { TEMPLATE_NAMES } from "../../lib/marketFactory";
 import { TeamBadge } from "../../components/TeamBadge";
 import { ProfileInsights } from "../../components/ProfileInsights";
 import { formatTick, OUTCOME_SHORT, truncateAddress } from "../../lib/format";
+import { integerBigInt } from "../../lib/integerString";
 
 type Tab = "activity" | "fixtures" | "created" | "insights";
 const surface = "overflow-hidden rounded-[1.5rem] border border-black/[.08] bg-white dark:border-white/[.09] dark:bg-[#101821]";
@@ -29,7 +30,7 @@ function date(value: string | null | undefined) {
 }
 
 function signedTick(value: string) {
-  const raw = BigInt(value);
+  const raw = integerBigInt(value);
   return `${raw > 0n ? "+" : raw < 0n ? "−" : ""}${formatTick(raw < 0n ? -raw : raw)}`;
 }
 
@@ -79,7 +80,7 @@ function MarketActivity({ username, owner, teams, fixtures }: { username: string
     <SectionIntro title="Market activity" detail="Each row is a stake event. One market can appear more than once when several outcomes were backed." />
     {loading ? <p className="px-4 pb-8 text-sm text-zinc-500 sm:px-6">Loading market activity…</p> : error && !rows.length ? <p className="px-4 pb-8 text-sm text-red-500 sm:px-6">{error}</p> : !rows.length ? <p className="px-4 pb-8 text-sm text-zinc-500 sm:px-6">No market stakes indexed for this season.</p> : <div className={divider}>{rows.map((row) => <Link key={row.stakeId} href={`/markets/${row.marketId}`} className="flex min-w-0 flex-col gap-3 px-4 py-4 transition hover:bg-black/[.025] dark:hover:bg-white/[.025] sm:flex-row sm:items-center sm:gap-4 sm:px-6">
       <div className="min-w-0 flex-1"><p className="mb-1 text-[11px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">{TEMPLATE_NAMES[row.templateId] ?? "Market"} · #{row.marketId}</p><p className="font-semibold leading-snug [overflow-wrap:anywhere]">{marketQuestion(row.templateId, row.params, teams, fixtures)}</p><p className="mt-1 text-xs text-zinc-500 [overflow-wrap:anywhere]">Picked {pickLabel(row.templateId, row.outcome, row.params, teams, fixtures)} · {date(row.stakedAt)}</p></div>
-      <div className="flex min-w-0 items-center justify-between gap-3 sm:justify-end"><div className="min-w-0 text-left sm:text-right">{owner && row.amountTick !== null && <p className="break-words text-sm font-bold tabular-nums">{formatTick(row.amountTick)} TICK</p>}{owner && row.pnlTick !== null && <p className={`break-words text-xs font-semibold tabular-nums ${BigInt(row.pnlTick) >= 0n ? "text-emerald-600" : "text-red-500"}`}>{signedTick(row.pnlTick)} TICK result</p>}</div><StateLabel state={row.status} /><ArrowUpRight className="h-4 w-4 shrink-0 text-zinc-400" /></div>
+      <div className="flex min-w-0 items-center justify-between gap-3 sm:justify-end"><div className="min-w-0 text-left sm:text-right">{owner && row.amountTick !== null && <p className="break-words text-sm font-bold tabular-nums">{formatTick(row.amountTick)} TICK</p>}{owner && row.pnlTick !== null && <p className={`break-words text-xs font-semibold tabular-nums ${integerBigInt(row.pnlTick) >= 0n ? "text-emerald-600" : "text-red-500"}`}>{signedTick(row.pnlTick)} TICK result</p>}</div><StateLabel state={row.status} /><ArrowUpRight className="h-4 w-4 shrink-0 text-zinc-400" /></div>
     </Link>)}</div>}
     {error && rows.length > 0 && <p className="px-6 py-3 text-sm text-red-500">{error}</p>}
     {cursor !== null && <button type="button" onClick={loadMore} disabled={moreLoading} className="w-full border-t border-black/[.06] px-5 py-4 text-sm font-bold text-blue-600 transition hover:bg-black/[.025] disabled:opacity-50 dark:border-white/[.07]">{moreLoading ? "Loading…" : "Load more activity"}</button>}
@@ -182,7 +183,7 @@ export default function ProfilePage() {
   const [analytics, setAnalytics] = useState<SocialAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
-  const [rank, setRank] = useState<{ rank: number | null; participants: number; points: number; correct: number; settled: number } | null>(null);
+  const [rank, setRank] = useState<{ rank: number | null; points: number; correct: number; settled: number } | null>(null);
   const [rankError, setRankError] = useState(false);
   const owner = !!profile && !!playerAddress && profile.walletAddress.toLowerCase() === playerAddress.toLowerCase();
   const teamRefs = useMemo<TeamRef[]>(() => teams.map(({ teamId, symbol, name }) => ({ teamId, symbol, name })), [teams]);
@@ -244,7 +245,7 @@ export default function ProfilePage() {
         <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{profile.bio || (owner ? "Add a bio to tell other players about yourself." : "No bio yet.")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-500"><span className="font-mono text-xs">{truncateAddress(profile.walletAddress)}</span>{displayTeam && <span className="inline-flex items-center gap-1.5"><TeamBadge teamId={displayTeam.teamId} size={18} showName={false} />{displayTeam.name}</span>}<span>{SEASON_DISPLAY_NAME}</span></div>
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">{stats.map((stat) => <span key={stat.label} title={stat.help}><strong className="font-black tabular-nums">{stat.value.toLocaleString()}</strong> <span className="text-zinc-500">{stat.label.toLowerCase()}</span></span>)}</div>
-        {owner && <div className="mt-5 min-w-0 rounded-2xl bg-blue-500/[.07] p-4 text-sm dark:bg-blue-500/[.12]"><p className="text-xs font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">Your private predictor rank</p><p className="mt-1 font-display text-2xl font-black [overflow-wrap:anywhere]">{rankError ? "Unavailable" : rank ? rank.rank ? `#${rank.rank}` : "Unranked" : "Checking…"}<span className="ml-2 inline-block text-sm font-medium text-zinc-500">{rank ? `of ${rank.participants} players` : ""}</span></p><p className="mt-1 text-xs text-zinc-500 [overflow-wrap:anywhere]">{rankError ? "Your rank could not be loaded. Try refreshing this page." : rank ? `${rank.points} points · ${rank.correct} correct of ${rank.settled} settled markets` : "One market counts once; a correct pick earns 3 points."}</p></div>}
+        {owner && <div className="mt-5 min-w-0 rounded-2xl bg-blue-500/[.07] p-4 text-sm dark:bg-blue-500/[.12]"><p className="text-xs font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">Your private predictor rank</p><p className="mt-1 font-display text-2xl font-black [overflow-wrap:anywhere]">{rankError ? "Unavailable" : rank ? rank.rank ? `Ranked no.${rank.rank}` : "Unranked" : "Checking…"}</p><p className="mt-1 text-xs text-zinc-500 [overflow-wrap:anywhere]">{rankError ? "Your rank could not be loaded. Try refreshing this page." : rank ? `${rank.points} points · ${rank.correct} correct of ${rank.settled} settled markets` : "One market counts once; a correct pick earns 3 points."}</p></div>}
       </div>
     </header>
     <nav className={`grid border-x border-b border-black/[.08] bg-white dark:border-white/[.08] dark:bg-[#101821] ${owner ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`} aria-label="Profile sections">{tabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? "page" : undefined} className={`min-w-0 border-b-4 px-2 py-3 text-center text-xs font-bold leading-tight transition sm:px-4 sm:py-4 sm:text-sm ${tab === item.id ? "border-blue-500 text-zinc-950 dark:text-white" : "border-transparent text-zinc-500 hover:bg-black/[.03] dark:hover:bg-white/[.03]"}`}>{item.id === "insights" && <LockKeyhole className="mr-1 inline h-3.5 w-3.5" />}{item.label}</button>)}</nav>

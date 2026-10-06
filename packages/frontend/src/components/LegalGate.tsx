@@ -15,6 +15,8 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GateState>("checking");
   const [terms, setTerms] = useState(false);
   const [privacy, setPrivacy] = useState(false);
+  const [adult, setAdult] = useState(false);
+  const [eligibleLocation, setEligibleLocation] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -30,7 +32,7 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready || !authenticated || !user?.id) { setState("checking"); return; }
     let active = true;
-    setState("checking"); setTerms(false); setPrivacy(false); setMessage("");
+    setState("checking"); setTerms(false); setPrivacy(false); setAdult(false); setEligibleLocation(false); setMessage("");
     void check().then((accepted) => { if (active) setState(accepted ? "accepted" : "required"); })
       .catch(() => { if (active) { setState("error"); setMessage("Could not check your agreement. Try again."); } });
     return () => { active = false; };
@@ -42,14 +44,14 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
   if (state === "accepted") return children;
 
   const accept = async () => {
-    if (!terms || !privacy || saving) return;
+    if (!terms || !privacy || !adult || !eligibleLocation || saving) return;
     setSaving(true); setMessage("");
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("Your session could not be verified.");
       const response = await fetch("/api/legal/acceptance", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ terms, privacy, version: LEGAL_VERSION }),
+        body: JSON.stringify({ terms, privacy, adult, eligibleLocation, version: LEGAL_VERSION }),
       });
       if (!response.ok) throw new Error("Could not save your agreement. Try again.");
       setState("accepted");
@@ -66,9 +68,11 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
         <div className="mt-6 space-y-4">
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 p-4 text-sm"><input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#2E7CF6]" /><span>I have read and agree to the <Link href="/terms" target="_blank" className="font-bold text-blue-300 underline">Terms of Use</Link>.</span></label>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 p-4 text-sm"><input type="checkbox" checked={privacy} onChange={(e) => setPrivacy(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#2E7CF6]" /><span>I have read and acknowledge the <Link href="/privacy" target="_blank" className="font-bold text-blue-300 underline">Privacy Notice</Link>.</span></label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 p-4 text-sm"><input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#2E7CF6]" /><span>I am at least 18 and meet the minimum age required where I am.</span></label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 p-4 text-sm"><input type="checkbox" checked={eligibleLocation} onChange={(e) => setEligibleLocation(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#2E7CF6]" /><span>I am in a location where my participation in fantasy gaming and prediction markets is permitted.</span></label>
         </div>
         {message && <p role="alert" className="mt-4 text-sm text-amber-300">{message}</p>}
-        <button type="button" onClick={() => void accept()} disabled={!terms || !privacy || saving || state === "error"} className="mt-6 w-full rounded-xl bg-[#2E7CF6] px-4 py-3 text-sm font-bold disabled:opacity-40">{saving ? "Saving…" : "Agree and continue"}</button>
+        <button type="button" onClick={() => void accept()} disabled={!terms || !privacy || !adult || !eligibleLocation || saving || state === "error"} className="mt-6 w-full rounded-xl bg-[#2E7CF6] px-4 py-3 text-sm font-bold disabled:opacity-40">{saving ? "Saving…" : "Agree and continue"}</button>
         {state === "error" && <button type="button" onClick={() => { setState("checking"); void check().then((accepted) => setState(accepted ? "accepted" : "required")).catch(() => { setState("error"); setMessage("Could not check your agreement. Try again."); }); }} className="mt-3 w-full text-sm font-semibold text-blue-300">Retry check</button>}
         <button type="button" onClick={() => void logout()} className="mt-4 w-full text-sm font-semibold text-white/70 hover:text-white">Decline and sign out</button>
       </>}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createPublicClient, http, parseAbi } from "viem";
-import { baseSepolia } from "viem/chains";
+import { parseAbi } from "viem";
+import { getPublicClient } from "./usePublicClient";
 
 export interface SettledScoreline {
   homeGoals: number;
@@ -52,10 +52,7 @@ export function useSettledScoreline(
 
     (async () => {
       try {
-        const client = createPublicClient({
-          chain: baseSepolia,
-          transport: http("https://sepolia.base.org"),
-        });
+        const client = getPublicClient();
         const seasonId = BigInt(
           process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2"
         );
