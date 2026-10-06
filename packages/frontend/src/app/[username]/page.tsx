@@ -222,8 +222,8 @@ export default function ProfilePage() {
     void load();
     return () => { active = false; };
   }, [owner, profile, getAccessToken]);
-  if (loading) return <div className="mx-auto max-w-6xl px-5 py-16"><Feedback message="Loading profile…" /></div>;
-  if (!profile) return <div className="mx-auto max-w-6xl px-5 py-16"><Feedback message={profileError ?? "This profile is unavailable."} /></div>;
+  if (loading) return <div data-profile-page className="w-full"><Feedback message="Loading profile…" /></div>;
+  if (!profile) return <div data-profile-page className="w-full"><Feedback message={profileError ?? "This profile is unavailable."} /></div>;
   const displayTeam = teams.find((team) => team.teamId === profile.favouriteTeamId);
   const stats = [
     { label: "Markets backed", value: profile.stats.marketsBacked, help: "Distinct markets with at least one stake" },
@@ -235,7 +235,7 @@ export default function ProfilePage() {
     { id: "activity", label: "Market activity" }, { id: "fixtures", label: "Fixture picks" },
     { id: "created", label: "Created markets" }, ...(owner ? [{ id: "insights" as const, label: "Private insights" }] : []),
   ];
-  return <main className="mx-auto w-full min-w-0 max-w-4xl pb-20">
+  return <div data-profile-page className="w-full min-w-0 pb-20">
     <header className="border-x border-b border-black/[.08] bg-white dark:border-white/[.09] dark:bg-[#101821]">
       <div className="flex h-15 min-w-0 items-center gap-3 px-3 sm:gap-6 sm:px-4"><Link href="/" aria-label="Back to home" className="shrink-0 rounded-full p-2 transition hover:bg-black/[.06] dark:hover:bg-white/[.08]"><ArrowLeft className="h-5 w-5" /></Link><div className="min-w-0"><h1 className="truncate font-display text-lg font-black leading-tight">{profile.username}</h1><p className="text-xs text-zinc-500">{profile.stats.marketsBacked} markets backed</p></div></div>
       <div className="relative h-36 overflow-hidden bg-gradient-to-br from-[#0b1b38] via-[#174a99] to-[#55aeff] sm:h-48"><div className="absolute -right-16 -top-24 h-64 w-64 rounded-full border-[36px] border-white/10" /><div className="absolute bottom-0 left-1/3 h-32 w-72 -rotate-12 rounded-full bg-cyan-300/15 blur-3xl" /><span className="absolute bottom-4 right-5 text-xs font-bold uppercase tracking-[.2em] text-white/65">TICKR · {SEASON_DISPLAY_NAME}</span></div>
@@ -250,5 +250,5 @@ export default function ProfilePage() {
     <nav className={`grid border-x border-b border-black/[.08] bg-white dark:border-white/[.08] dark:bg-[#101821] ${owner ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`} aria-label="Profile sections">{tabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? "page" : undefined} className={`min-w-0 border-b-4 px-2 py-3 text-center text-xs font-bold leading-tight transition sm:px-4 sm:py-4 sm:text-sm ${tab === item.id ? "border-blue-500 text-zinc-950 dark:text-white" : "border-transparent text-zinc-500 hover:bg-black/[.03] dark:hover:bg-white/[.03]"}`}>{item.id === "insights" && <LockKeyhole className="mr-1 inline h-3.5 w-3.5" />}{item.label}</button>)}</nav>
     <div className="min-w-0 [&>section]:rounded-none [&>section]:border-t-0">{tab === "activity" && <MarketActivity username={profile.username} owner={owner} teams={teamRefs} fixtures={fixtures} />}{tab === "fixtures" && <FixtureActivity wallet={profile.walletAddress} season={profile.seasonId} />}{tab === "created" && <CreatedMarkets username={profile.username} teams={teamRefs} fixtures={fixtures} />}{tab === "insights" && owner && <ProfileInsights analytics={analytics} loading={analyticsLoading} error={analyticsError} />}</div>
     {owner && <p className="mt-5 flex items-center gap-1.5 px-4 text-xs text-zinc-500"><ChartNoAxesCombined className="h-3.5 w-3.5" /> Financial performance is visible only to you.</p>}
-  </main>;
+  </div>;
 }

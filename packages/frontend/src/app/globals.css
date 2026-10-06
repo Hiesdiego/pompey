@@ -75,6 +75,12 @@ body {
   position: relative;
   transition: background-color 0.35s ease, color 0.35s ease;
 }
+
+/* Public profile pages use the full app viewport under the shared header. */
+.app-page-shell:has([data-profile-page]) {
+  max-width: none;
+  padding: 0;
+}
 @media (max-width: 767px) {
   html,
   body {

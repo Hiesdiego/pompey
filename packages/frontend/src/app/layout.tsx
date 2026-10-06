@@ -119,7 +119,7 @@ export default function RootLayout({
           <PwaRegister />
           <Providers>
             <Header />
-            <main className="mx-auto min-h-[70vh] max-w-6xl animate-page-in px-4 py-6">
+            <main className="app-page-shell mx-auto min-h-[70vh] max-w-6xl animate-page-in px-4 py-6">
               {children}
             </main>
             <Footer />
