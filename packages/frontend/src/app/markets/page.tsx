@@ -28,8 +28,6 @@ import { useTeams } from "../../hooks/useTeams";
 import {
   MARKET_FACTORY_ADDRESS,
   MARKET_FACTORY_ABI,
-  normalizeMarketInfo,
-  normalizeMarketSettlement,
   TEMPLATE_NAMES,
   TEMPLATES,
 } from "../../lib/marketFactory";
@@ -371,7 +369,7 @@ export default function MarketsPage() {
   const { teams } = useTeams();
   const { playerAddress } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
-  const [tab, setTab] = useState<"all" | "featured" | "bounty">("all");
+  const [tab, setTab] = useState<"all" | "featured" | "bounty" | "winnings">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
   // matchday, kickoff. Fails soft — spread cards fall back to generic text.
@@ -392,17 +390,23 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const { unresolved, featured, community, bountyCandidates } = useMemo(() => {
-    if (!markets) return { unresolved: [], featured: [], community: [], bountyCandidates: [] };
+  const { unresolved, featured, community, bounty, bountyCandidates } = useMemo(() => {
+    if (!markets) return { unresolved: [], featured: [], community: [], bounty: [], bountyCandidates: [] };
     const unresolved = markets.filter((m) => m.state === 0);
     // Featured = Matchday Top Gainer + Season Champion (league templates).
     const featured = unresolved.filter((m) => m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION);
     const community = unresolved.filter((m) => m.templateId !== TEMPLATES.TOP_GAINER && m.templateId !== TEMPLATES.CHAMPION);
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Markets past their end time are awaiting permissionless resolution.
+    // The contract checks whether the template's outcome data is available.
+    const bounty = unresolved
+      .filter((m) => Number(m.endTime) <= nowSec && m.totalStaked > 0n)
+      .sort((a, b) => a.totalStaked > b.totalStaked ? -1 : a.totalStaked < b.totalStaked ? 1 : 0);
     // Only markets with winning stakes can have outstanding claims.
     const bountyCandidates = markets.filter((m) => m.state === 1 && m.outcomeTotals.some(
       (total, index) => total > 0n && (m.winnerBitmap & (1n << BigInt(index))) !== 0n
     ));
-    return { unresolved, featured, community, bountyCandidates };
+    return { unresolved, featured, community, bounty, bountyCandidates };
   }, [markets]);
   const claimQuery = useQuery({
     queryKey: ["marketClaims", playerAddress?.toLowerCase(), bountyCandidates.map((m) => m.id.toString())],
@@ -448,9 +452,9 @@ export default function MarketsPage() {
       return claimable;
     },
   });
-  const bounty = bountyCandidates.filter((market) => claimQuery.data?.includes(market.id.toString()));
-  const bountyLoading = Boolean(playerAddress && bountyCandidates.length && claimQuery.isPending);
-  const visible = tab === "all" ? unresolved : tab === "featured" ? featured : bounty;
+  const winnings = bountyCandidates.filter((market) => claimQuery.data?.includes(market.id.toString()));
+  const winningsLoading = Boolean(playerAddress && bountyCandidates.length && claimQuery.isPending);
+  const visible = tab === "all" ? unresolved : tab === "featured" ? featured : tab === "bounty" ? bounty : winnings;
 
   if (!MARKET_FACTORY_ADDRESS) {
     return (
@@ -495,7 +499,8 @@ export default function MarketsPage() {
         {([
           ["all", "All markets", unresolved.length],
           ["featured", "Featured", featured.length],
-          ["bounty", "Bounty", bountyLoading ? "…" : bounty.length],
+          ["bounty", "Bounty", bounty.length],
+          ["winnings", "Winnings", winningsLoading ? "…" : winnings.length],
         ] as const).map(([key, label, count]) => (
           <button
             key={key}
@@ -515,20 +520,21 @@ export default function MarketsPage() {
         ))}
       </div>
 
-      {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolver bounties are paid when a market resolves. This tab shows your unclaimed winnings.</p>}
+      {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">These markets have passed their end time and have stakes. Anyone can resolve one to earn the resolver fee once its outcome data is available.</p>}
+      {tab === "winnings" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolved markets with your unclaimed winnings.</p>}
 
-      {!markets || (tab === "bounty" && bountyLoading) ? (
+      {!markets || (tab === "winnings" && winningsLoading) ? (
         <SkeletonCards cards={6} />
-      ) : tab === "bounty" && claimQuery.isError ? (
+      ) : tab === "winnings" && claimQuery.isError ? (
         <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />
       ) : visible.length === 0 ? (
         <EmptyState
-          title={tab === "bounty" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
-          message={tab === "bounty" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : "New markets will appear here when they are created."}
+          title={tab === "winnings" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "bounty" ? "No resolver bounties right now" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
+          message={tab === "winnings" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : tab === "bounty" ? "Markets with stakes will appear here after their end time until they resolve." : "New markets will appear here when they are created."}
         />
-      ) : tab === "bounty" ? (
+      ) : tab === "bounty" || tab === "winnings" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {bounty.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />)}
+          {visible.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />)}
         </div>
       ) : (
         <div role="tabpanel">
