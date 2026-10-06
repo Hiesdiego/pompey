@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "About — TICKR",
   description:
-    "What TICKR is, how scoring and leaderboards work, how to audit every result yourself, and why it's decentralized.",
+    "What TICKR is, how scoring and private predictor ranks work, how to audit results, and why it's decentralized.",
 };
 
 function Section({
@@ -71,7 +71,7 @@ export default function AboutPage() {
         {[
           ["what", "What is TICKR"],
           ["scoring", "Match scoring"],
-          ["leaderboards", "Leaderboards"],
+          ["leaderboards", "Rankings"],
           ["audit", "Private audits"],
           ["decentralized", "Decentralization"],
           ["difference", "Why TICKR"],
@@ -168,10 +168,9 @@ export default function AboutPage() {
         </P>
       </Section>
 
-      <Section id="leaderboards" kicker="03 — Rankings" title="How the leaderboards work">
+      <Section id="leaderboards" kicker="03 — Rankings" title="How rankings work">
         <P>
-          TICKR has <strong className="text-zinc-900 dark:text-white">two leaderboards</strong> — one for the league
-          itself, one for the prediction markets.
+          The coin league table is public. Each predictor sees their own private rank on their profile.
         </P>
         <h3 className="mt-6 font-display text-lg font-bold text-zinc-900 dark:text-white">
           Main league table
@@ -184,21 +183,13 @@ export default function AboutPage() {
           disagree with the official results.
         </P>
         <h3 className="mt-6 font-display text-lg font-bold text-zinc-900 dark:text-white">
-          Predictor leaderboard
+          Your predictor rank
         </h3>
         <P>
-          <strong className="text-zinc-900 dark:text-white">You</strong>, ranked against other predictors across
-          the prediction markets. Filterable by metric:
+          Correct picks in resolved markets earn 3 points. A market counts once even if you backed it repeatedly or chose multiple outcomes. Open and voided markets do not count. Ties share a rank; only you can see your rank.
         </P>
-        <ul className="mt-4 space-y-2 text-[15px] text-zinc-600 dark:text-zinc-400">
-          <li><strong className="text-zinc-900 dark:text-white">Total points</strong> — 10 per market created · 3 per correct prediction · 5 per resolved market</li>
-          <li><strong className="text-zinc-900 dark:text-white">Correct predictions</strong> — 3 points each</li>
-          <li><strong className="text-zinc-900 dark:text-white">Markets created</strong> — 10 points each</li>
-          <li><strong className="text-zinc-900 dark:text-white">Markets resolved</strong> — 5 points each</li>
-        </ul>
         <P>
-          Profiles are public and analytics are viewer-only — anyone can inspect
-          anyone’s record, but only you see your own detailed breakdown.
+          Profiles show public market activity. Your rank and financial analytics are visible only when viewing your own account.
         </P>
       </Section>
 
@@ -330,7 +321,7 @@ export default function AboutPage() {
           </li>
           <li>
             <strong className="text-zinc-900 dark:text-white">Social prediction graph.</strong> Public profiles,
-            shareable pick cards, and a predictor leaderboard turn staking into
+            shareable pick cards, and private predictor ranks turn staking into
             a social game — your record is your reputation.
           </li>
         </ul>

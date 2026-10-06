@@ -33,7 +33,6 @@ const NAV = [
   { href: "/fixtures", label: "Fixtures" },
   { href: "/markets", label: "Markets" },
   { href: "/watchlist", label: "Watchlist" },
-  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/claims", label: "Claims" },
 ];
 

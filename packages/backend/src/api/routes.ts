@@ -11,7 +11,6 @@
  *   GET /api/fixtures/:id              — one fixture
  *   GET /api/fixtures/:id/pool         — live parimutuel pool sizes
  *   GET /api/table                     — league table (points, GD)
- *   GET /api/leaderboard               — players ranked by win rate
  *   GET /api/players/:address          — player profile stats
  *   GET /api/prices                    — latest validated price per team
  *   GET /api/chain/markets             — cached market catalogue (RPC shield)
@@ -281,15 +280,6 @@ export function buildRouter(deps: ApiDeps): Router {
     } catch (err) {
       logger.warn("[api] getLeagueTable failed", { error: String(err) });
       res.status(502).json({ error: "failed to read league table from chain" });
-    }
-  });
-
-  router.get("/api/leaderboard", async (_req: Request, res: Response) => {
-    try {
-      res.json(await deps.reader.getLeaderboard());
-    } catch (err) {
-      logger.warn("[api] getLeaderboard failed", { error: String(err) });
-      res.status(502).json({ error: "failed to build leaderboard" });
     }
   });
 

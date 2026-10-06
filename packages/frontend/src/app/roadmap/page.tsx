@@ -116,7 +116,7 @@ export default function RoadmapPage() {
             The league goes live on Base Sepolia: 20 coins, 380 fixtures, the
             full settlement pipeline (oracle → engine → table → payouts), five
             permissionless market templates, social layer with profiles and
-            leaderboards.
+            private player ranks.
           </P>
           <ul className="space-y-2">
             <Li>Core contracts deployed, audited internally, battle-tested with real fixtures</Li>

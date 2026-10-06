@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useMarkets } from "../lib/query/useMarkets";
 import { usePriceFeed } from "../lib/price/usePriceFeed";
-import { useWatchlist, saveWatchNotice } from "../lib/watchlist";
+import { useWatchlist, saveWatchNotice, saveWatchlist } from "../lib/watchlist";
 import { decodeTargetTerms } from "../lib/targetMarket";
 import { TEMPLATES } from "../lib/marketFactory";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
@@ -16,6 +16,7 @@ export function WatchAlertMonitor() {
   useEffect(() => {
     if (!wallet || !markets?.length || !entries.length) return;
     const now = Date.now();
+    const finished: string[] = [];
     for (const entry of entries) {
       const market = markets.find((m) => m.id === Number(entry.marketId));
       if (!market) continue;
@@ -26,8 +27,11 @@ export function WatchAlertMonitor() {
           try { new Notification("TICKR market update", { body: message, tag: key }); } catch { /* In-app update is already saved. */ }
         }
       };
-      if (entry.settled && market.state !== 0) notify("settled", `Market #${entry.marketId} has ${market.state === 1 ? "resolved" : "voided"}. View the result and your position.`);
-      if (market.state !== 0) continue;
+      if (market.state !== 0) {
+        if (entry.settled) notify("settled", `Market #${entry.marketId} has ${market.state === 1 ? "resolved" : "voided"}. View the result and your position.`);
+        finished.push(entry.marketId);
+        continue;
+      }
       const closeMs = market.bettingCloseTime * 1000;
       if (entry.closing && closeMs > now && closeMs - now <= 60 * 60_000) notify("closing", `Market #${entry.marketId} closes within an hour.`);
       if (entry.nearTarget && status !== "stale" && market.templateId === TEMPLATES.TARGET && now < closeMs) {
@@ -39,6 +43,7 @@ export function WatchAlertMonitor() {
         }
       }
     }
+    if (finished.length) saveWatchlist(wallet, entries.filter((entry) => !finished.includes(entry.marketId)));
   }, [wallet, entries, markets, prices, status, updatedAt]);
   return null;
 }

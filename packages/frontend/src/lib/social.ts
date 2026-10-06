@@ -14,7 +14,6 @@
 
 import { CodedError, toAppError, type ErrorCode } from "./errors";
 
-export type SocialMetric = "points" | "created" | "correct" | "resolved";
 export type PredictionStatusFilter = "all" | "open" | "settled";
 export type MarketState = "open" | "resolved" | "voided";
 
@@ -96,24 +95,6 @@ export interface SocialAnalytics {
   pnlCurve: PnlPoint[];
   byTemplate: TemplateWinRate[];
   recentResults: Array<{ marketId: string; templateId: number; stakeTick: string; netTick: string; resolvedAt: string }>;
-}
-
-export interface LeaderboardRow {
-  rank: number;
-  walletAddress: string;
-  username: string | null;
-  favouriteTeamId: number | null;
-  value: string;
-  points: number;
-  created: number;
-  correct: number;
-  resolved: number;
-}
-
-export interface SocialLeaderboard {
-  metric: SocialMetric;
-  season: number;
-  rows: LeaderboardRow[];
 }
 
 export interface PageResult<T> {
@@ -245,9 +226,4 @@ export const social = {
       getToken
     ),
 
-  /** Metric-filtered predictor leaderboard. */
-  leaderboard: (metric: SocialMetric, season: number, limit = 50) =>
-    get<SocialLeaderboard>(
-      `/api/social/leaderboard?metric=${metric}&season=${season}&limit=${limit}`
-    ),
 };

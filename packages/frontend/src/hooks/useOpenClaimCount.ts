@@ -7,7 +7,7 @@ import { getPublicClient } from "./usePublicClient";
 import { CONTRACTS, globalFixtureId, PREDICTION_POOL_ABI } from "../lib/contracts";
 import { api } from "../lib/api";
 
-/** Number of settled match pools where the signed-in player still has a claim. */
+/** Number of settled match pools with a winning, unclaimed stake. */
 export function useOpenClaimCount(): number {
   const { authenticated, playerAddress } = useTickr();
   const [count, setCount] = useState(0);
@@ -38,12 +38,19 @@ export function useOpenClaimCount(): number {
           },
         ]);
         const results = await client.multicall({ contracts: calls });
+        const pending: number[] = [];
         for (let i = 0; i < chunk.length; i++) {
           const base = i * 4;
           const hasStake = [0, 1, 2].some((n) => ((results[base + n].result ?? 0n) as bigint) > 0n);
           const claimed = (results[base + 3].result ?? false) as boolean;
-          if (hasStake && !claimed) open++;
+          if (hasStake && !claimed) pending.push(i);
         }
+        const pools = await Promise.all(pending.map((i) => api.pool(chunk[i].fixtureId)));
+        pools.forEach((pool, index) => {
+          const winner = pool.winningOutcome;
+          const base = pending[index] * 4;
+          if (!pool.voided && winner !== null && ((results[base + winner].result ?? 0n) as bigint) > 0n) open++;
+        });
       }
       setCount(open);
     } catch {

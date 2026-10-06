@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Trophy, Zap } from "lucide-react";
 import { TEMPLATES, TEMPLATE_NAMES } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
-import { social, type LeaderboardRow } from "../lib/social";
 import { useMarkets } from "../lib/query/useMarkets";
 import { useTeams } from "../hooks/useTeams";
 import { useTickr } from "../hooks/useTickr";
@@ -275,15 +274,13 @@ export default function HomePage() {
   const teams = teamData ?? [];
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
   const [table, setTable] = useState<ApiTableRow[] | null>(null);
-  const [players, setPlayers] = useState<LeaderboardRow[]>([]);
   useEffect(() => {
     let live = true;
     const loadFixtures = () => { api.fixtures().then((v) => { if (live) setFixtures(v); }).catch(() => {}); };
     const loadTable = () => { api.table().then((v) => { if (live) setTable(v); }).catch(() => {}); };
-    const loadPlayers = () => { social.leaderboard("points", Number(SEASON_ID), 10).then((v) => { if (live) setPlayers(v.rows); }).catch(() => {}); };
-    loadFixtures(); loadTable(); loadPlayers();
+    loadFixtures(); loadTable();
     const fixtureTimer = window.setInterval(loadFixtures, 15_000);
-    const dataTimer = window.setInterval(() => { if (!table || table.length === 0) loadTable(); loadPlayers(); }, 15_000);
+    const dataTimer = window.setInterval(() => { if (!table || table.length === 0) loadTable(); }, 15_000);
     return () => { live = false; window.clearInterval(fixtureTimer); window.clearInterval(dataTimer); };
   }, [table?.length]);
   const sorted = useMemo(() => [...(markets ?? [])].filter(open).sort((a, b) => Number(pool(b) - pool(a))), [markets]);
@@ -300,7 +297,7 @@ export default function HomePage() {
       <section><div className="mb-4"><p className="text-[11px] font-extrabold uppercase tracking-[.2em] text-[#2E7CF6]">The market is moving</p><h1 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white sm:text-3xl">Featured markets</h1></div><FeaturedCarousel markets={featured} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} loading={isLoading && !markets} /></section>
       <aside className="space-y-5"><section><div className="mb-3 flex items-center justify-between">{table === null ? <div className="skeleton h-5 w-28 rounded-md" aria-hidden /> : <h2 className="font-display text-base font-bold">League table</h2>}<Link href="/standings" className="text-xs font-bold text-[#2E7CF6]">Full table</Link></div><div className={card + " overflow-hidden p-2"}>{table === null ? <LeagueTableSkeleton rows={8} compact /> : <LeagueTable rows={table} limit={8} compact />}</div></section>
         {authenticated && <Link href="/markets/create" className="group block overflow-hidden rounded-3xl bg-gradient-to-br from-[#1765dc] via-[#2E7CF6] to-[#6ea7ff] p-5 text-white shadow-lg shadow-[#2E7CF6]/20 transition hover:-translate-y-0.5"><div className="flex items-start justify-between"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-white/15"><Zap className="h-5 w-5" /></span><ArrowUpRight className="h-5 w-5 transition-transform group-hover:translate-x-1 group-hover:-translate-y-1" /></div><h3 className="mt-4 max-w-[16rem] font-display text-lg font-extrabold leading-snug">Get others to stake on your market.</h3><p className="mt-1 text-sm text-white/75">Make your call. Bring the crowd.</p><span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-[#1d5fc9]">Create a market <ArrowRight className="h-4 w-4" /></span></Link>}
-        {players.length > 0 && <section><div className="mb-3 flex items-center justify-between"><h2 className="font-display text-base font-bold">Top predictors</h2><Link href="/leaderboard" className="text-xs font-bold text-[#2E7CF6]">Leaderboard</Link></div><div className={`${card} divide-y divide-black/[.05] p-2 dark:divide-white/[.06]`}>{players.map((p, i) => <Link key={p.walletAddress} href={p.username ? `/${p.username}` : `/${p.walletAddress}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-black/[.03] dark:hover:bg-white/[.04]"><span className={`w-5 text-xs font-extrabold tabular-nums ${i < 3 ? "text-[#2E7CF6]" : "text-zinc-400"}`}>{String(i + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-xs font-bold">{p.username ? `@${p.username}` : `${p.walletAddress.slice(0, 6)}…${p.walletAddress.slice(-4)}`}</span><span className="text-xs font-extrabold text-zinc-500">{p.points.toLocaleString()} pts</span></Link>)}</div></section>}</aside>
+      </aside>
     </div>
 
     {liveMatches.length > 0 && <section><SectionHeading icon={Flame} title="Matches in play" subtitle="Live crypto performance score · tap a match to stake" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{liveMatches.map((f) => <LiveFixtureCard key={f.fixtureId} fixture={f} prices={prices} />)}</div></section>}

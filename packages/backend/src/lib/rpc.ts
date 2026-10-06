@@ -14,8 +14,7 @@
  * - JSON-RPC batching (`batch: true`) — viem packs concurrent calls into
  *   one HTTP request. Free throughput.
  * - Transport-level retry with exponential backoff (3 attempts).
- * - Optional fallback RPC: set FALLBACK_RPC_URL and viem's `fallback`
- *   transport fails over automatically (ranked by latency).
+ * - Optional fallback RPCs: FALLBACK_RPC_URL through FALLBACK_RPC_URL_8.
  * - `withRpcRetry()` for operation-level retries on top of the transport.
  */
 import {
@@ -53,26 +52,21 @@ let sharedTransport: Transport | null = null;
 /** Build (once) the resilient transport every client in the backend shares. */
 function getSharedTransport(): Transport {
   if (sharedTransport) return sharedTransport;
-  const primary = http(primaryRpcUrl(), {
-    batch: true,
-    timeout: RPC_TIMEOUT_MS,
-    retryCount: RPC_RETRY_COUNT,
-    retryDelay: RPC_RETRY_DELAY_MS,
-  });
-  const fallbackUrl = config.fallbackRpcUrl;
-  if (fallbackUrl) {
-    const secondary = http(fallbackUrl, {
+  const urls = [...new Set([primaryRpcUrl(), ...config.fallbackRpcUrls])];
+  const transports = urls.map((url) => http(url, {
       batch: true,
       timeout: RPC_TIMEOUT_MS,
       retryCount: RPC_RETRY_COUNT,
       retryDelay: RPC_RETRY_DELAY_MS,
-    });
-    sharedTransport = fallback([primary, secondary], { rank: true });
-    logger.info("[rpc] shared transport ready (primary + fallback, ranked)", {
+    }));
+  if (transports.length > 1) {
+    sharedTransport = fallback(transports, { rank: true });
+    logger.info("[rpc] shared transport ready", {
       chain: tickrChain().name,
+      endpoints: transports.length,
     });
   } else {
-    sharedTransport = primary;
+    sharedTransport = transports[0];
     logger.info("[rpc] shared transport ready (primary only — set FALLBACK_RPC_URL for failover)", {
       chain: tickrChain().name,
     });

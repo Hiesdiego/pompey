@@ -7,6 +7,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { baseSepolia, baseMainnet } from "@tickr/shared/chains";
 import { queryClient } from "../lib/query/queryClient";
 import { LoginModalProvider } from "../components/LoginModal";
+import { LegalGate } from "../components/LegalGate";
 import { initMatchDuration } from "../lib/matchConfig";
 
 /**
@@ -70,7 +71,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     >
       <SmartWalletsProvider>
         <QueryClientProvider client={queryClient}>
-          <LoginModalProvider>{children}</LoginModalProvider>
+          <LoginModalProvider><LegalGate>{children}</LegalGate></LoginModalProvider>
         </QueryClientProvider>
       </SmartWalletsProvider>
     </PrivyProvider>

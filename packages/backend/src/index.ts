@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     chainEnv: config.chainEnv,
     seasonId: config.seasonId.toString(),
     matchDurationMin: config.leagues.main.matchDurationMinutes,
-    fallbackRpc: config.fallbackRpcUrl ? "configured" : "not set",
+    fallbackRpcCount: config.fallbackRpcUrls.length,
   });
 
   // --- price feeds -------------------------------------------------------

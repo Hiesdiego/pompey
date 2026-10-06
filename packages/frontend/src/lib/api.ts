@@ -126,7 +126,6 @@ export const api = {
   fixture: (id: string | number) => get<ApiFixture>(`/api/fixtures/${id}`),
   pool: (id: string | number) => get<ApiPool>(`/api/fixtures/${id}/pool`),
   table: () => get<ApiTableRow[]>("/api/table"),
-  leaderboard: () => get<ApiPlayer[]>("/api/leaderboard"),
   player: (address: string) => get<ApiPlayer>(`/api/players/${address}`),
   prices: () => get<ApiPrice[]>("/api/prices"),
 };

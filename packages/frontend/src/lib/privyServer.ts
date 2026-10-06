@@ -7,6 +7,7 @@
 
 import "server-only";
 import { PrivyClient } from "@privy-io/server-auth";
+import { acceptedFromRequest } from "./legalAcceptance";
 
 let privy: PrivyClient | null = null;
 let warned = false;
@@ -31,6 +32,20 @@ function getPrivy(): PrivyClient | null {
 export type LinkedWalletCheck =
   | { ok: true; userId: string }
   | { ok: false; status: number; error: string };
+
+export async function requirePrivyUser(req: Request): Promise<LinkedWalletCheck> {
+  const header = req.headers.get("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!token) return { ok: false, status: 401, error: "missing_token" };
+  const client = getPrivy();
+  if (!client) return { ok: false, status: 503, error: "auth_not_configured" };
+  try {
+    const claims = await client.verifyAuthToken(token);
+    return { ok: true, userId: claims.userId };
+  } catch {
+    return { ok: false, status: 401, error: "invalid_token" };
+  }
+}
 
 /**
  * Verify `Authorization: Bearer <Privy access token>` and check that
@@ -70,6 +85,10 @@ export async function requireLinkedWallet(
 
   if (!linked.includes(wanted)) {
     return { ok: false, status: 403, error: "wallet_not_linked" };
+  }
+  const secret = process.env.PRIVY_APP_SECRET;
+  if (!secret || !acceptedFromRequest(req, userId, secret)) {
+    return { ok: false, status: 403, error: "legal_acceptance_required" };
   }
   return { ok: true, userId };
 }

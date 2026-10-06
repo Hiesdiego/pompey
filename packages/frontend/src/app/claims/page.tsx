@@ -4,8 +4,7 @@
  *
  * Scan: settled fixtures → chunked multicall of
  * getStake(season, fixture, player, outcome)×3 + claimed(gid, player).
- * A fixture is claimable when the player staked > 0 and hasn't claimed.
- * (Claiming also records forfeits as losses when the pool went to treasury.)
+ * A fixture is claimable when the player backed its winner and hasn't claimed.
  */
 
 "use client";
@@ -75,13 +74,9 @@ async function scanClaimable(player: Address): Promise<Claimable[]> {
       ] as [bigint, bigint, bigint];
       const claimed = (claimedRes[j].result ?? false) as boolean;
       if (stakes.some((s) => s > 0n) && !claimed) {
-        let winningOutcome: number | null = null;
-        try {
-          const pool = await api.pool(chunk[j].fixtureId);
-          winningOutcome = pool.winningOutcome;
-        } catch {
-          /* pool endpoint missing — still claimable */
-        }
+        const pool = await api.pool(chunk[j].fixtureId);
+        const winningOutcome = pool.winningOutcome;
+        if (pool.voided || winningOutcome === null || stakes[winningOutcome] <= 0n) continue;
         out.push({
           fixture: chunk[j],
           stakes,

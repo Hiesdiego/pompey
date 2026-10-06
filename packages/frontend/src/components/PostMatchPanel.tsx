@@ -225,7 +225,7 @@ export function PostMatchPanel({
       {playerAddress && stakes !== null && !hasStake && (
         <p className="text-center text-sm text-zinc-500">You didn't stake on this match.</p>
       )}
-      {playerAddress && hasStake && claimed === false && (
+      {playerAddress && hasStake && claimed === false && (won || voided) && (
         <div className="rounded-2xl border border-black/8 bg-black/[.03] p-4 dark:border-white/8 dark:bg-white/[.03]">
           <p className="mb-1 font-display text-sm tabular-nums text-zinc-600 dark:text-zinc-300">
             Your stakes:{" "}
@@ -273,6 +273,9 @@ export function PostMatchPanel({
               : "No payout — this only records the result on your profile."}
           </p>
         </div>
+      )}
+      {playerAddress && hasStake && claimed === false && !won && !voided && (
+        <p className="text-center text-sm text-zinc-500">Your pick lost. There is no payout to claim.</p>
       )}
       {playerAddress && hasStake && claimed === true && (
         <p className="flex items-center justify-center gap-2 text-sm font-medium text-[#0f7a55] dark:text-[#7fe0bd]">

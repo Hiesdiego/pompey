@@ -5,9 +5,8 @@
  */
 
 import "server-only";
-import { createPublicClient, http } from "viem";
-import { baseSepolia, baseMainnet } from "@tickr/shared/chains";
-import { getChainEnv, CONTRACTS, SEASON_ID } from "./contracts";
+import { CONTRACTS, SEASON_ID } from "./contracts";
+import { getPublicClient } from "../hooks/usePublicClient";
 
 const SEASON_REGISTRY_ABI = [
   {
@@ -32,14 +31,7 @@ export async function currentSeasonId(): Promise<number> {
   }
 
   try {
-    const mainnet = getChainEnv() === "mainnet";
-    const rpc = mainnet
-      ? process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL || "https://mainnet.base.org"
-      : process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org";
-    const client = createPublicClient({
-      chain: mainnet ? baseMainnet : baseSepolia,
-      transport: http(rpc),
-    });
+    const client = getPublicClient();
     const id = await client.readContract({
       address: registry,
       abi: SEASON_REGISTRY_ABI,

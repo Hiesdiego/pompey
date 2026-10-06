@@ -162,7 +162,7 @@ export default function HowToPlayPage() {
           {[
             {
               t: "Prediction markets",
-              d: "Five templates — top gainer, season champion, head-to-head, price target, fixture spread. Anyone can create one; the best predictors climb a dedicated leaderboard.",
+              d: "Five templates — top gainer, season champion, head-to-head, price target, fixture spread. Anyone can create one and back an outcome.",
               href: "/markets",
             },
             {
@@ -173,12 +173,12 @@ export default function HowToPlayPage() {
             {
               t: "Share your picks",
               d: "Every match and market has a share card for X, Telegram, and WhatsApp. Put your record on the line publicly.",
-              href: "/leaderboard",
+              href: "/markets",
             },
             {
-              t: "Climb the leaderboard",
-              d: "Earn predictor points: 10 per market created, 3 per correct prediction, 5 per resolved market. Profiles are public — your record is your reputation.",
-              href: "/leaderboard",
+              t: "Track your private rank",
+              d: "Each correct resolved market earns 3 points. Your rank appears only on your own profile.",
+              href: "/markets",
             },
           ].map((c) => (
             <Link

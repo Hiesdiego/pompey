@@ -5,6 +5,7 @@ import { useTickr } from "../hooks/useTickr";
 
 export interface WatchEntry {
   marketId: string;
+  expiresAt?: number;
   nearTarget: boolean;
   closing: boolean;
   settled: boolean;
@@ -20,6 +21,7 @@ export interface WatchNotice {
 const eventName = "tickr-watchlist-change";
 const keyFor = (wallet: string) => `tickr-watchlist-v1:${wallet.toLowerCase()}`;
 const noticeKeyFor = (wallet: string) => `tickr-watch-notices-v1:${wallet.toLowerCase()}`;
+const WATCH_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 function read<T>(key: string): T[] {
   if (typeof window === "undefined") return [];
@@ -29,7 +31,16 @@ function read<T>(key: string): T[] {
   } catch { return []; }
 }
 
-export function readWatchlist(wallet: string): WatchEntry[] { return read<WatchEntry>(keyFor(wallet)); }
+export function readWatchlist(wallet: string): WatchEntry[] {
+  const entries = read<WatchEntry>(keyFor(wallet));
+  const now = Date.now();
+  const active = entries.filter((entry) => !entry.expiresAt || entry.expiresAt > now)
+    .map((entry) => entry.expiresAt ? entry : { ...entry, expiresAt: now + WATCH_LIFETIME_MS });
+  if (typeof window !== "undefined" && (active.length !== entries.length || entries.some((entry) => !entry.expiresAt))) {
+    localStorage.setItem(keyFor(wallet), JSON.stringify(active));
+  }
+  return active;
+}
 export function readWatchNotices(wallet: string): WatchNotice[] { return read<WatchNotice>(noticeKeyFor(wallet)); }
 
 export function saveWatchlist(wallet: string, entries: WatchEntry[]) {
@@ -57,9 +68,10 @@ export function useWatchlist() {
       setNotices(wallet ? readWatchNotices(wallet) : []);
     };
     update();
+    const timer = window.setInterval(update, 60 * 60_000);
     window.addEventListener(eventName, update);
     window.addEventListener("storage", update);
-    return () => { window.removeEventListener(eventName, update); window.removeEventListener("storage", update); };
+    return () => { window.clearInterval(timer); window.removeEventListener(eventName, update); window.removeEventListener("storage", update); };
   }, [wallet]);
 
   const toggle = useCallback((marketId: string) => {
@@ -67,7 +79,7 @@ export function useWatchlist() {
     const old = readWatchlist(wallet);
     saveWatchlist(wallet, old.some((e) => e.marketId === marketId)
       ? old.filter((e) => e.marketId !== marketId)
-      : [...old, { marketId, nearTarget: true, closing: true, settled: true }]);
+      : [...old, { marketId, nearTarget: true, closing: true, settled: true, expiresAt: Date.now() + WATCH_LIFETIME_MS }]);
   }, [wallet]);
 
   const setAlert = useCallback((marketId: string, field: "nearTarget" | "closing" | "settled", enabled: boolean) => {

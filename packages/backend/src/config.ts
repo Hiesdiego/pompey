@@ -55,13 +55,10 @@ export const config = {
   chainEnv: optional("TICKR_CHAIN_ENV", "testnet") as "testnet" | "mainnet",
   baseSepoliaRpcUrl: optional("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org"),
   baseMainnetRpcUrl: optional("BASE_MAINNET_RPC_URL", "https://mainnet.base.org"),
-  /**
-   * Optional second RPC endpoint. When set, the shared transport in
-   * lib/rpc.ts fails over to it automatically (ranked by latency) if the
-   * primary starts erroring or rate-limiting. Leave empty to run on the
-   * primary alone.
-   */
-  fallbackRpcUrl: optional("FALLBACK_RPC_URL", ""),
+  /** Optional RPC endpoints, in priority order. Empty entries are ignored. */
+  fallbackRpcUrls: ["FALLBACK_RPC_URL", ...Array.from({ length: 7 }, (_, i) => `FALLBACK_RPC_URL_${i + 2}`)]
+    .map((name) => optional(name, "").trim())
+    .filter(Boolean),
 
   /** Private key of the wallet authorized for PriceOracle submissions + revealKickoff. */
   backendSignerPrivateKey: required("BACKEND_SIGNER_PRIVATE_KEY") as `0x${string}`,

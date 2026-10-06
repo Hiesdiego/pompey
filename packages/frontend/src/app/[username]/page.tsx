@@ -5,11 +5,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
 import type { Address } from "viem";
-import { ArrowLeft, ArrowUpRight, ChartNoAxesCombined, CircleHelp, LockKeyhole } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChartNoAxesCombined, LockKeyhole } from "lucide-react";
 import { useTickr } from "../../hooks/useTickr";
 import { useTeams } from "../../hooks/useTeams";
 import { getPublicClient } from "../../hooks/usePublicClient";
-import { CONTRACTS, PREDICTION_POOL_ABI } from "../../lib/contracts";
+import { CONTRACTS, PREDICTION_POOL_ABI, SEASON_DISPLAY_NAME } from "../../lib/contracts";
 import { social, ApiError, type SocialAnalytics, type SocialMarket, type SocialPrediction, type SocialProfile } from "../../lib/social";
 import { api, type ApiFixture } from "../../lib/api";
 import { marketQuestion, pickLabel, type TeamRef } from "../../lib/marketQuestion";
@@ -182,6 +182,8 @@ export default function ProfilePage() {
   const [analytics, setAnalytics] = useState<SocialAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [rank, setRank] = useState<{ rank: number | null; participants: number; points: number; correct: number; settled: number } | null>(null);
+  const [rankError, setRankError] = useState(false);
   const owner = !!profile && !!playerAddress && profile.walletAddress.toLowerCase() === playerAddress.toLowerCase();
   const teamRefs = useMemo<TeamRef[]>(() => teams.map(({ teamId, symbol, name }) => ({ teamId, symbol, name })), [teams]);
   const fixtures = useMemo(() => new Map(fixtureList.map((fixture) => [fixture.fixtureId, fixture])), [fixtureList]);
@@ -204,6 +206,22 @@ export default function ProfilePage() {
       .finally(() => { if (active) setAnalyticsLoading(false); });
     return () => { active = false; };
   }, [tab, owner, profile, getAccessToken]);
+  useEffect(() => {
+    if (!owner || !profile) { setRank(null); setRankError(false); return; }
+    let active = true;
+    setRank(null); setRankError(false);
+    const load = async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const response = await fetch(`/api/social/rank?walletAddress=${profile.walletAddress}`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        if (!response.ok) throw new Error("Rank unavailable");
+        if (active) setRank(await response.json());
+      } catch { if (active) setRankError(true); }
+    };
+    void load();
+    return () => { active = false; };
+  }, [owner, profile, getAccessToken]);
   if (loading) return <div className="mx-auto max-w-6xl px-5 py-16"><Feedback message="Loading profile…" /></div>;
   if (!profile) return <div className="mx-auto max-w-6xl px-5 py-16"><Feedback message={profileError ?? "This profile is unavailable."} /></div>;
   const displayTeam = teams.find((team) => team.teamId === profile.favouriteTeamId);
@@ -217,18 +235,20 @@ export default function ProfilePage() {
     { id: "activity", label: "Market activity" }, { id: "fixtures", label: "Fixture picks" },
     { id: "created", label: "Created markets" }, ...(owner ? [{ id: "insights" as const, label: "Private insights" }] : []),
   ];
-  return <main className="mx-auto max-w-6xl px-4 pb-20 pt-8 sm:px-6">
-    <Link href="/leaderboard" className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-zinc-500 transition hover:text-blue-600"><ArrowLeft className="h-4 w-4" /> Leaderboard</Link>
-    <header className={`${surface} relative`}>
-      <div className="relative overflow-hidden bg-[#0c1b36] px-6 pb-8 pt-9 text-white sm:px-9 sm:pb-9"><div className="pointer-events-none absolute -right-16 -top-36 h-80 w-80 rounded-full bg-blue-500/20 blur-3xl" /><div className="relative flex flex-wrap items-start gap-5">
-        <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-2xl font-black uppercase sm:h-20 sm:w-20">{profile.username[0]}</div>
-        <div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase tracking-[.22em] text-blue-200">Player profile · Season {profile.seasonId}</p><h1 className="mt-1 break-all font-display text-3xl font-black tracking-tight sm:text-4xl">@{profile.username}</h1><p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/70">{profile.bio || "No bio yet."}</p><div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-white/60"><span>{truncateAddress(profile.walletAddress)}</span>{displayTeam && <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white"><TeamBadge teamId={displayTeam.teamId} size={16} showName={false} />{displayTeam.name}</span>}</div></div>
-      </div></div>
-      <div className="grid grid-cols-2 divide-x divide-y divide-black/[.06] dark:divide-white/[.07] sm:grid-cols-4 sm:divide-y-0">{stats.map((stat) => <div key={stat.label} className="p-5 sm:p-6"><p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">{stat.label}</p><p className="mt-2 font-display text-3xl font-black tabular-nums">{stat.value.toLocaleString()}</p><p className="mt-1 text-xs leading-snug text-zinc-500">{stat.help}</p></div>)}</div>
+  return <main className="mx-auto max-w-3xl px-0 pb-20 sm:px-4">
+    <header className="border-x border-b border-black/[.08] bg-white dark:border-white/[.09] dark:bg-[#101821]">
+      <div className="flex h-15 items-center gap-6 px-4"><Link href="/" aria-label="Back to home" className="rounded-full p-2 transition hover:bg-black/[.06] dark:hover:bg-white/[.08]"><ArrowLeft className="h-5 w-5" /></Link><div><h1 className="font-display text-lg font-black leading-tight">{profile.username}</h1><p className="text-xs text-zinc-500">{profile.stats.marketsBacked} markets backed</p></div></div>
+      <div className="relative h-36 overflow-hidden bg-gradient-to-br from-[#0b1b38] via-[#174a99] to-[#55aeff] sm:h-48"><div className="absolute -right-16 -top-24 h-64 w-64 rounded-full border-[36px] border-white/10" /><div className="absolute bottom-0 left-1/3 h-32 w-72 -rotate-12 rounded-full bg-cyan-300/15 blur-3xl" /><span className="absolute bottom-4 right-5 text-xs font-bold uppercase tracking-[.2em] text-white/65">TICKR · {SEASON_DISPLAY_NAME}</span></div>
+      <div className="relative px-4 pb-5 sm:px-5"><div className="flex items-start justify-between"><div className="-mt-12 grid h-24 w-24 shrink-0 place-items-center rounded-full border-4 border-white bg-[#173e80] font-display text-4xl font-black uppercase text-white shadow-sm dark:border-[#101821] sm:-mt-16 sm:h-32 sm:w-32 sm:text-5xl">{profile.username[0]}</div></div>
+        <h2 className="mt-3 break-words font-display text-xl font-black leading-tight sm:text-2xl">{profile.username}</h2><p className="text-sm text-zinc-500">@{profile.username}</p>
+        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{profile.bio || (owner ? "Add a bio to tell other players about yourself." : "No bio yet.")}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-500"><span className="font-mono text-xs">{truncateAddress(profile.walletAddress)}</span>{displayTeam && <span className="inline-flex items-center gap-1.5"><TeamBadge teamId={displayTeam.teamId} size={18} showName={false} />{displayTeam.name}</span>}<span>{SEASON_DISPLAY_NAME}</span></div>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">{stats.map((stat) => <span key={stat.label} title={stat.help}><strong className="font-black tabular-nums">{stat.value.toLocaleString()}</strong> <span className="text-zinc-500">{stat.label.toLowerCase()}</span></span>)}</div>
+        {owner && <div className="mt-5 rounded-2xl bg-blue-500/[.07] p-4 text-sm dark:bg-blue-500/[.12]"><p className="text-xs font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">Your private predictor rank</p><p className="mt-1 font-display text-2xl font-black">{rankError ? "Unavailable" : rank ? rank.rank ? `#${rank.rank}` : "Unranked" : "Checking…"}<span className="ml-2 text-sm font-medium text-zinc-500">{rank ? `of ${rank.participants} players` : ""}</span></p><p className="mt-1 text-xs text-zinc-500">{rankError ? "Your rank could not be loaded. Try refreshing this page." : rank ? `${rank.points} points · ${rank.correct} correct of ${rank.settled} settled markets` : "One market counts once; a correct pick earns 3 points."}</p></div>}
+      </div>
     </header>
-    <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-blue-500/10 bg-blue-500/[.05] px-4 py-3 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300"><CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" /><span>These counts cover indexed market activity for season {profile.seasonId}. Fixture picks are listed separately. Voided backed markets: {profile.stats.voidedMarkets}. Indexing may lag recent transactions.</span></div>
-    <nav className="mt-7 flex gap-1 overflow-x-auto border-b border-black/[.08] dark:border-white/[.08]" aria-label="Profile sections">{tabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? "page" : undefined} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-bold transition ${tab === item.id ? "border-blue-500 text-blue-600 dark:text-blue-300" : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}>{item.id === "insights" && <LockKeyhole className="mr-1 inline h-3.5 w-3.5" />}{item.label}</button>)}</nav>
-    <div className="mt-5">{tab === "activity" && <MarketActivity username={profile.username} owner={owner} teams={teamRefs} fixtures={fixtures} />}{tab === "fixtures" && <FixtureActivity wallet={profile.walletAddress} season={profile.seasonId} />}{tab === "created" && <CreatedMarkets username={profile.username} teams={teamRefs} fixtures={fixtures} />}{tab === "insights" && owner && <ProfileInsights analytics={analytics} loading={analyticsLoading} error={analyticsError} />}</div>
-    <p className="mt-5 flex items-center gap-1.5 text-xs text-zinc-500"><ChartNoAxesCombined className="h-3.5 w-3.5" /> Financial performance is visible only to the account owner.</p>
+    <nav className="flex gap-1 overflow-x-auto border-x border-b border-black/[.08] bg-white dark:border-white/[.08] dark:bg-[#101821]" aria-label="Profile sections">{tabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? "page" : undefined} className={`min-w-max flex-1 border-b-4 px-4 py-4 text-sm font-bold transition ${tab === item.id ? "border-blue-500 text-zinc-950 dark:text-white" : "border-transparent text-zinc-500 hover:bg-black/[.03] dark:hover:bg-white/[.03]"}`}>{item.id === "insights" && <LockKeyhole className="mr-1 inline h-3.5 w-3.5" />}{item.label}</button>)}</nav>
+    <div className="[&>section]:rounded-none [&>section]:border-t-0">{tab === "activity" && <MarketActivity username={profile.username} owner={owner} teams={teamRefs} fixtures={fixtures} />}{tab === "fixtures" && <FixtureActivity wallet={profile.walletAddress} season={profile.seasonId} />}{tab === "created" && <CreatedMarkets username={profile.username} teams={teamRefs} fixtures={fixtures} />}{tab === "insights" && owner && <ProfileInsights analytics={analytics} loading={analyticsLoading} error={analyticsError} />}</div>
+    {owner && <p className="mt-5 flex items-center gap-1.5 px-4 text-xs text-zinc-500"><ChartNoAxesCombined className="h-3.5 w-3.5" /> Financial performance is visible only to you.</p>}
   </main>;
 }
