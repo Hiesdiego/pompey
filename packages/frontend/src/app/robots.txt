@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Allow: /api/social/og/
+Disallow: /api/
+Disallow: /claims
+Disallow: /watchlist
+Disallow: /markets/create
+
+Sitemap: https://tickrbase.top/sitemap.xml
