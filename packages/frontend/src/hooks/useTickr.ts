@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
@@ -23,9 +23,6 @@ export type ChainStatus = "unknown" | "correct" | "switching" | "failed";
 // Module-level: one automatic chain-switch attempt per session, no matter
 // how many components consume this hook.
 let autoSwitchAttempted = false;
-// useTickr is consumed in several parts of the app. Share the in-flight
-// creation attempt so simultaneous hook instances cannot create duplicates.
-let walletCreationInProgress = false;
 
 export function useTickr() {
   const { ready, authenticated, logout, user } = usePrivy();
@@ -34,7 +31,6 @@ export function useTickr() {
   const { open: login } = useLoginModal();
   const { wallets, ready: walletsReady } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
-  const { createWallet } = useCreateWallet();
   const [chainStatus, setChainStatus] = useState<ChainStatus>("unknown");
 
   const privyUserId: string | null = user?.id ?? null;
@@ -55,21 +51,6 @@ export function useTickr() {
     ready &&
     authenticated &&
     (!walletsReady || !playerAddress);
-
-  // TICKR uses a headless login modal, so create the embedded wallet after
-  // authentication when Privy has not supplied one automatically.
-  useEffect(() => {
-    if (!ready || !authenticated || !walletsReady) return;
-    if (wallets.some((wallet) => wallet.walletClientType === "privy")) return;
-    if (walletCreationInProgress) return;
-
-    walletCreationInProgress = true;
-    createWallet()
-      .catch(() => undefined)
-      .finally(() => {
-        walletCreationInProgress = false;
-      });
-  }, [ready, authenticated, walletsReady, wallets, createWallet]);
 
   const ensureChain = useCallback(async (): Promise<boolean> => {
     if (!walletsReady || wallets.length === 0) return false;

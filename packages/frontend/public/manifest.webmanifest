@@ -68,10 +68,10 @@
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Leaderboard",
-      "short_name": "Ranks",
+      "name": "Standings",
+      "short_name": "Standings",
       "description": "Season standings",
-      "url": "/leaderboard",
+      "url": "/standings",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]

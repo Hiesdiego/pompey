@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { PrivyProvider } from "@privy-io/react-auth";
+import { useEffect, useRef } from "react";
+import { PrivyProvider, useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { baseSepolia, baseMainnet } from "@tickr/shared/chains";
@@ -9,6 +9,28 @@ import { queryClient } from "../lib/query/queryClient";
 import { LoginModalProvider } from "../components/LoginModal";
 import { LegalGate } from "../components/LegalGate";
 import { initMatchDuration } from "../lib/matchConfig";
+
+function EnsureEmbeddedWallet() {
+  const { ready, authenticated, user } = usePrivy();
+  const { wallets, ready: walletsReady } = useWallets();
+  const { createWallet } = useCreateWallet();
+  const attemptedForUser = useRef<string | null>(null);
+
+  // Provision once in the always-mounted provider tree. The legal gate can
+  // hide the page and header, so page-level hooks cannot reliably do this.
+  useEffect(() => {
+    if (!ready || !authenticated || !user?.id || !walletsReady) return;
+    if (wallets.some((wallet) => wallet.walletClientType === "privy")) return;
+    if (attemptedForUser.current === user.id) return;
+    attemptedForUser.current = user.id;
+    void createWallet().catch((error) => {
+      attemptedForUser.current = null;
+      console.error("TICKR embedded wallet creation failed:", error);
+    });
+  }, [ready, authenticated, user?.id, walletsReady, wallets, createWallet]);
+
+  return null;
+}
 
 /**
  * TICKR v0.1 Privy setup.
@@ -70,6 +92,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       }}
     >
       <SmartWalletsProvider>
+        <EnsureEmbeddedWallet />
         <QueryClientProvider client={queryClient}>
           <LoginModalProvider><LegalGate>{children}</LegalGate></LoginModalProvider>
         </QueryClientProvider>

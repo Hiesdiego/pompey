@@ -1,31 +1,8 @@
-import { readFileSync, existsSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const BUILD_ID_PATH = join(ROOT, ".next", "BUILD_ID");
-
-/**
- * The same build stamp scripts/stamp-sw.mjs bakes into the service worker.
- * Exposed to the client so the update banner can tell "this build" from
- * "a build the user already dismissed" — sw.js itself can't be read from the
- * page, so both sides derive the value from .next/BUILD_ID the same way.
- *
- * Read lazily (at request time) rather than at module load: next.config is
- * evaluated before `next build` writes BUILD_ID on a cold build.
- */
-function swBuildId() {
-  let seed;
-  try {
-    seed = existsSync(BUILD_ID_PATH) ? readFileSync(BUILD_ID_PATH, "utf8").trim() : "";
-  } catch {
-    seed = "";
-  }
-  if (!seed) return "dev";
-  return createHash("sha256").update(seed).digest("hex").slice(0, 12);
-}
+// Shared by the page and its service worker URL. Generate it before Next
+// compiles the client, so Vercel builds work without a post-build file edit.
+const swBuildId = randomBytes(8).toString("hex");
 
 /** @type {import('next').NextConfig} */
 const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-3aca.onrender.com" || "http://localhost:4000").replace(/\/$/, "");
@@ -33,7 +10,7 @@ const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-3ac
 const nextConfig = {
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_SW_BUILD: swBuildId(),
+    NEXT_PUBLIC_SW_BUILD: swBuildId,
   },
   async rewrites() {
     return [{

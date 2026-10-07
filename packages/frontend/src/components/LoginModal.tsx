@@ -35,6 +35,8 @@ interface LoginModalContextValue {
   open: () => void;
   close: () => void;
   isOpen: boolean;
+  startOAuth: (provider: "google" | "twitter") => Promise<void>;
+  oauthError: string | null;
 }
 
 const LoginModalContext = createContext<LoginModalContextValue | null>(null);
@@ -48,16 +50,33 @@ export function useLoginModal(): LoginModalContextValue {
 export function LoginModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const { authenticated } = usePrivy();
+  // Privy processes the redirect callback in this hook. Keep it mounted while
+  // the modal is closed, since a full-page OAuth redirect resets modal state.
+  const { initOAuth, state: oauthState } = useLoginWithOAuth();
+  const oauthError = oauthState.status === "error"
+    ? oauthState.error?.message || "Sign-in couldn't be completed. Try again."
+    : null;
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
+  const startOAuth = useCallback(
+    (provider: "google" | "twitter") => initOAuth({ provider }),
+    [initOAuth],
+  );
+
+  useEffect(() => {
+    if (oauthError && !authenticated) setIsOpen(true);
+  }, [oauthError, authenticated]);
 
   // Once Privy reports the user is authenticated, dismiss automatically.
   useEffect(() => {
     if (authenticated) setIsOpen(false);
   }, [authenticated]);
 
-  const value = useMemo(() => ({ open, close, isOpen }), [open, close, isOpen]);
+  const value = useMemo(
+    () => ({ open, close, isOpen, startOAuth, oauthError }),
+    [open, close, isOpen, startOAuth, oauthError],
+  );
 
   return (
     <LoginModalContext.Provider value={value}>
@@ -93,7 +112,7 @@ function XIcon() {
 function LoginModalView({ onClose }: { onClose: () => void }) {
   const { connectWallet } = usePrivy();
   const { sendCode, loginWithCode, state: emailState } = useLoginWithEmail();
-  const { initOAuth } = useLoginWithOAuth();
+  const { startOAuth, oauthError } = useLoginModal();
 
   const [view, setView] = useState<"methods" | "email">("methods");
   const [email, setEmail] = useState("");
@@ -156,7 +175,7 @@ function LoginModalView({ onClose }: { onClose: () => void }) {
     setErr(null);
     setOauthPending(provider);
     try {
-      await initOAuth({ provider }); // full-page redirect
+      await startOAuth(provider); // full-page redirect
     } catch (e) {
       setErr((e as Error)?.message || "Couldn't start sign-in. Try again.");
       setOauthPending(null);
@@ -234,9 +253,9 @@ function LoginModalView({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {err && (
+        {(err || oauthError) && (
           <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-sm text-red-600 dark:text-red-400">
-            {err}
+            {err || oauthError}
           </p>
         )}
 

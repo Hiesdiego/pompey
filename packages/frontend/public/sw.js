@@ -3,12 +3,9 @@
  *
  * Design notes (why it looks like this):
  *
- * 1. CACHE_NAME is stamped at build time. `next build` runs
- *    scripts/stamp-sw.mjs, which replaces __SW_BUILD__ with the Next build id.
- *    Without a changing name the activate-time purge can never fire (the old
- *    worker's name IS the current name), so stale `_next/static` chunks get
- *    served forever and deploys appear to do nothing. This is the whole reason
- *    the previous sw.js was broken.
+ * 1. The page registers /sw.js?v=<build>. The build value becomes the cache
+ *    name suffix, so activating a new worker purges stale build assets. The
+ *    script URL also changes on each deploy even though public/sw.js is static.
  *
  * 2. We never call skipWaiting() during install. Swapping the controller
  *    underneath a live tab means the DOM was built from one build's JS while
@@ -31,7 +28,7 @@
  *    and balances must not be served from a cache that outlives the response.
  */
 
-const VERSION = "__SW_BUILD__";
+const VERSION = new URL(self.location.href).searchParams.get("v") || "unversioned";
 const SHELL_CACHE = `tickr-shell-${VERSION}`;
 const RUNTIME_CACHE = `tickr-runtime-${VERSION}`;
 const IMAGE_CACHE = `tickr-images-${VERSION}`;
@@ -242,10 +239,15 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   if (url.origin !== self.location.origin) return;
 
+  // OAuth callback URLs contain one-time credentials. Let the browser fetch
+  // them directly and never store them in a navigation cache.
+  if (url.searchParams.has("privy_oauth_code") || url.searchParams.has("privy_oauth_state")) return;
+
   // Live data is never cached: money, prices, balances, auth.
   if (
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/backend-api/") ||
+    url.pathname === "/sw.js" ||
     url.pathname.startsWith("/_next/data/") ||
     url.pathname.startsWith("/_next/webpack-hmr")
   ) {

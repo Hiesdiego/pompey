@@ -25,13 +25,11 @@ const UPDATE_DISMISSED_KEY = "tickr-sw-update-dismissed";
 const INSTALL_DISMISSED_KEY = "tickr-pwa-install-dismissed";
 
 /**
- * Build stamp shared with the service worker. Both sides hash .next/BUILD_ID
- * the same way (scripts/stamp-sw.mjs and next.config.mjs), so this identifies
- * exactly which deploy is currently running.
+ * Build stamp from next.config.mjs. It is also passed in the worker script URL,
+ * so the worker uses it for cache names without editing public/sw.js.
  */
 const CURRENT_BUILD = process.env.NEXT_PUBLIC_SW_BUILD ?? "dev";
 
-/** Only offer the custom install button where there's no OS-level affordance. */
 function isMobileLike() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -60,13 +58,14 @@ export function PwaRegister() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstall, setShowInstall] = useState(false);
 
-  // Guards controllerchange so we reload exactly once per update.
+  // A first install may claim this page; only an accepted update reloads it.
+  const updateRequestedRef = useRef(false);
   const reloadingRef = useRef(false);
 
   const applyUpdate = useCallback(() => {
     const worker = waitingWorker;
     if (!worker) return;
-    reloadingRef.current = true;
+    updateRequestedRef.current = true;
     worker.postMessage({ type: "SKIP_WAITING" });
   }, [waitingWorker]);
 
@@ -81,7 +80,7 @@ export function PwaRegister() {
     /**
      * A worker is parked. Suppress the bar only if the user dismissed the build
      * that produced it — keyed on the build stamp shared with the service
-     * worker (NEXT_PUBLIC_SW_BUILD, injected by next.config from BUILD_ID).
+     * worker (NEXT_PUBLIC_SW_BUILD, injected by next.config).
      * The next deploy has a different stamp, so it re-surfaces instead of
      * being silenced forever by a single dismissal.
      */
@@ -111,8 +110,9 @@ export function PwaRegister() {
       });
     };
 
+    const workerUrl = `/sw.js?v=${CURRENT_BUILD}`;
     navigator.serviceWorker
-      .register("/sw.js", { scope: "/", updateViaCache: "none" })
+      .register(workerUrl, { scope: "/", updateViaCache: "none" })
       .then((reg) => {
         if (cancelled) return;
         track(reg);
@@ -124,6 +124,7 @@ export function PwaRegister() {
 
     // The new worker claimed this page — swap in the new build exactly once.
     const onControllerChange = () => {
+      if (!updateRequestedRef.current) return;
       if (reloadingRef.current) return;
       if (!navigator.serviceWorker.controller) return;
       reloadingRef.current = true;
@@ -140,7 +141,7 @@ export function PwaRegister() {
     // A failed first registration (started offline, say) shouldn't be sticky.
     const onOnline = () => {
       navigator.serviceWorker
-        .register("/sw.js", { scope: "/" })
+        .register(workerUrl, { scope: "/", updateViaCache: "none" })
         .then((reg) => {
           if (!cancelled) track(reg);
         })
@@ -173,7 +174,7 @@ export function PwaRegister() {
       const promptEvent = event as BeforeInstallPromptEvent;
       promptEvent.preventDefault();
       setInstallEvent(promptEvent);
-      if (readFlag(INSTALL_DISMISSED_KEY) !== "1" && isMobileLike()) {
+      if (readFlag(INSTALL_DISMISSED_KEY) !== "1") {
         setShowInstall(true);
       }
     };
@@ -187,8 +188,10 @@ export function PwaRegister() {
     window.addEventListener("appinstalled", onInstalled);
 
     // iOS has no beforeinstallprompt; offer the hint directly on mobile Safari.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes("Macintosh") && "ontouchend" in document);
     const iosSafari =
-      isMobileLike() &&
+      isIOS &&
       !(window.navigator as Navigator & { standalone?: boolean }).standalone &&
       readFlag(INSTALL_DISMISSED_KEY) !== "1";
     if (iosSafari) setShowInstall(true);
