@@ -1,0 +1,88 @@
+/* TICKR brand loader — letters hop in a wave, crown drops onto the "t". */
+
+.tickr-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #050b18;
+  line-height: 0;
+}
+
+/* Mark box: letters row (3776x1677 units) + crown overhang above (~228 units) */
+.tickr-loader__mark {
+  position: relative;
+  display: block;
+  width: min(240px, 70vw);
+  aspect-ratio: 3776 / 1905;
+}
+
+.tickr-loader__letters {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  aspect-ratio: 3776 / 1677;
+}
+
+.tickr-loader__letter {
+  position: absolute;
+  bottom: 0;
+  height: auto;
+  animation: tickr-hop 1.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.tickr-loader__crown {
+  position: absolute;
+  top: 0;
+  left: 0.29%;
+  width: 22.64%;
+  height: auto;
+  aspect-ratio: 855 / 716;
+  transform-origin: 50% 92%;
+  animation: tickr-crown 2.4s cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
+  will-change: transform;
+  filter: drop-shadow(0 0 10px rgba(80, 140, 255, 0.45));
+}
+
+@keyframes tickr-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-14%);
+  }
+}
+
+@keyframes tickr-crown {
+  0% {
+    transform: translateY(-170%) rotate(-7deg);
+  }
+  45% {
+    transform: translateY(0) rotate(0deg);
+  }
+  60% {
+    transform: translateY(-16%);
+  }
+  74% {
+    transform: translateY(0);
+  }
+  84% {
+    transform: translateY(-6%);
+  }
+  94%,
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tickr-loader__letter,
+  .tickr-loader__crown {
+    animation: none;
+  }
+}
