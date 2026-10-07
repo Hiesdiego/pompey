@@ -17,7 +17,13 @@ export function getPublicClient(): PublicClient {
       : process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL ?? "https://base-sepolia-rpc.publicnode.com";
   const publicFallbacks = env === "mainnet"
     ? ["https://base-rpc.publicnode.com"]
-    : ["https://base-sepolia-rpc.publicnode.com", "https://base-sepolia.drpc.org"];
+    : [
+        "https://base-sepolia.rpc.sentio.xyz",
+        "https://base-sepolia.drpc.org",
+        "https://base-sepolia-rpc.publicnode.com",
+        "https://base-testnet.api.pocket.network",
+        "https://lb.routeme.sh/rpc/evm/84532",
+      ];
   const configured = env === "mainnet"
     ? process.env.NEXT_PUBLIC_BASE_MAINNET_FALLBACK_RPC_URLS
     : process.env.NEXT_PUBLIC_BASE_SEPOLIA_FALLBACK_RPC_URLS;

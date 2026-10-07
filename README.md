@@ -10,13 +10,13 @@
 **TICKR is a decentralized prediction market built like a football season.**
 Coins are the teams. Price moves are the goals. You call the result, stake TICK, and chase the table.
 
-[![Live](https://img.shields.io/badge/▶_Live-tickr--rouge.vercel.app-2E7CF6?style=for-the-badge)](https://tickr-rouge.vercel.app)
+[![Live](https://img.shields.io/badge/▶_Live-tickrbase.top-2E7CF6?style=for-the-badge)](https://tickrbase.top)
 [![Base Sepolia](https://img.shields.io/badge/Network-Base_Sepolia-0052FF?style=for-the-badge&logo=coinbase&logoColor=white)](https://sepolia.basescan.org)
-[![Season 2](https://img.shields.io/badge/Season_2-CTF_Season_1-00C853?style=for-the-badge)](https://tickr-rouge.vercel.app)
+[![Season 2](https://img.shields.io/badge/Season_2-CTF_Season_1-00C853?style=for-the-badge)](https://tickrbase.top)
 
 ![TICKR in action — home, fixtures, staking, markets, leaderboard](packages/frontend/public/tickr-gif/tickr-showoff.gif)
 
-[🎮 Open the app](https://tickr-rouge.vercel.app) · [📖 How to play](https://tickr-rouge.vercel.app/how-to-play) · [🧠 How it works](https://tickr-rouge.vercel.app/about) · [🗺 Roadmap](https://tickr-rouge.vercel.app/roadmap)
+[🎮 Open the app](https://tickrbase.top) · [📖 How to play](https://tickrbase.top/how-to-play) · [🧠 How it works](https://tickrbase.top/about) · [🗺 Roadmap](https://tickrbase.top/roadmap)
 
 </div>
 
@@ -59,7 +59,7 @@ flowchart LR
 4. **It settles on-chain.** The ResultEngine records the score; winners claim their share of the pool minus a small treasury fee.
 5. **The table moves.** 3 points for a win, 1 for a draw — just like football.
 
-Full scoring math, worked examples, and the audit guide live on the [About page](https://tickr-rouge.vercel.app/about).
+Full scoring math, worked examples, and the audit guide live on the [About page](https://tickrbase.top/about).
 
 ## 🏟 Markets beyond fixtures
 
@@ -148,12 +148,14 @@ cp packages/backend/.env.example packages/backend/.env
 | **3 · Mainnet Alpha** | 📅 H1 2027 | Base mainnet + real TICK token launch, creator revenue share, flexible staking (TICK + Base-native + wrapped coins) |
 | **4 · Stable mainnet** | 🔭 Next | More leagues, sponsored league campaigns, mobile app, governance |
 
-Full whitepaper version: [tickr-rouge.vercel.app/roadmap](https://tickr-rouge.vercel.app/roadmap)
+Full whitepaper version: [tickrbase.top/roadmap](https://tickrbase.top/roadmap)
 
 ## 📚 Docs
 
-- [How to play](https://tickr-rouge.vercel.app/how-to-play) — the player's guide
-- [About TICKR](https://tickr-rouge.vercel.app/about) — scoring math, leaderboards, audits, decentralization
+Contact: [contact@tickrbase.top](mailto:contact@tickrbase.top)
+
+- [How to play](https://tickrbase.top/how-to-play) — the player's guide
+- [About TICKR](https://tickrbase.top/about) — scoring math, leaderboards, audits, decentralization
 - [Build spec](tickr-build-spec%20(1).md) — the original v0.1 spec
 - [Social setup](SOCIAL_SETUP.md) — social layer integration notes
 

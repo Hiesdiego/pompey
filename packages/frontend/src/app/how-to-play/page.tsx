@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/how-to-play" },
   title: "How to play — TICKR",
   description:
     "From your first login to your first payout: the complete guide to playing TICKR.",

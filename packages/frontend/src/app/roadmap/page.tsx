@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/roadmap" },
   title: "Roadmap — TICKR",
   description:
     "The TICKR whitepaper roadmap: from testnet beta to stable mainnet, TICK tokenomics, and the features that get us there.",

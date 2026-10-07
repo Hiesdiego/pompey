@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/about" },
   title: "About — TICKR",
   description:
     "What TICKR is, how scoring and private predictor ranks work, how to audit results, and why it's decentralized.",

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LEGAL_VERSION } from "../../lib/legal";
 
-export const metadata: Metadata = { title: "Privacy Notice" };
+export const metadata: Metadata = { title: "Privacy Notice", alternates: { canonical: "/privacy" } };
 
 export default function PrivacyPage() {
   return <article className="mx-auto max-w-3xl space-y-8 py-10 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
@@ -12,6 +12,6 @@ export default function PrivacyPage() {
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Who can see it</h2><p>Wallet addresses and blockchain transactions are public. Your username, bio, selected team, and public market activity may appear on public profile pages. Your private financial analytics and player rank are shown only to your authenticated account. Service providers used to host the app, store profile data, and provide authentication or price data may process information needed to operate those services.</p></section>
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Storage and retention</h2><p>We keep profile and indexed game data while needed to operate TICKR and meet applicable obligations. The legal acknowledgement cookie lasts up to one year, or until the documents change. You can remove local preferences using your browser settings. Public blockchain records cannot be deleted by TICKR.</p></section>
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Your choices and requests</h2><p>You can leave the optional bio blank, remove watched markets, decline the legal acknowledgement and sign out, or stop using the app. To request access, correction, or deletion of information TICKR controls, contact us. We will assess requests under applicable law; we cannot change public blockchain history or information held by independent providers.</p></section>
-    <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Contact and updates</h2><p>Contact the TICKR team at <a href="https://x.com/tickrtop" target="_blank" rel="noopener noreferrer" className="text-[#2E7CF6] underline">@tickrtop on X</a> about privacy requests. We may update this notice and will ask you to acknowledge a materially changed version before continuing.</p></section>
+    <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Contact and updates</h2><p>For privacy requests, email the TICKR team at <a href="mailto:contact@tickrbase.top" className="text-[#2E7CF6] underline">contact@tickrbase.top</a>. We may update this notice and will ask you to acknowledge a materially changed version before continuing.</p></section>
   </article>;
 }

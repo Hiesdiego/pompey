@@ -12,12 +12,11 @@
 import { useState } from "react";
 import { Share2, Link2, Check, Send } from "lucide-react";
 import { cn } from "../lib/cn";
+import { siteUrl as canonicalSiteUrl } from "../lib/siteUrl";
 
 function siteUrl(): string {
   if (typeof window !== "undefined") return window.location.origin;
-  const v =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
-  return v.replace(/\/$/, "");
+  return canonicalSiteUrl();
 }
 
 export function shareLinks(path: string, text: string): {

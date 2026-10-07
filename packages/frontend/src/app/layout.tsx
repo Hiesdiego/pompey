@@ -9,6 +9,8 @@ import { OnboardingGate } from "../components/OnboardingGate";
 import { PwaRegister } from "../components/PwaRegister";
 import { ToastViewport } from "../components/Toast";
 import { WatchAlertMonitor } from "../components/WatchAlertMonitor";
+import { Analytics } from "@vercel/analytics/next";
+import { siteUrl } from "../lib/siteUrl";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const spaceGrotesk = Space_Grotesk({
@@ -17,34 +19,17 @@ const spaceGrotesk = Space_Grotesk({
   weight: ["400", "500", "600", "700"],
 });
 
-const PRODUCTION_SITE_URL = "https://tickr-rouge.vercel.app";
-
 // Absolute origin for metadataBase — without it Next emits relative og:image
 // URLs, which crawlers can't resolve. Mirrors siteUrl() in api/social/og/_shared.
-function siteUrl(): string {
-  const v =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
-    process.env.VERCEL_URL?.trim() ||
-    PRODUCTION_SITE_URL;
-  try {
-    const url = new URL(v.startsWith("http://") || v.startsWith("https://") ? v : `https://${v}`);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return PRODUCTION_SITE_URL;
-    return url.origin;
-  } catch {
-    return PRODUCTION_SITE_URL;
-  }
-}
-
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
   applicationName: "TICKR",
   title: {
-    default: "TICKR - Crypto Price Prediction League",
-    template: "%s - TICKR",
+    default: "TICKR | Crypto Price Prediction League on Base",
+    template: "%s | TICKR",
   },
   description:
-    "Stake TICK on crypto teams. Match outcomes come from real price performance.",
+    "TICKR is a crypto price prediction league on Base. Follow coin fixtures, compare real price performance, and predict outcomes with TICK.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -65,9 +50,9 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "TICKR",
-    title: "TICKR - Crypto Price Prediction League",
+    title: "TICKR | Crypto Price Prediction League on Base",
     description:
-      "Stake TICK on crypto teams. Match outcomes come from real price performance.",
+      "Follow coin fixtures, compare real price performance, and predict outcomes with TICK on Base.",
     images: [
       {
         url: "/tickr-hero.png",
@@ -79,9 +64,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "TICKR - Crypto Price Prediction League",
+    title: "TICKR | Crypto Price Prediction League on Base",
     description:
-      "Stake TICK on crypto teams. Match outcomes come from real price performance.",
+      "Follow coin fixtures, compare real price performance, and predict outcomes with TICK on Base.",
     images: ["/tickr-hero.png"],
   },
 };
@@ -104,6 +89,14 @@ export const viewport: Viewport = {
 // Runs before paint: applies the persisted theme so there's no flash.
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('tickr-theme');document.documentElement.classList.toggle('dark',t!=='light');}catch(e){document.documentElement.classList.add('dark');}})();`;
 
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "WebSite", name: "TICKR", url: siteUrl() },
+    { "@type": "Organization", name: "TICKR", url: siteUrl(), logo: `${siteUrl()}/icons/icon-512.png`, email: "contact@tickrbase.top" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -111,6 +104,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
       </head>
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-white font-sans text-zinc-900 antialiased transition-colors duration-300 dark:bg-black dark:text-zinc-100`}
@@ -128,6 +122,7 @@ export default function RootLayout({
             <WatchAlertMonitor />
           </Providers>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );

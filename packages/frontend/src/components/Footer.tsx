@@ -83,6 +83,7 @@ export async function Footer() {
           <Link href="/markets" className="transition-colors hover:text-[#2E7CF6]">Markets</Link>
           <Link href="/terms" className="transition-colors hover:text-[#2E7CF6]">Terms</Link>
           <Link href="/privacy" className="transition-colors hover:text-[#2E7CF6]">Privacy</Link>
+          <a href="mailto:contact@tickrbase.top" className="transition-colors hover:text-[#2E7CF6]">Contact</a>
           <a href="https://x.com/tickrtop" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#2E7CF6]">Follow on X</a>
         </nav>
         {dynamicLinks.length > 0 && (

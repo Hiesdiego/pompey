@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LEGAL_VERSION } from "../../lib/legal";
 
-export const metadata: Metadata = { title: "Terms of Use" };
+export const metadata: Metadata = { title: "Terms of Use", alternates: { canonical: "/terms" } };
 
 export default function TermsPage() {
   return <article className="mx-auto max-w-3xl space-y-8 py-10 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
@@ -13,6 +13,6 @@ export default function TermsPage() {
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Results and availability</h2><p>Match and market outcomes follow the deployed smart contracts and their price inputs. Quotes, odds, schedules, and displayed estimates can change. Network congestion, third party services, or software faults can delay or interrupt the app. We may fix errors, pause features, or change the game as needed.</p></section>
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Profiles and conduct</h2><p>Your username, bio, market activity, and onchain transactions may be public. Do not impersonate others, post unlawful or abusive material, or use the service to harm others. We may restrict access for misuse, subject to applicable law.</p></section>
     <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Changes and stopping use</h2><p>We may update these terms and ask you to accept a new version before continuing. You can decline or stop using TICKR and sign out. Onchain records remain on the network even after you stop using the app.</p></section>
-    <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Contact</h2><p>Contact the TICKR team at <a href="https://x.com/tickrtop" target="_blank" rel="noopener noreferrer" className="text-[#2E7CF6] underline">@tickrtop on X</a> with questions about these terms.</p></section>
+    <section><h2 className="text-xl font-bold text-zinc-950 dark:text-white">Contact</h2><p>Email the TICKR team at <a href="mailto:contact@tickrbase.top" className="text-[#2E7CF6] underline">contact@tickrbase.top</a> with questions about these terms.</p></section>
   </article>;
 }

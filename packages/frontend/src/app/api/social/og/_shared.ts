@@ -10,6 +10,7 @@
  */
 
 import "server-only";
+import { siteUrl } from "../../../../lib/siteUrl";
 
 /** Standard OG image dimensions. */
 export const OG_WIDTH = 1200;
@@ -32,25 +33,8 @@ export const OG_COLORS = {
   zinc500: "#71717A",
 } as const;
 
-/** Production origin — used when no env var pins the site URL. */
-const PRODUCTION_SITE_URL = "https://tickr-rouge.vercel.app";
-
 /** Canonical frontend origin for absolute metadata and links. */
-export function siteUrl(): string {
-  const v =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    // Vercel's auto-provided canonical production domain (set on prod deploys).
-    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
-    process.env.VERCEL_URL?.trim() ||
-    PRODUCTION_SITE_URL;
-  try {
-    const url = new URL(v.startsWith("http://") || v.startsWith("https://") ? v : `https://${v}`);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return PRODUCTION_SITE_URL;
-    return url.origin;
-  } catch {
-    return PRODUCTION_SITE_URL;
-  }
-}
+export { siteUrl };
 
 /** Base URL for absolute links in OG cards (no trailing slash). */
 export const ogBaseUrl = siteUrl;
