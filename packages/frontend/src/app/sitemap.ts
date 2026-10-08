@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { siteUrl } from "../lib/siteUrl";
 import { backendUrl } from "./api/social/og/_shared";
 
-export const revalidate = 300;
+export const revalidate = 'force-dynamic';
 
 type Fixture = { fixtureId: string | number };
 type Market = { id: string | number };
@@ -10,7 +10,7 @@ type Market = { id: string | number };
 async function catalogue<T>(path: string): Promise<T | null> {
   try {
     const response = await fetch(`${backendUrl()}${path}`, {
-      next: { revalidate },
+      next: { revalidate: 0 },
       signal: AbortSignal.timeout(5_000),
     });
     return response.ok ? (await response.json()) as T : null;
