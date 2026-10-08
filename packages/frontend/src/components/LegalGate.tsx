@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAcceptTerms, usePrivy } from "@privy-io/react-auth";
 import { LEGAL_VERSION } from "../lib/legal";
 import { SEASON_DISPLAY_NAME } from "../lib/contracts";
 import TickrLoader from "./TickrLoader";
@@ -12,6 +12,9 @@ type GateState = "checking" | "required" | "accepted" | "error";
 
 export function LegalGate({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
+  const { acceptTerms: acceptPrivyTerms } = useAcceptTerms();
+  const acceptPrivyTermsRef = useRef(acceptPrivyTerms);
+  acceptPrivyTermsRef.current = acceptPrivyTerms;
   const pathname = usePathname();
   const [state, setState] = useState<GateState>("checking");
   const [checkedUserId, setCheckedUserId] = useState<string | null>(null);
@@ -29,8 +32,13 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
     const response = await fetch("/api/legal/acceptance", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
     if (!response.ok) throw new Error("Could not check your agreement. Try again.");
     const data = await response.json() as { accepted: boolean };
+    // Existing consent was recorded in our signed cookie. Privy must record it
+    // too or its session restore logs the user out on the next page load.
+    if (data.accepted && !user?.hasAcceptedTerms) {
+      await acceptPrivyTermsRef.current();
+    }
     return data.accepted;
-  }, [getAccessToken]);
+  }, [getAccessToken, user?.hasAcceptedTerms]);
 
   useEffect(() => {
     if (!ready || !authenticated || !user?.id) { setState("checking"); setCheckedUserId(null); return; }
@@ -58,6 +66,7 @@ export function LegalGate({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ terms, privacy, adult, eligibleLocation, version: LEGAL_VERSION }),
       });
       if (!response.ok) throw new Error("Could not save your agreement. Try again.");
+      if (!user?.hasAcceptedTerms) await acceptPrivyTermsRef.current();
       setCheckedUserId(user?.id ?? null);
       setState("accepted");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save your agreement."); }
