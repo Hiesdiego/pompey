@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { siteUrl } from "../lib/siteUrl";
 import { backendUrl } from "./api/social/og/_shared";
 
-export const revalidate = 'force-dynamic';
+export const dynamic = 'force-dynamic';
 
 type Fixture = { fixtureId: string | number };
 type Market = { id: string | number };
