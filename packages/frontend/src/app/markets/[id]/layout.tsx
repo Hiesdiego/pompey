@@ -6,7 +6,7 @@
 import type { Metadata } from "next";
 import { parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
 import { getPublicClient } from "../../../hooks/usePublicClient";
-import { isNumericId, siteUrl } from "../../api/social/og/_shared";
+import { backendUrl, isNumericId, siteUrl } from "../../api/social/og/_shared";
 
 const FACTORY_ABI = parseAbi([
   "function marketInfo(uint256 marketId) external view returns (uint8 templateId, address creator, string creatorName, uint64 createdAt, uint64 bettingCloseTime, uint64 endTime, uint64 voidAfter, bytes params, uint8 outcomeCount)",
@@ -46,7 +46,21 @@ async function marketQuestion(marketId: bigint): Promise<string | null> {
       );
       return `Will ${sym(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
-    if (templateId === 4) return "Will the home team cover the fixture spread?";
+    if (templateId === 4) {
+      const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);
+      const response = await fetch(`${backendUrl()}/api/fixtures/${fixtureId}`, { next: { revalidate: 60 } });
+      if (response.ok) {
+        const fixture = (await response.json()) as { home?: { symbol?: string } | null; away?: { symbol?: string } | null };
+        if (fixture.home?.symbol && fixture.away?.symbol) {
+          const points = Math.abs(Number(spread));
+          const goals = points === 1 ? "goal" : "goals";
+          return Number(spread) >= 0
+            ? `Will ${fixture.home.symbol} beat ${fixture.away.symbol} by more than ${points} ${goals}?`
+            : `Will ${fixture.home.symbol} avoid losing to ${fixture.away.symbol} by ${points}+ ${goals}?`;
+        }
+      }
+      return "Will the home team cover the fixture spread?";
+    }
     void creatorName;
     return "TICKR prediction market";
   } catch {
@@ -65,8 +79,8 @@ export async function generateMetadata({
   const question = validId ? await marketQuestion(BigInt(id)) : null;
   const title = question ? `${question} — TICKR` : `Market ${id} — TICKR`;
   const description = question
-    ? `${question} Stake TICK on the outcome.`
-    : "Predict the outcome. Stake TICK. Climb the table.";
+    ? `${question} Pick your lineup and back your team on TICKR.`
+    : "The crypto fantasy league. Pick your lineup and back your team.";
 
   const safeId = encodeURIComponent(id);
   const ogImage = `${site}/api/social/og/market/${safeId}?title=${encodeURIComponent(question ?? "TICKR prediction market")}`;

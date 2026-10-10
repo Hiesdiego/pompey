@@ -21,6 +21,7 @@ import {
   logoDataUrl,
   formatTickShort,
   isNumericId,
+  ogTemplateDataUrl,
 } from "../../_shared";
 
 /**
@@ -90,25 +91,30 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let templateBackground: string | null = null;
   try {
     const fallbackTitle = new URL(req.url).searchParams.get("title") || "TICKR match";
-    const response = await renderMatchCard(await params, fallbackTitle);
+    templateBackground = await ogTemplateDataUrl(process.env.NODE_ENV === "development" ? new URL(req.url).origin : undefined);
+    const response = await renderMatchCard(await params, fallbackTitle, templateBackground);
     if (!(response instanceof ImageResponse)) return response;
     // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Match OG image failed", error);
-    const fallback = fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match");
+    const fallback = await fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match", templateBackground);
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
 /** Minimal fallback card — guaranteed to render. */
-function fallbackMatchCard(title: string): ImageResponse {
+async function fallbackMatchCard(title: string, templateBackground: string | null): Promise<ImageResponse> {
   const c = OG_COLORS;
   const [homeName, awayName] = title.split(/\s+vs\.?\s+/i, 2);
   const home = (homeName || title || "TICKR Match").slice(0, 42);
   const away = (awayName || "Opponent").slice(0, 42);
+  const homeTeam = TICKR_TEAMS.find((team) => team.name.toLowerCase() === home.toLowerCase() || team.symbol.toLowerCase() === home.toLowerCase());
+  const awayTeam = TICKR_TEAMS.find((team) => team.name.toLowerCase() === away.toLowerCase() || team.symbol.toLowerCase() === away.toLowerCase());
+  const [homeLogo, awayLogo] = await Promise.all([logoDataUrl(homeTeam?.cmcId), logoDataUrl(awayTeam?.cmcId)]);
   return new ImageResponse(
     (
       <div
@@ -119,22 +125,25 @@ function fallbackMatchCard(title: string): ImageResponse {
           flexDirection: "column",
           justifyContent: "space-between",
           padding: 54,
-          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
+          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
           border: "1px solid #24434a",
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}><span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• MATCH PREDICTION</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}><span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span></div>
           <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>FIXTURE</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28, width: "100%" }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 380 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{home.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800, textAlign: "center" }}>{home}</div></div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>VS</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>PICK THE WINNER</span></div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 300 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{away.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800 }}>{away}</div></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 380 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{homeLogo ? <img src={homeLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : home.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800, textAlign: "center" }}>{home}</div></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>VS</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>BACK YOUR TEAM</span></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 300 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{awayLogo ? <img src={awayLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : away.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800 }}>{away}</div></div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>◉  Predict. Compete. Climb.</span><span>tickrbase.top</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>◉  Pick your lineup. Back your team.</span><span>tickrbase.top</span></div>
       </div>
     ),
     {
@@ -145,7 +154,7 @@ function fallbackMatchCard(title: string): ImageResponse {
   );
 }
 
-async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
+async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, templateBackground: string | null) {
   if (!isNumericId(id)) return new Response("Match not found", { status: 404 });
   const base = backendUrl();
   const c = OG_COLORS;
@@ -156,7 +165,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
   ]);
 
   if (!fixture?.home || !fixture?.away) {
-    return fallbackMatchCard(fallbackTitle);
+    return await fallbackMatchCard(fallbackTitle, templateBackground);
   }
 
   const homeTeam = TICKR_TEAMS.find((t) => t.teamId === fixture.home!.teamId);
@@ -221,12 +230,15 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: `linear-gradient(135deg, ${c.bg} 0%, ${c.bgAlt} 100%)`,
+          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
           color: c.white,
           fontFamily: "system-ui, -apple-system, sans-serif",
           padding: 64,
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>

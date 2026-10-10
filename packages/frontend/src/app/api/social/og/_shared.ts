@@ -39,6 +39,36 @@ export { siteUrl };
 /** Base URL for absolute links in OG cards (no trailing slash). */
 export const ogBaseUrl = siteUrl;
 
+const ogTemplateCache = new Map<string, Promise<string | null>>();
+
+/** Fetch and inline the supplied social-card background for Satori rendering. */
+export async function ogTemplateDataUrl(origin = siteUrl()): Promise<string | null> {
+  const key = new URL(origin).origin;
+  let cached = ogTemplateCache.get(key);
+  if (!cached) {
+    cached = (async () => {
+      try {
+        const response = await fetch(new URL("/og-meta/image.png", key), {
+          next: { revalidate: 86400 },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) return null;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (!bytes.length || bytes.length > 4_000_000) return null;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        return `data:image/png;base64,${btoa(binary)}`;
+      } catch {
+        return null;
+      }
+    })();
+    ogTemplateCache.set(key, cached);
+  }
+  return cached;
+}
+
 /** Accept canonical non-negative decimal identifiers only. */
 export function isNumericId(id: string): boolean {
   return /^(0|[1-9]\d{0,77})$/.test(id);

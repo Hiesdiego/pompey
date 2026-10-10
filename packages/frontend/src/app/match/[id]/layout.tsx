@@ -16,7 +16,7 @@ export async function generateMetadata({
   const validId = isNumericId(id);
 
   let title = `Match ${id} — TICKR`;
-  let description = "Predict the outcome. Stake TICK. Climb the table.";
+  let description = "The crypto fantasy league. Pick your lineup and back your team.";
   try {
     const res = validId
       ? await fetch(`${backendUrl()}/api/fixtures/${id}`, { next: { revalidate: 60 } })
@@ -31,7 +31,7 @@ export async function generateMetadata({
         title = `${f.home.name} vs ${f.away.name} — TICKR`;
         description = f.settled
           ? `Full-time result: ${f.home.name} vs ${f.away.name} on TICKR.`
-          : `${f.home.name} take on ${f.away.name} on TICKR — predict the winner and stake TICK.`;
+          : `${f.home.name} take on ${f.away.name} on TICKR — pick your lineup and back your team.`;
       }
     }
   } catch {

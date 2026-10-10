@@ -21,9 +21,12 @@ import {
   OG_HEIGHT,
   OG_COLORS,
   ogBaseUrl,
+  backendUrl,
   formatTickShort,
   handleForAddress,
   isNumericId,
+  logoDataUrl,
+  ogTemplateDataUrl,
 } from "../../_shared";
 
 /**
@@ -63,7 +66,7 @@ function teamName(teamId: number | bigint): string {
   return TICKR_TEAMS.find((t) => t.teamId === id)?.name ?? `Team #${id}`;
 }
 
-function questionFor(templateId: number, params: `0x${string}`): string {
+async function questionFor(templateId: number, params: `0x${string}`): Promise<string> {
   try {
     if (templateId === TEMPLATES.TOP_GAINER) {
       const [, md] = decodeAbiParameters(parseAbiParameters("uint256, uint8"), params);
@@ -81,7 +84,24 @@ function questionFor(templateId: number, params: `0x${string}`): string {
       );
       return `Will ${teamSymbol(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
-    if (templateId === TEMPLATES.SPREAD) return "Will the home team cover the fixture spread?";
+    if (templateId === TEMPLATES.SPREAD) {
+      const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);
+      const res = await fetch(`${backendUrl()}/api/fixtures/${fixtureId}`, {
+        next: { revalidate: 60 },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const fixture = (await res.json()) as { home?: { symbol?: string } | null; away?: { symbol?: string } | null };
+        if (fixture.home?.symbol && fixture.away?.symbol) {
+          const points = Math.abs(Number(spread));
+          const goalWord = points === 1 ? "goal" : "goals";
+          return Number(spread) >= 0
+            ? `Will ${fixture.home.symbol} beat ${fixture.away.symbol} by more than ${points} ${goalWord}?`
+            : `Will ${fixture.home.symbol} avoid losing to ${fixture.away.symbol} by ${points}+ ${goalWord}?`;
+        }
+      }
+      return "Will the home team cover the fixture spread?";
+    }
   } catch {
     /* fall through */
   }
@@ -111,20 +131,22 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let templateBackground: string | null = null;
   try {
-    const response = await renderMarketCard(await params, new URL(req.url).searchParams.get("title") || "TICKR prediction market");
+    templateBackground = await ogTemplateDataUrl(process.env.NODE_ENV === "development" ? new URL(req.url).origin : undefined);
+    const response = await renderMarketCard(await params, new URL(req.url).searchParams.get("title") || "TICKR prediction market", templateBackground);
     if (!(response instanceof ImageResponse)) return response;
     // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Market OG image failed", error);
-    const fallback = fallbackMarketCard(new URL(req.url).searchParams.get("title") || "TICKR prediction market");
+    const fallback = await fallbackMarketCard(new URL(req.url).searchParams.get("title") || "TICKR prediction market", templateBackground);
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
 /** Minimal fallback card — guaranteed to render. */
-function fallbackMarketCard(title: string): ImageResponse {
+async function fallbackMarketCard(title: string, templateBackground: string | null): Promise<ImageResponse> {
   const c = OG_COLORS;
   const safeTitle = title.slice(0, 110);
   return new ImageResponse(
@@ -137,28 +159,31 @@ function fallbackMarketCard(title: string): ImageResponse {
           flexDirection: "column",
           justifyContent: "space-between",
           padding: 54,
-          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
+          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
           border: "1px solid #24434a",
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}>
-            <span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• PREDICTION MARKET</span>
+            <span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span>
           </div>
           <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>LIVE MARKET</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 48 }}>
           <div style={{ display: "flex", flexDirection: "column", width: 570, gap: 22 }}>
-            <div style={{ color: "#22d3ee", fontSize: 17, letterSpacing: 3, fontWeight: 700 }}>MAKE YOUR CALL</div>
+            <div style={{ color: "#22d3ee", fontSize: 17, letterSpacing: 3, fontWeight: 700 }}>PICK YOUR LINEUP</div>
             <div style={{ fontSize: 47, lineHeight: 1.14, fontWeight: 800 }}>{safeTitle}</div>
-            <div style={{ color: "#67e8f9", fontSize: 19, letterSpacing: 1 }}>PREDICT THE OUTCOME. STAKE TICK.</div>
+            <div style={{ color: "#67e8f9", fontSize: 19, letterSpacing: 1 }}>BACK YOUR TEAM. CLIMB THE TABLE.</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", width: 400, padding: 24, borderRadius: 20, background: "#0b1117", border: "1px solid #164e63", gap: 14 }}>
             <div style={{ color: "#94a3b8", fontSize: 16, letterSpacing: 2 }}>CHOOSE AN OUTCOME</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#101b20", border: "1px solid #17434b", fontSize: 23 }}><span style={{ color: "#4ade80" }}>● Yes</span><span style={{ color: "#94a3b8" }}>—</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#10171c", border: "1px solid #29353a", fontSize: 23 }}><span style={{ color: "#fb7185" }}>● No</span><span style={{ color: "#94a3b8" }}>—</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#101b20", border: "1px solid #17434b", fontSize: 23 }}><span style={{ color: "#4ade80" }}>● Yes</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#10171c", border: "1px solid #29353a", fontSize: 23 }}><span style={{ color: "#fb7185" }}>● No</span></div>
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18 }}><span>◉  A market for every prediction</span><span>tickrbase.top</span></div>
@@ -172,13 +197,13 @@ function fallbackMarketCard(title: string): ImageResponse {
   );
 }
 
-async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
+async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, templateBackground: string | null) {
   const c = OG_COLORS;
   if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
   const marketId = BigInt(id);
 
   if (!FACTORY) {
-    return fallbackMarketCard(fallbackTitle);
+    return fallbackMarketCard(fallbackTitle, templateBackground);
   }
 
   const client = getPublicClient();
@@ -188,7 +213,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
   ]).catch(() => null);
-  if (!reads) return fallbackMarketCard(fallbackTitle);
+  if (!reads) return fallbackMarketCard(fallbackTitle, templateBackground);
   const [info, settlement] = reads;
 
   const [templateId, creator, creatorName, , bettingCloseTime, , , marketParams, outcomeCount] = info;
@@ -197,7 +222,8 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const resolved = state === 1;
   const voided = state === 2;
 
-  const question = questionFor(templateId, marketParams);
+  let question = await questionFor(templateId, marketParams);
+  if (templateId === TEMPLATES.SPREAD && (question === "Spread" || question === "Will the home team cover the fixture spread?")) question = fallbackTitle;
   const labels = outcomeLabels(templateId, marketParams, outcomeCount);
 
   // Outcome totals for odds.
@@ -217,6 +243,11 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     .map((label, i) => ({ label, i, pct: pct(i) }))
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 3);
+  const rankedLogos = await Promise.all(ranked.map(({ i }) =>
+    templateId === TEMPLATES.TOP_GAINER || templateId === TEMPLATES.CHAMPION
+      ? logoDataUrl(TICKR_TEAMS[i]?.cmcId)
+      : Promise.resolve(null)
+  ));
 
   // Winning outcome indices from the bitmap.
   const winners: number[] = [];
@@ -264,12 +295,15 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: `linear-gradient(135deg, ${c.bg} 0%, ${c.bgAlt} 100%)`,
+          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
           color: c.white,
           fontFamily: "system-ui, -apple-system, sans-serif",
           padding: 64,
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -346,6 +380,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
                     borderRadius: 16,
                   }}
                 >
+                  {rankedLogos[ranked.indexOf(o)] ? <img src={rankedLogos[ranked.indexOf(o)]!} width={42} height={42} style={{ borderRadius: 999, background: "#fff" }} /> : null}
                   <span style={{ fontSize: 30, fontWeight: 700, color: c.zinc100 }}>{o.label}</span>
                   <span style={{ fontSize: 34, fontWeight: 900, color: c.accent }}>
                     {o.pct.toFixed(0)}%
