@@ -1,7 +1,4 @@
-/**
- * Route layout for /match/[id] — provides dynamic social metadata.
- * The page itself is a client component, so metadata lives here.
- */
+
 
 import type { Metadata } from "next";
 import { backendUrl, isNumericId, siteUrl } from "../../api/social/og/_shared";
@@ -35,7 +32,8 @@ export async function generateMetadata({
       }
     }
   } catch {
-    /* fallback title stands */
+    title = `Match ${id} — TICKR`;
+    description = "The crypto fantasy league. Pick your lineup and back your team.";
   }
 
   const safeId = encodeURIComponent(id);

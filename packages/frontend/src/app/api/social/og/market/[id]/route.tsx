@@ -1,12 +1,4 @@
-/**
- * Dynamic OG image for a market: /api/og/market/[id]
- *
- * Mirrors the desktop market card:
- *  - Unresolved: question, top outcomes + odds, "created by @creator", close time
- *  - Resolved: question, winning outcome, "resolved by @resolver", "created by @creator"
- *
- * 1200×630 PNG generated at request time via Next's ImageResponse.
- */
+
 
 import { ImageResponse } from "next/og";
 import {
@@ -26,18 +18,12 @@ import {
   handleForAddress,
   isNumericId,
   logoDataUrl,
-  ogTemplateDataUrl,
 } from "../../_shared";
 
-/**
- * NOTE: Node.js runtime (not edge) — viem's RPC calls fail on the edge
- * runtime, which broke all chain reads. OG images are cached by crawlers
- * anyway, so the edge speed advantage doesn't matter here.
- */
+
 export const runtime = "nodejs";
 
 const FACTORY = (process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS || "") as `0x${string}`;
-// `||` not `??` — an empty env var must fall back too; BigInt("") throws at module load.
 const FACTORY_DEPLOY_BLOCK = BigInt(process.env.MARKET_FACTORY_DEPLOY_BLOCK?.trim() || "0");
 
 const FACTORY_ABI = parseAbi([
@@ -103,9 +89,8 @@ async function questionFor(templateId: number, params: `0x${string}`): Promise<s
       return "Will the home team cover the fixture spread?";
     }
   } catch {
-    /* fall through */
+    return TEMPLATE_NAMES[templateId] ?? "Market";
   }
-  return TEMPLATE_NAMES[templateId] ?? "Market";
 }
 
 function outcomeLabels(
@@ -131,22 +116,19 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let templateBackground: string | null = null;
   try {
-    templateBackground = await ogTemplateDataUrl(process.env.NODE_ENV === "development" ? new URL(req.url).origin : undefined);
-    const response = await renderMarketCard(await params, new URL(req.url).searchParams.get("title") || "TICKR prediction market", templateBackground);
+    const response = await renderMarketCard(await params, new URL(req.url).searchParams.get("title") || "TICKR prediction market");
     if (!(response instanceof ImageResponse)) return response;
-    // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Market OG image failed", error);
-    const fallback = await fallbackMarketCard(new URL(req.url).searchParams.get("title") || "TICKR prediction market", templateBackground);
+    const fallback = fallbackMarketCard(new URL(req.url).searchParams.get("title") || "TICKR prediction market");
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
-/** Minimal fallback card — guaranteed to render. */
-async function fallbackMarketCard(title: string, templateBackground: string | null): Promise<ImageResponse> {
+
+function fallbackMarketCard(title: string): ImageResponse {
   const c = OG_COLORS;
   const safeTitle = title.slice(0, 110);
   return new ImageResponse(
@@ -159,15 +141,12 @@ async function fallbackMarketCard(title: string, templateBackground: string | nu
           flexDirection: "column",
           justifyContent: "space-between",
           padding: 54,
-          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
+          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
           border: "1px solid #24434a",
-          position: "relative",
-          overflow: "hidden",
         }}
       >
-        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}>
             <span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span>
@@ -197,36 +176,31 @@ async function fallbackMarketCard(title: string, templateBackground: string | nu
   );
 }
 
-async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, templateBackground: string | null) {
+async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const c = OG_COLORS;
   if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
   const marketId = BigInt(id);
 
   if (!FACTORY) {
-    return fallbackMarketCard(fallbackTitle, templateBackground);
+    return fallbackMarketCard(fallbackTitle);
   }
 
   const client = getPublicClient();
-
-  // A non-existent market reverts — render the fallback card, not a 500.
   const reads = await Promise.all([
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
   ]).catch(() => null);
-  if (!reads) return fallbackMarketCard(fallbackTitle, templateBackground);
+  if (!reads) return fallbackMarketCard(fallbackTitle);
   const [info, settlement] = reads;
 
   const [templateId, creator, creatorName, , bettingCloseTime, , , marketParams, outcomeCount] = info;
   const [seedAmount, totalStaked, state, winnerBitmap] = settlement;
-  // state: 0 = Open, 1 = Resolved, 2 = Voided
   const resolved = state === 1;
   const voided = state === 2;
 
   let question = await questionFor(templateId, marketParams);
   if (templateId === TEMPLATES.SPREAD && (question === "Spread" || question === "Will the home team cover the fixture spread?")) question = fallbackTitle;
   const labels = outcomeLabels(templateId, marketParams, outcomeCount);
-
-  // Outcome totals for odds.
   const totals = await Promise.all(
     labels.map((_, i) =>
       client
@@ -237,8 +211,6 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
   const totalForOdds = totals.reduce((s, v) => s + v, 0n) + seedAmount;
   const pct = (i: number) =>
     totalForOdds > 0n ? Number((totals[i] * 10000n) / totalForOdds) / 100 : 0;
-
-  // Top 3 outcomes by stake for the card.
   const ranked = labels
     .map((label, i) => ({ label, i, pct: pct(i) }))
     .sort((a, b) => b.pct - a.pct)
@@ -248,16 +220,12 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
       ? logoDataUrl(TICKR_TEAMS[i]?.cmcId)
       : Promise.resolve(null)
   ));
-
-  // Winning outcome indices from the bitmap.
   const winners: number[] = [];
   if (resolved) {
     for (let i = 0; i < labels.length; i++) {
       if ((winnerBitmap >> BigInt(i)) & 1n) winners.push(i);
     }
   }
-
-  // Resolver: from the MarketResolved event.
   let resolverHandle: string | null = null;
   if (resolved) {
     try {
@@ -270,7 +238,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
       const resolver = (logs[0]?.args as { resolver?: `0x${string}` } | undefined)?.resolver;
       if (resolver) resolverHandle = await handleForAddress(resolver);
     } catch {
-      /* resolver unknown — card renders without it */
+      resolverHandle = null;
     }
   }
 
@@ -295,24 +263,24 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
+          background: "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
           color: c.white,
           fontFamily: "system-ui, -apple-system, sans-serif",
           padding: 64,
-          position: "relative",
+          border: "1px solid #17404d",
+          borderRadius: 28,
           overflow: "hidden",
         }}
       >
-        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
-        {/* Header */}
+        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
               style={{
                 width: 56,
                 height: 56,
-                borderRadius: 16,
-                background: `linear-gradient(135deg, ${c.accent} 0%, ${c.accentDark} 100%)`,
+                borderRadius: 18,
+                background: "linear-gradient(145deg, #23d5f4 0%, #1474ff 100%)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -320,7 +288,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
                 fontWeight: 900,
               }}
             >
-              ✓
+              ↑
             </div>
             <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 2 }}>TICKR</div>
           </div>
@@ -342,12 +310,12 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
           </div>
         </div>
 
-        {/* Question */}
+        {}
         <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1.2 }}>
           {question.length > 90 ? question.slice(0, 87) + "…" : question}
         </div>
 
-        {/* Outcomes */}
+        {}
         <div style={{ display: "flex", gap: 24 }}>
           {resolved || voided
             ? winners.map((i) => (
@@ -392,7 +360,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string, t
           )}
         </div>
 
-        {/* Footer */}
+        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 32, fontSize: 24, color: c.zinc400 }}>
             <span>

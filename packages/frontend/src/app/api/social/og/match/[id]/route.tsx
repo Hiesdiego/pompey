@@ -1,12 +1,4 @@
-/**
- * Dynamic OG image for a match: /api/og/match/[id]
- *
- * Mirrors the desktop match card:
- *  - Unresolved: teams + logos, VS (or live score), matchday, pool size
- *  - Resolved: FT score, winner highlight, payout distributed
- *
- * 1200×630 PNG generated at request time via Next's ImageResponse.
- */
+
 
 import { ImageResponse } from "next/og";
 import { parseAbi } from "viem";
@@ -21,18 +13,12 @@ import {
   logoDataUrl,
   formatTickShort,
   isNumericId,
-  ogTemplateDataUrl,
 } from "../../_shared";
 
-/**
- * NOTE: Node.js runtime (not edge) — viem's RPC calls fail on the edge
- * runtime, which broke all chain reads. OG images are cached by crawlers
- * anyway, so the edge speed advantage doesn't matter here.
- */
+
 export const runtime = "nodejs";
 
 const PRICE_ORACLE = (process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS || "") as `0x${string}`;
-// `||` not `??` — an empty env var must fall back too; BigInt("") throws at module load.
 const SEASON_ID = BigInt(process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2");
 
 const SNAPSHOT_ABI = parseAbi([
@@ -49,11 +35,10 @@ function pctOf(start: bigint, end: bigint): number | null {
   return ((e - s) / s) * 100;
 }
 
-/** Same oracle rounding as the app: 1 goal = 0.5% price move. */
+
 function goalsFor(pct: number): number {
   const sign = pct < 0 ? -1 : 1;
   const abs = Math.abs(pct);
-  // 0.5% per goal, dead zone below 0.25%
   if (abs < 0.25) return 0;
   return sign * Math.round(abs / 0.5);
 }
@@ -91,23 +76,20 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let templateBackground: string | null = null;
   try {
     const fallbackTitle = new URL(req.url).searchParams.get("title") || "TICKR match";
-    templateBackground = await ogTemplateDataUrl(process.env.NODE_ENV === "development" ? new URL(req.url).origin : undefined);
-    const response = await renderMatchCard(await params, fallbackTitle, templateBackground);
+    const response = await renderMatchCard(await params, fallbackTitle);
     if (!(response instanceof ImageResponse)) return response;
-    // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Match OG image failed", error);
-    const fallback = await fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match", templateBackground);
+    const fallback = await fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match");
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
 
-/** Minimal fallback card — guaranteed to render. */
-async function fallbackMatchCard(title: string, templateBackground: string | null): Promise<ImageResponse> {
+
+async function fallbackMatchCard(title: string): Promise<ImageResponse> {
   const c = OG_COLORS;
   const [homeName, awayName] = title.split(/\s+vs\.?\s+/i, 2);
   const home = (homeName || title || "TICKR Match").slice(0, 42);
@@ -125,15 +107,12 @@ async function fallbackMatchCard(title: string, templateBackground: string | nul
           flexDirection: "column",
           justifyContent: "space-between",
           padding: 54,
-          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
+          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
           border: "1px solid #24434a",
-          position: "relative",
-          overflow: "hidden",
         }}
       >
-        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}><span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span></div>
           <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>FIXTURE</div>
@@ -154,7 +133,7 @@ async function fallbackMatchCard(title: string, templateBackground: string | nul
   );
 }
 
-async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, templateBackground: string | null) {
+async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
   if (!isNumericId(id)) return new Response("Match not found", { status: 404 });
   const base = backendUrl();
   const c = OG_COLORS;
@@ -165,21 +144,17 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
   ]);
 
   if (!fixture?.home || !fixture?.away) {
-    return await fallbackMatchCard(fallbackTitle, templateBackground);
+    return await fallbackMatchCard(fallbackTitle);
   }
 
   const homeTeam = TICKR_TEAMS.find((t) => t.teamId === fixture.home!.teamId);
   const awayTeam = TICKR_TEAMS.find((t) => t.teamId === fixture.away!.teamId);
-  // Pre-fetch logos as data URLs — never let Satori fetch external images
-  // during render (a blocked CDN kills the whole image).
   const [homeLogo, awayLogo] = await Promise.all([
     logoDataUrl(homeTeam?.cmcId),
     logoDataUrl(awayTeam?.cmcId),
   ]);
 
   const settled = fixture.settled || pool?.settled || false;
-
-  // FT score from the oracle snapshot (same source as the app).
   let score: [number, number] | null = null;
   if (settled && PRICE_ORACLE) {
     try {
@@ -196,11 +171,9 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
         if (hg !== null && ag !== null) score = [goalsFor(hg), goalsFor(ag)];
       }
     } catch {
-      /* snapshot unavailable — card renders without score */
+      score = null;
     }
   }
-
-  // Payout distributed = total pool minus platform fee (matches claim math).
   const totalPool =
     BigInt(pool?.totalHome ?? "0") +
     BigInt(pool?.totalDraw ?? "0") +
@@ -230,24 +203,24 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: templateBackground ? "transparent" : "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
+          background: "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
           color: c.white,
           fontFamily: "system-ui, -apple-system, sans-serif",
           padding: 64,
-          position: "relative",
+          border: "1px solid #17404d",
+          borderRadius: 28,
           overflow: "hidden",
         }}
       >
-        {templateBackground ? <img src={templateBackground} width={OG_WIDTH} height={OG_HEIGHT} style={{ position: "absolute", inset: 0, width: OG_WIDTH, height: OG_HEIGHT, objectFit: "cover", zIndex: -1 }} /> : null}
-        {/* Header */}
+        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
               style={{
                 width: 56,
                 height: 56,
-                borderRadius: 16,
-                background: `linear-gradient(135deg, ${c.accent} 0%, ${c.accentDark} 100%)`,
+                borderRadius: 18,
+                background: "linear-gradient(145deg, #23d5f4 0%, #1474ff 100%)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -255,7 +228,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
                 fontWeight: 900,
               }}
             >
-              ✓
+              ↑
             </div>
             <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 2 }}>TICKR</div>
           </div>
@@ -273,7 +246,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
           </div>
         </div>
 
-        {/* Teams + score */}
+        {}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 48 }}>
           <TeamBlock
             name={fixture.home.name}
@@ -303,7 +276,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string, te
           />
         </div>
 
-        {/* Footer */}
+        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 26, color: c.zinc400 }}>
             {settled ? (
@@ -361,7 +334,6 @@ function TeamBlock({
       }}
     >
       {logo ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={logo}
           alt={symbol}

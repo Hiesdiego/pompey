@@ -1,7 +1,4 @@
-/**
- * Route layout for /markets/[id] — provides dynamic social metadata.
- * The page itself is a client component, so metadata lives here.
- */
+
 
 import type { Metadata } from "next";
 import { parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
@@ -24,7 +21,6 @@ async function marketQuestion(marketId: bigint): Promise<string | null> {
       args: [marketId],
     });
     const [templateId, , creatorName, , , , , params] = info;
-    // Reuse the same plain-language derivation as the app.
     const { TICKR_TEAMS } = await import("@tickr/shared/teams");
     const sym = (id: number | bigint) =>
       TICKR_TEAMS.find((t) => t.teamId === Number(id))?.symbol ?? `#${Number(id)}`;

@@ -1,22 +1,13 @@
-/**
- * Shared helpers for the dynamic OG image routes (/api/og/*).
- * Underscore-prefixed so Next.js doesn't treat it as a route.
- *
- * The OG images mirror the app's desktop cards:
- *  - Unresolved match: teams, VS / live score, matchday, pool size
- *  - Resolved match: FT score, winner, payout distributed
- *  - Unresolved market: question, outcomes + odds, creator, close time
- *  - Resolved market: question, winning outcome, resolver, creator
- */
+
 
 import "server-only";
 import { siteUrl } from "../../../../lib/siteUrl";
 
-/** Standard OG image dimensions. */
+
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
 
-/** TICKR brand palette (matches the app's dark theme). */
+
 export const OG_COLORS = {
   bg: "#0B1B3D",
   bgAlt: "#0E2247",
@@ -33,53 +24,24 @@ export const OG_COLORS = {
   zinc500: "#71717A",
 } as const;
 
-/** Canonical frontend origin for absolute metadata and links. */
+
 export { siteUrl };
 
-/** Base URL for absolute links in OG cards (no trailing slash). */
+
 export const ogBaseUrl = siteUrl;
 
-const ogTemplateCache = new Map<string, Promise<string | null>>();
 
-/** Fetch and inline the supplied social-card background for Satori rendering. */
-export async function ogTemplateDataUrl(origin = siteUrl()): Promise<string | null> {
-  const key = new URL(origin).origin;
-  let cached = ogTemplateCache.get(key);
-  if (!cached) {
-    cached = (async () => {
-      try {
-        const response = await fetch(new URL("/og-meta/image.png", key), {
-          next: { revalidate: 86400 },
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!response.ok) return null;
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (!bytes.length || bytes.length > 4_000_000) return null;
-        let binary = "";
-        for (let i = 0; i < bytes.length; i += 8192) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-        }
-        return `data:image/png;base64,${btoa(binary)}`;
-      } catch {
-        return null;
-      }
-    })();
-    ogTemplateCache.set(key, cached);
-  }
-  return cached;
-}
 
-/** Accept canonical non-negative decimal identifiers only. */
 export function isNumericId(id: string): boolean {
   return /^(0|[1-9]\d{0,77})$/.test(id);
 }
 
-/** Backend API base (server-side only). */
+
 export function backendUrl(): string {
   return (process.env.BACKEND_API_URL || "https://tickr-backend-3aca.onrender.com").replace(/\/$/, "");
 }
 
-/** CoinMarketCap static logo (absolute URL, works in OG renders). */
+
 export function teamLogoUrl(cmcId: number | null | undefined): string | null {
   if (typeof cmcId === "number" && cmcId > 0) {
     return `https://s2.coinmarketcap.com/static/img/coins/64x64/${cmcId}.png`;
@@ -92,7 +54,7 @@ export function shortAddress(addr: string): string {
   return addr.length > 10 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-/** Format a TICK amount (wei string) for display, e.g. "1,250". */
+
 export function formatTickShort(wei: string | bigint | null | undefined): string {
   if (wei === null || wei === undefined) return "0";
   try {
@@ -103,7 +65,7 @@ export function formatTickShort(wei: string | bigint | null | undefined): string
   }
 }
 
-/** Look up a username by wallet address via Supabase (null when unknown). */
+
 export async function usernameForAddress(
   address: string
 ): Promise<string | null> {
@@ -122,17 +84,12 @@ export async function usernameForAddress(
   }
 }
 
-/** Display handle: @username when known, else truncated address. */
+
 export async function handleForAddress(address: string): Promise<string> {
   return (await usernameForAddress(address)) ?? shortAddress(address);
 }
 
-/**
- * Fetch a team logo and embed as a data URL. Satori fetches <img> srcs
- * during render — a slow or blocked CDN would kill the whole image, so we
- * pre-fetch here with a short timeout and fall back to null (the card then
- * renders the letter avatar instead). Never throws.
- */
+
 export async function logoDataUrl(cmcId: number | null | undefined): Promise<string | null> {
   if (typeof cmcId !== "number" || cmcId <= 0) return null;
   try {
@@ -145,7 +102,6 @@ export async function logoDataUrl(cmcId: number | null | undefined): Promise<str
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
     if (buf.byteLength === 0 || buf.byteLength > 200_000) return null;
-    // btoa, not Buffer — Buffer doesn't exist on the edge runtime.
     const bytes = new Uint8Array(buf);
     let binary = "";
     const CHUNK = 8192;
