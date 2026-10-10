@@ -108,17 +108,17 @@ function outcomeLabels(
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const response = await renderMarketCard(await params);
+    const response = await renderMarketCard(await params, new URL(req.url).searchParams.get("title") || "TICKR prediction market");
     if (!(response instanceof ImageResponse)) return response;
     // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Market OG image failed", error);
-    const fallback = fallbackMarketCard("TICKR Market");
+    const fallback = fallbackMarketCard(new URL(req.url).searchParams.get("title") || "TICKR prediction market");
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
@@ -126,6 +126,7 @@ export async function GET(
 /** Minimal fallback card — guaranteed to render. */
 function fallbackMarketCard(title: string): ImageResponse {
   const c = OG_COLORS;
+  const safeTitle = title.slice(0, 110);
   return new ImageResponse(
     (
       <div
@@ -133,18 +134,34 @@ function fallbackMarketCard(title: string): ImageResponse {
           width: OG_WIDTH,
           height: OG_HEIGHT,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: c.bg,
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: 54,
+          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
-          fontSize: 56,
-          fontWeight: 900,
-          padding: 64,
-          textAlign: "center",
+          border: "1px solid #24434a",
         }}
       >
-        {title}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}>
+            <span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• PREDICTION MARKET</span>
+          </div>
+          <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>LIVE MARKET</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 48 }}>
+          <div style={{ display: "flex", flexDirection: "column", width: 570, gap: 22 }}>
+            <div style={{ color: "#22d3ee", fontSize: 17, letterSpacing: 3, fontWeight: 700 }}>MAKE YOUR CALL</div>
+            <div style={{ fontSize: 47, lineHeight: 1.14, fontWeight: 800 }}>{safeTitle}</div>
+            <div style={{ color: "#67e8f9", fontSize: 19, letterSpacing: 1 }}>PREDICT THE OUTCOME. STAKE TICK.</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", width: 400, padding: 24, borderRadius: 20, background: "#0b1117", border: "1px solid #164e63", gap: 14 }}>
+            <div style={{ color: "#94a3b8", fontSize: 16, letterSpacing: 2 }}>CHOOSE AN OUTCOME</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#101b20", border: "1px solid #17434b", fontSize: 23 }}><span style={{ color: "#4ade80" }}>● Yes</span><span style={{ color: "#94a3b8" }}>—</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#10171c", border: "1px solid #29353a", fontSize: 23 }}><span style={{ color: "#fb7185" }}>● No</span><span style={{ color: "#94a3b8" }}>—</span></div>
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18 }}><span>◉  A market for every prediction</span><span>tickrbase.top</span></div>
       </div>
     ),
     {
@@ -155,13 +172,13 @@ function fallbackMarketCard(title: string): ImageResponse {
   );
 }
 
-async function renderMarketCard({ id }: { id: string }) {
+async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const c = OG_COLORS;
   if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
   const marketId = BigInt(id);
 
   if (!FACTORY) {
-    return fallbackMarketCard("TICKR Market");
+    return fallbackMarketCard(fallbackTitle);
   }
 
   const client = getPublicClient();
@@ -171,7 +188,7 @@ async function renderMarketCard({ id }: { id: string }) {
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
   ]).catch(() => null);
-  if (!reads) return fallbackMarketCard("Market not found");
+  if (!reads) return fallbackMarketCard(fallbackTitle);
   const [info, settlement] = reads;
 
   const [templateId, creator, creatorName, , bettingCloseTime, , , marketParams, outcomeCount] = info;

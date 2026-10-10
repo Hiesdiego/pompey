@@ -39,7 +39,7 @@ export async function generateMetadata({
   }
 
   const safeId = encodeURIComponent(id);
-  const ogImage = `${site}/api/social/og/match/${safeId}`;
+  const ogImage = `${site}/api/social/og/match/${safeId}?title=${encodeURIComponent(title.replace(/\s+—\s+TICKR$/, ""))}`;
   const url = `${site}/match/${safeId}`;
 
   return {

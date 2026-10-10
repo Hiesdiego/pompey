@@ -87,17 +87,18 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const response = await renderMatchCard(await params);
+    const fallbackTitle = new URL(req.url).searchParams.get("title") || "TICKR match";
+    const response = await renderMatchCard(await params, fallbackTitle);
     if (!(response instanceof ImageResponse)) return response;
     // Rendering is lazy. Consume the image here so Satori errors reach this catch.
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
     console.error("Match OG image failed", error);
-    const fallback = fallbackMatchCard("TICKR Match");
+    const fallback = fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match");
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
 }
@@ -105,6 +106,9 @@ export async function GET(
 /** Minimal fallback card — guaranteed to render. */
 function fallbackMatchCard(title: string): ImageResponse {
   const c = OG_COLORS;
+  const [homeName, awayName] = title.split(/\s+vs\.?\s+/i, 2);
+  const home = (homeName || title || "TICKR Match").slice(0, 42);
+  const away = (awayName || "Opponent").slice(0, 42);
   return new ImageResponse(
     (
       <div
@@ -112,16 +116,25 @@ function fallbackMatchCard(title: string): ImageResponse {
           width: OG_WIDTH,
           height: OG_HEIGHT,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: c.bg,
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: 54,
+          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
           color: c.white,
           fontFamily: "system-ui, sans-serif",
-          fontSize: 72,
-          fontWeight: 900,
+          border: "1px solid #24434a",
         }}
       >
-        {title}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}><span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• MATCH PREDICTION</span></div>
+          <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>FIXTURE</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28, width: "100%" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 380 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{home.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800, textAlign: "center" }}>{home}</div></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>VS</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>PICK THE WINNER</span></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 300 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{away.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800 }}>{away}</div></div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>◉  Predict. Compete. Climb.</span><span>tickrbase.top</span></div>
       </div>
     ),
     {
@@ -132,7 +145,7 @@ function fallbackMatchCard(title: string): ImageResponse {
   );
 }
 
-async function renderMatchCard({ id }: { id: string }) {
+async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
   if (!isNumericId(id)) return new Response("Match not found", { status: 404 });
   const base = backendUrl();
   const c = OG_COLORS;
@@ -143,7 +156,7 @@ async function renderMatchCard({ id }: { id: string }) {
   ]);
 
   if (!fixture?.home || !fixture?.away) {
-    return fallbackMatchCard("Match not found");
+    return fallbackMatchCard(fallbackTitle);
   }
 
   const homeTeam = TICKR_TEAMS.find((t) => t.teamId === fixture.home!.teamId);

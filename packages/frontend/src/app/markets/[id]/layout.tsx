@@ -69,7 +69,7 @@ export async function generateMetadata({
     : "Predict the outcome. Stake TICK. Climb the table.";
 
   const safeId = encodeURIComponent(id);
-  const ogImage = `${site}/api/social/og/market/${safeId}`;
+  const ogImage = `${site}/api/social/og/market/${safeId}?title=${encodeURIComponent(question ?? "TICKR prediction market")}`;
   const url = `${site}/markets/${safeId}`;
 
   return {
