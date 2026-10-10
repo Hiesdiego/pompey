@@ -91,6 +91,7 @@ async function questionFor(templateId: number, params: `0x${string}`): Promise<s
   } catch {
     return TEMPLATE_NAMES[templateId] ?? "Market";
   }
+  return TEMPLATE_NAMES[templateId] ?? "Market";
 }
 
 function outcomeLabels(
@@ -128,7 +129,7 @@ export async function GET(
 }
 
 
-function fallbackMarketCard(title: string): ImageResponse {
+function fallbackMarketCard(title: string, resolution?: { status: string; outcome: string }): ImageResponse {
   const c = OG_COLORS;
   const safeTitle = title.slice(0, 110);
   return new ImageResponse(
@@ -151,13 +152,13 @@ function fallbackMarketCard(title: string): ImageResponse {
           <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}>
             <span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span>
           </div>
-          <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>LIVE MARKET</div>
+          <div style={{ color: resolution ? "#7fe0bd" : "#67e8f9", border: `1px solid ${resolution ? "#1d9e75" : "#155e75"}`, borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>{resolution?.status ?? "LIVE MARKET"}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 48 }}>
           <div style={{ display: "flex", flexDirection: "column", width: 570, gap: 22 }}>
-            <div style={{ color: "#22d3ee", fontSize: 17, letterSpacing: 3, fontWeight: 700 }}>PICK YOUR LINEUP</div>
+            <div style={{ color: "#22d3ee", fontSize: 17, letterSpacing: 3, fontWeight: 700 }}>{resolution ? "FINAL RESULT" : "PICK YOUR LINEUP"}</div>
             <div style={{ fontSize: 47, lineHeight: 1.14, fontWeight: 800 }}>{safeTitle}</div>
-            <div style={{ color: "#67e8f9", fontSize: 19, letterSpacing: 1 }}>BACK YOUR TEAM. CLIMB THE TABLE.</div>
+            <div style={{ color: "#67e8f9", fontSize: resolution ? 25 : 19, letterSpacing: 1, fontWeight: resolution ? 800 : 500 }}>{resolution?.outcome ?? "BACK YOUR TEAM. CLIMB THE TABLE."}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", width: 400, padding: 24, borderRadius: 20, background: "#0b1117", border: "1px solid #164e63", gap: 14 }}>
             <div style={{ color: "#94a3b8", fontSize: 16, letterSpacing: 2 }}>CHOOSE AN OUTCOME</div>
@@ -176,13 +177,40 @@ function fallbackMarketCard(title: string): ImageResponse {
   );
 }
 
+async function marketFallback(id: string, title: string): Promise<ImageResponse> {
+  try {
+    const response = await fetch(`${backendUrl()}/api/chain/markets/${id}`, {
+      next: { revalidate: 30 },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return fallbackMarketCard(title);
+    const payload = (await response.json()) as {
+      data?: { market?: { templateId: number; params: string; state: number; winnerBitmap: string; outcomeCount: number } };
+    };
+    const market = payload.data?.market;
+    if (!market) return fallbackMarketCard(title);
+    const params = market.params as `0x${string}`;
+    const question = await questionFor(market.templateId, params);
+    if (market.state === 1) {
+      const labels = outcomeLabels(market.templateId, params, market.outcomeCount);
+      const bitmap = BigInt(market.winnerBitmap);
+      const winners = labels.filter((_, index) => ((bitmap >> BigInt(index)) & 1n) === 1n);
+      return fallbackMarketCard(question, { status: "RESOLVED", outcome: winners.length ? `Resolved: ${winners.join(" · ")}` : "Settlement recorded" });
+    }
+    if (market.state === 2) return fallbackMarketCard(question, { status: "VOIDED", outcome: "Market voided · stakes returned" });
+    return fallbackMarketCard(question);
+  } catch {
+    return fallbackMarketCard(title);
+  }
+}
+
 async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const c = OG_COLORS;
   if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
   const marketId = BigInt(id);
 
   if (!FACTORY) {
-    return fallbackMarketCard(fallbackTitle);
+    return marketFallback(id, fallbackTitle);
   }
 
   const client = getPublicClient();
@@ -190,7 +218,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
   ]).catch(() => null);
-  if (!reads) return fallbackMarketCard(fallbackTitle);
+  if (!reads) return marketFallback(id, fallbackTitle);
   const [info, settlement] = reads;
 
   const [templateId, creator, creatorName, , bettingCloseTime, , , marketParams, outcomeCount] = info;
@@ -272,7 +300,6 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
           overflow: "hidden",
         }}
       >
-        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
@@ -309,15 +336,15 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
             {resolved ? "RESOLVED" : voided ? "VOIDED" : TEMPLATE_NAMES[templateId]?.toUpperCase() ?? "MARKET"}
           </div>
         </div>
-
-        {}
         <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1.2 }}>
           {question.length > 90 ? question.slice(0, 87) + "…" : question}
         </div>
-
-        {}
         <div style={{ display: "flex", gap: 24 }}>
-          {resolved || voided
+          {voided ? (
+            <div style={{ fontSize: 30, fontWeight: 700, color: c.zinc400, background: "rgba(161,161,170,.12)", padding: "16px 28px", borderRadius: 16 }}>
+              Market voided · stakes returned
+            </div>
+          ) : resolved
             ? winners.map((i) => (
                 <div
                   key={i}
@@ -355,12 +382,10 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
                   </span>
                 </div>
               ))}
-          {winners.length === 0 && (resolved || voided) && (
+          {winners.length === 0 && resolved && (
             <div style={{ fontSize: 30, color: c.zinc400 }}>No winning outcome</div>
           )}
         </div>
-
-        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 32, fontSize: 24, color: c.zinc400 }}>
             <span>

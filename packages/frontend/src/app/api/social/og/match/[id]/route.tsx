@@ -3,6 +3,7 @@
 import { ImageResponse } from "next/og";
 import { parseAbi } from "viem";
 import { getPublicClient } from "@/hooks/usePublicClient";
+import { normalizeScoreline } from "@/lib/format";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
   OG_WIDTH,
@@ -21,26 +22,17 @@ export const runtime = "nodejs";
 const PRICE_ORACLE = (process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS || "") as `0x${string}`;
 const SEASON_ID = BigInt(process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2");
 
-const SNAPSHOT_ABI = parseAbi([
+const PRICE_ORACLE_ABI = parseAbi([
+  "event EndPriceSubmitted(uint256 indexed seasonId, uint256 indexed fixtureId, uint256 homePrice, uint256 awayPrice, int16 homeGoals, int16 awayGoals, uint8 outcome)",
   "function getSnapshot(uint256 seasonId, uint256 fixtureId) external view returns (uint256 homeStart, uint256 awayStart, uint256 homeEnd, uint256 awayEnd, bool startSubmitted, bool endSubmitted)",
 ]);
+const PRICE_ORACLE_DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_PRICE_ORACLE_DEPLOY_BLOCK?.trim() || "0");
 
-const PRICE_DECIMALS = 8;
-
-function pctOf(start: bigint, end: bigint): number | null {
+function roundedPercentChange(start: bigint, end: bigint): number | null {
   if (start <= 0n || end <= 0n) return null;
-  const s = Number(start) / 10 ** PRICE_DECIMALS;
-  const e = Number(end) / 10 ** PRICE_DECIMALS;
-  if (s <= 0) return null;
-  return ((e - s) / s) * 100;
-}
-
-
-function goalsFor(pct: number): number {
-  const sign = pct < 0 ? -1 : 1;
-  const abs = Math.abs(pct);
-  if (abs < 0.25) return 0;
-  return sign * Math.round(abs / 0.5);
+  const basisPoints = ((end - start) * 10_000n) / start;
+  const adjustment = basisPoints >= 0n ? 25n : -25n;
+  return Number((basisPoints + adjustment) / 50n);
 }
 
 interface FixtureDto {
@@ -159,16 +151,33 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
   if (settled && PRICE_ORACLE) {
     try {
       const client = getPublicClient();
-      const snap = await client.readContract({
+      const logs = await client.getContractEvents({
         address: PRICE_ORACLE,
-        abi: SNAPSHOT_ABI,
-        functionName: "getSnapshot",
-        args: [SEASON_ID, BigInt(id)],
+        abi: PRICE_ORACLE_ABI,
+        eventName: "EndPriceSubmitted",
+        args: { seasonId: SEASON_ID, fixtureId: BigInt(id) },
+        fromBlock: PRICE_ORACLE_DEPLOY_BLOCK,
+        toBlock: "latest",
       });
-      if (snap[5]) {
-        const hg = pctOf(snap[0], snap[2]);
-        const ag = pctOf(snap[1], snap[3]);
-        if (hg !== null && ag !== null) score = [goalsFor(hg), goalsFor(ag)];
+      const settledEvent = logs[logs.length - 1];
+      if (settledEvent) {
+        const args = settledEvent.args as { homeGoals?: number | bigint; awayGoals?: number | bigint };
+        if (args.homeGoals !== undefined && args.awayGoals !== undefined) {
+          score = normalizeScoreline(Number(args.homeGoals), Number(args.awayGoals));
+        }
+      }
+      if (!score) {
+        const snapshot = await client.readContract({
+          address: PRICE_ORACLE,
+          abi: PRICE_ORACLE_ABI,
+          functionName: "getSnapshot",
+          args: [SEASON_ID, BigInt(id)],
+        });
+        if (snapshot[5]) {
+          const homeGoals = roundedPercentChange(snapshot[0], snapshot[2]);
+          const awayGoals = roundedPercentChange(snapshot[1], snapshot[3]);
+          if (homeGoals !== null && awayGoals !== null) score = normalizeScoreline(homeGoals, awayGoals);
+        }
       }
     } catch {
       score = null;
@@ -212,7 +221,6 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
           overflow: "hidden",
         }}
       >
-        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
@@ -245,8 +253,6 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
             {settled ? "FULL TIME" : `MATCHDAY ${fixture.matchdayIndex + 1}`}
           </div>
         </div>
-
-        {}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 48 }}>
           <TeamBlock
             name={fixture.home.name}
@@ -275,8 +281,6 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
             dim={winner !== null && winner !== 2}
           />
         </div>
-
-        {}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 26, color: c.zinc400 }}>
             {settled ? (
