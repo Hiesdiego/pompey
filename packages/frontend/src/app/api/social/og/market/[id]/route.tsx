@@ -160,10 +160,16 @@ function fallbackMarketCard(title: string, resolution?: { status: string; outcom
             <div style={{ fontSize: 47, lineHeight: 1.14, fontWeight: 800 }}>{safeTitle}</div>
             <div style={{ color: "#67e8f9", fontSize: resolution ? 25 : 19, letterSpacing: 1, fontWeight: resolution ? 800 : 500 }}>{resolution?.outcome ?? "BACK YOUR TEAM. CLIMB THE TABLE."}</div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", width: 400, padding: 24, borderRadius: 20, background: "#0b1117", border: "1px solid #164e63", gap: 14 }}>
-            <div style={{ color: "#94a3b8", fontSize: 16, letterSpacing: 2 }}>CHOOSE AN OUTCOME</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#101b20", border: "1px solid #17434b", fontSize: 23 }}><span style={{ color: "#4ade80" }}>● Yes</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 17, borderRadius: 12, background: "#10171c", border: "1px solid #29353a", fontSize: 23 }}><span style={{ color: "#fb7185" }}>● No</span></div>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", width: 400, minHeight: 190, padding: 24, borderRadius: 20, background: "#0b1117", border: "1px solid #164e63", gap: 14 }}>
+            <div style={{ color: "#94a3b8", fontSize: 16, letterSpacing: 2 }}>{resolution ? "SETTLEMENT" : "CHOOSE AN OUTCOME"}</div>
+            {resolution ? (
+              <div style={{ display: "flex", alignItems: "center", fontSize: 34, lineHeight: 1.15, fontWeight: 800, color: "#7fe0bd" }}>{resolution.outcome}</div>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", padding: 17, borderRadius: 12, background: "#101b20", border: "1px solid #17434b", fontSize: 23 }}><span style={{ color: "#4ade80" }}>Yes</span></div>
+                <div style={{ display: "flex", alignItems: "center", padding: 17, borderRadius: 12, background: "#10171c", border: "1px solid #29353a", fontSize: 23 }}><span style={{ color: "#fb7185" }}>No</span></div>
+              </>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18 }}><span>◉  A market for every prediction</span><span>tickrbase.top</span></div>
@@ -172,7 +178,7 @@ function fallbackMarketCard(title: string, resolution?: { status: string; outcom
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300" },
+      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
     }
   );
 }
@@ -204,6 +210,28 @@ async function marketFallback(id: string, title: string): Promise<ImageResponse>
   }
 }
 
+interface CachedMarket {
+  templateId: number;
+  params: string;
+  state: number;
+  winnerBitmap: string;
+  outcomeCount: number;
+}
+
+async function cachedMarketState(id: string): Promise<CachedMarket | null> {
+  try {
+    const response = await fetch(`${backendUrl()}/api/chain/markets/${id}`, {
+      next: { revalidate: 10 },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { data?: { market?: CachedMarket } };
+    return payload.data?.market ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const c = OG_COLORS;
   if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
@@ -213,6 +241,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     return marketFallback(id, fallbackTitle);
   }
 
+  const cachedMarket = await cachedMarketState(id);
   const client = getPublicClient();
   const reads = await Promise.all([
     client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
@@ -221,8 +250,14 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   if (!reads) return marketFallback(id, fallbackTitle);
   const [info, settlement] = reads;
 
-  const [templateId, creator, creatorName, , bettingCloseTime, , , marketParams, outcomeCount] = info;
-  const [seedAmount, totalStaked, state, winnerBitmap] = settlement;
+  const [directTemplateId, creator, creatorName, , bettingCloseTime, , , directParams, directOutcomeCount] = info;
+  const templateId = cachedMarket?.templateId ?? directTemplateId;
+  const marketParams = (cachedMarket?.params ?? directParams) as `0x${string}`;
+  const outcomeCount = cachedMarket?.outcomeCount ?? directOutcomeCount;
+  const [seedAmount, totalStaked, directState, directWinnerBitmap] = settlement;
+  const cachedTerminalState = cachedMarket?.state === 1 || cachedMarket?.state === 2 ? cachedMarket.state : null;
+  const state = cachedTerminalState ?? directState;
+  const winnerBitmap = cachedMarket?.state === state ? BigInt(cachedMarket.winnerBitmap) : directWinnerBitmap;
   const resolved = state === 1;
   const voided = state === 2;
 
@@ -407,7 +442,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300" },
+      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
     }
   );
 }

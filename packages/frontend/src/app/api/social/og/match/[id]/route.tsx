@@ -1,9 +1,9 @@
 
 
 import { ImageResponse } from "next/og";
-import { parseAbi } from "viem";
 import { getPublicClient } from "@/hooks/usePublicClient";
 import { normalizeScoreline } from "@/lib/format";
+import { CONTRACTS, SEASON_ID } from "@/lib/contracts";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
   OG_WIDTH,
@@ -19,14 +19,22 @@ import {
 
 export const runtime = "nodejs";
 
-const PRICE_ORACLE = (process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS || "") as `0x${string}`;
-const SEASON_ID = BigInt(process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2");
-
-const PRICE_ORACLE_ABI = parseAbi([
-  "event EndPriceSubmitted(uint256 indexed seasonId, uint256 indexed fixtureId, uint256 homePrice, uint256 awayPrice, int16 homeGoals, int16 awayGoals, uint8 outcome)",
-  "function getSnapshot(uint256 seasonId, uint256 fixtureId) external view returns (uint256 homeStart, uint256 awayStart, uint256 homeEnd, uint256 awayEnd, bool startSubmitted, bool endSubmitted)",
-]);
-const PRICE_ORACLE_DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_PRICE_ORACLE_DEPLOY_BLOCK?.trim() || "0");
+const SNAPSHOT_ABI = [
+  {
+    type: "function",
+    name: "getSnapshot",
+    stateMutability: "view",
+    inputs: [{ name: "seasonId", type: "uint256" }, { name: "fixtureId", type: "uint256" }],
+    outputs: [
+      { name: "homeStart", type: "uint256" },
+      { name: "awayStart", type: "uint256" },
+      { name: "homeEnd", type: "uint256" },
+      { name: "awayEnd", type: "uint256" },
+      { name: "startSubmitted", type: "bool" },
+      { name: "endSubmitted", type: "bool" },
+    ],
+  },
+] as const;
 
 function roundedPercentChange(start: bigint, end: bigint): number | null {
   if (start <= 0n || end <= 0n) return null;
@@ -37,6 +45,7 @@ function roundedPercentChange(start: bigint, end: bigint): number | null {
 
 interface FixtureDto {
   fixtureId: string;
+  seasonId?: string;
   home: { teamId: number; name: string; symbol: string } | null;
   away: { teamId: number; name: string; symbol: string } | null;
   matchdayIndex: number;
@@ -46,6 +55,7 @@ interface FixtureDto {
 }
 
 interface PoolDto {
+  seasonId?: string;
   totalHome: string;
   totalDraw: string;
   totalAway: string;
@@ -120,7 +130,7 @@ async function fallbackMatchCard(title: string): Promise<ImageResponse> {
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300" },
+      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
     }
   );
 }
@@ -147,37 +157,21 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
   ]);
 
   const settled = fixture.settled || pool?.settled || false;
+  const seasonId = BigInt(fixture.seasonId ?? pool?.seasonId ?? SEASON_ID.toString());
   let score: [number, number] | null = null;
-  if (settled && PRICE_ORACLE) {
+  if (settled && CONTRACTS.priceOracle) {
     try {
       const client = getPublicClient();
-      const logs = await client.getContractEvents({
-        address: PRICE_ORACLE,
-        abi: PRICE_ORACLE_ABI,
-        eventName: "EndPriceSubmitted",
-        args: { seasonId: SEASON_ID, fixtureId: BigInt(id) },
-        fromBlock: PRICE_ORACLE_DEPLOY_BLOCK,
-        toBlock: "latest",
+      const snapshot = await client.readContract({
+        address: CONTRACTS.priceOracle,
+        abi: SNAPSHOT_ABI,
+        functionName: "getSnapshot",
+        args: [seasonId, BigInt(id)],
       });
-      const settledEvent = logs[logs.length - 1];
-      if (settledEvent) {
-        const args = settledEvent.args as { homeGoals?: number | bigint; awayGoals?: number | bigint };
-        if (args.homeGoals !== undefined && args.awayGoals !== undefined) {
-          score = normalizeScoreline(Number(args.homeGoals), Number(args.awayGoals));
-        }
-      }
-      if (!score) {
-        const snapshot = await client.readContract({
-          address: PRICE_ORACLE,
-          abi: PRICE_ORACLE_ABI,
-          functionName: "getSnapshot",
-          args: [SEASON_ID, BigInt(id)],
-        });
-        if (snapshot[5]) {
-          const homeGoals = roundedPercentChange(snapshot[0], snapshot[2]);
-          const awayGoals = roundedPercentChange(snapshot[1], snapshot[3]);
-          if (homeGoals !== null && awayGoals !== null) score = normalizeScoreline(homeGoals, awayGoals);
-        }
+      if (snapshot[5]) {
+        const homeGoals = roundedPercentChange(snapshot[0], snapshot[2]);
+        const awayGoals = roundedPercentChange(snapshot[1], snapshot[3]);
+        if (homeGoals !== null && awayGoals !== null) score = normalizeScoreline(homeGoals, awayGoals);
       }
     } catch {
       score = null;
@@ -308,7 +302,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300" },
+      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
     }
   );
 }
