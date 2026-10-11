@@ -90,7 +90,16 @@ async function scanClaimable(player: Address): Promise<Claimable[]> {
 
 export default function ClaimsPage() {
   const { authenticated, login, playerAddress } = useTickr();
-  const { refresh: refreshBalance } = useTickBalance(playerAddress);
+  const {
+    balance,
+    refresh: refreshBalance,
+    claimFaucet,
+    faucetBusy,
+    faucetError,
+    faucetTx,
+    faucetReady,
+    walletReady,
+  } = useTickBalance(playerAddress);
   const { write } = useContractWrite();
   const [items, setItems] = useState<Claimable[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -240,6 +249,31 @@ export default function ClaimsPage() {
           </section>
         );
       })()}
+
+      <section aria-label="Daily TICK claim" className="glass mb-5 flex flex-col gap-4 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-display text-base font-bold text-zinc-900 dark:text-white">Daily TICK</h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Claim free TICK once every 24 hours to use in matches and markets.
+          </p>
+          {faucetError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-300">{faucetError}</p>}
+          {faucetTx && <p role="status" className="mt-2 text-sm text-[#1D9E75] dark:text-[#7fe0bd]">TICK claimed successfully.</p>}
+        </div>
+        {balance !== null && faucetReady ? (
+          <button
+            onClick={claimFaucet}
+            disabled={faucetBusy || !walletReady}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(46,124,246,.3)] transition-all hover:shadow-[0_0_28px_rgba(46,124,246,.45)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {faucetBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {faucetBusy ? "Claiming…" : "Claim TICK"}
+          </button>
+        ) : (
+          <span className="shrink-0 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            {balance === null ? "Checking availability…" : "Claimed for now"}
+          </span>
+        )}
+      </section>
 
       {error && (
         <div className="mb-4">

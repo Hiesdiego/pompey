@@ -15,7 +15,7 @@
 
 import { useCallback, useState } from "react";
 import type { Address } from "viem";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { CONTRACTS, TICK_TOKEN_ABI } from "../contracts";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { useContractWrite } from "../../hooks/useContractWrite";
@@ -67,11 +67,11 @@ export function useTickBalance(playerAddress: Address | null) {
         ],
         allowFailure: true,
       })) as unknown as MulticallResult[];
-      if (results[0]?.status !== "success") throw new Error("balanceOf failed");
-      const lastClaim =
-        results[1]?.status === "success" ? results[1].result : 0n;
-      const cooldown =
-        results[2]?.status === "success" ? results[2].result : 0n;
+      if (results.length !== 3 || results.some((result) => result?.status !== "success")) {
+        throw new Error("Could not check TICK balance and claim availability.");
+      }
+      const lastClaim = (results[1] as { status: "success"; result: bigint }).result;
+      const cooldown = (results[2] as { status: "success"; result: bigint }).result;
       const next = Number(lastClaim + cooldown);
       return {
         balance: (results[0] as { status: "success"; result: bigint }).result,
@@ -82,7 +82,8 @@ export function useTickBalance(playerAddress: Address | null) {
     enabled: !!playerAddress && !!CONTRACTS.tickToken,
     staleTime: 10_000,
     refetchInterval: 15_000,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[2] === addressKey ? previousData : undefined,
     // A blip must not blank the balance: keep serving the last value.
     retry: (failureCount) => failureCount < 2,
   });
