@@ -1,36 +1,3 @@
-/**
- * REST API (spec P2.7).
- *
- * Endpoints (all JSON):
- *   GET /health                        — liveness + subsystem status + bandwidth
- *   GET /api/teams                     — 20-team roster + CoinGecko logos
- *   GET /api/fixtures                  — all Season-1 fixtures w/ kickoff state
- *     (+ scheduledKickoff: the deterministic slot, visible well before the
- *      on-chain reveal — the contract only accepts reveals 30–120 min
- *      before kickoff, but each slot is fixed for the season)
- *   GET /api/fixtures/:id              — one fixture
- *   GET /api/fixtures/:id/pool         — live parimutuel pool sizes
- *   GET /api/table                     — league table (points, GD)
- *   GET /api/players/:address          — player profile stats
- *   GET /api/prices                    — latest validated price per team
- *   GET /api/chain/markets             — cached market catalogue (RPC shield)
- *   GET /api/chain/markets/:id         — one cached market
- *   GET /api/chain/odds-history/:id    — incremental stake-driven odds history
- *
- * BigInts are serialized as strings throughout — JSON has no BigInt.
- *
- * Optimization pass changes:
- * - /health is REAL now: RPC latency, indexer lag, price-feed staleness,
- *   Supabase reachability and the bandwidth projection (was a stub).
- * - /api/* is rate-limited (100 req/min per IP) and request-logged.
- * - The three previously unguarded routes (/api/teams, /api/fixtures,
- *   /api/prices) have try/catch — an exception no longer hits Express's
- *   default HTML error handler.
- * - New /api/chain/* endpoints served by ChainCache (10s TTL + coalescing),
- *   so hundreds of frontend clients share a handful of upstream RPC calls.
- * - Error bodies are { ok:false, code, message } with calm, human messages —
- *   never stacks, RPC URLs or "check the server logs".
- */
 
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { rateLimit } from "express-rate-limit";
@@ -71,7 +38,7 @@ export interface ApiDeps {
   priceFeed: PriceFeed;
   coingecko: CoingeckoPoller;
   chainCache: ChainCache;
-  /** Assembled in index.ts — reads every subsystem without throwing. */
+
   health: () => Promise<HealthReport>;
 }
 
@@ -102,9 +69,7 @@ function serializeFixture(
     windowEnd: new Date(f.windowEndMs).toISOString(),
     kickoff: f.kickoffMs > 0 ? new Date(f.kickoffMs).toISOString() : null,
     kickoffRevealed: f.kickoffRevealed,
-    // Deterministic slot, visible well before the on-chain reveal (the
-    // contract only accepts reveals 30–120 min before kickoff). Null once
-    // settled or when the window can't fit the schedule.
+
     scheduledKickoff:
       scheduledKickoffMs !== null ? new Date(scheduledKickoffMs).toISOString() : null,
     settled: f.settled,
@@ -112,7 +77,6 @@ function serializeFixture(
   };
 }
 
-/** Calm API error body — no stacks, hosts or jargon. */
 function apiError(
   res: Response,
   status: number,
@@ -140,7 +104,6 @@ function chainError(res: Response, err: unknown): void {
 export function buildRouter(deps: ApiDeps): Router {
   const router = Router();
 
-  // --- request logging -------------------------------------------------------
   router.use((req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
     res.on("finish", () => {
@@ -156,7 +119,6 @@ export function buildRouter(deps: ApiDeps): Router {
     next();
   });
 
-  // --- rate limiting (all /api/*, /health stays open for monitors) -----------
   const apiLimiter = rateLimit({
     windowMs: 60_000,
     limit: 100,
@@ -170,9 +132,6 @@ export function buildRouter(deps: ApiDeps): Router {
   });
   router.use("/api", apiLimiter);
 
-  // --- health ------------------------------------------------------------------
-  // Always 200: the process is alive; subsystem trouble is reported in the
-  // body (a 503 here would make a load balancer kill us over an RPC blip).
   router.get("/health", async (_req: Request, res: Response) => {
     try {
       const report = await deps.health();
@@ -189,7 +148,6 @@ export function buildRouter(deps: ApiDeps): Router {
     }
   });
 
-  // --- chain-cache (RPC shield) --------------------------------------------------
   router.get("/api/chain/markets", async (_req: Request, res: Response) => {
     try {
       const data = await deps.chainCache.getMarkets();
@@ -217,7 +175,6 @@ export function buildRouter(deps: ApiDeps): Router {
     }
   });
 
-  // --- existing endpoints (shapes unchanged) ---------------------------------------
   router.get("/api/teams", (_req: Request, res: Response) => {
     try {
       const meta = deps.coingecko.getMetadata();
@@ -274,6 +231,18 @@ export function buildRouter(deps: ApiDeps): Router {
     }
   });
 
+  router.get("/api/fixtures/:id/form", (req: Request, res: Response) => {
+    try {
+      const fixtureId = BigInt(String(req.params.id));
+      const fixture = deps.lifecycle.getFixtures().find((item) => item.fixtureId === fixtureId);
+      if (!fixture) { res.status(404).json({ error: "fixture not found" }); return; }
+      res.json(deps.reader.getRecentForm(config.seasonId, fixture.homeTeamId, fixture.awayTeamId));
+    } catch (err) {
+      logger.warn("[api] getRecentForm failed", { error: String(err) });
+      res.status(502).json({ error: "recent form unavailable" });
+    }
+  });
+
   router.get("/api/table", async (_req: Request, res: Response) => {
     try {
       res.json(await deps.reader.getLeagueTable(config.seasonId));
@@ -303,7 +272,7 @@ export function buildRouter(deps: ApiDeps): Router {
     const cached = priceHistoryCache.get(team.symbol);
     if (cached && Date.now() - cached.at < 60_000) { res.json(cached.points); return; }
     try {
-      const url = `https://api.binance.com/api/v3/klines?symbol=${team.binanceSymbol}&interval=5m&limit=288`;
+      const url = `${config.binance.restBaseUrl.replace(/\/$/, "")}/api/v3/klines?symbol=${team.binanceSymbol}&interval=5m&limit=288`;
       const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
       if (!response.ok) throw new Error(`history source ${response.status}`);
       const rows = await response.json() as unknown;

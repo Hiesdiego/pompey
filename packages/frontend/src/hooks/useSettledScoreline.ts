@@ -2,33 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { parseAbi } from "viem";
+import { CONTRACTS, SEASON_ID } from "../lib/contracts";
 import { getPublicClient } from "./usePublicClient";
 
 export interface SettledScoreline {
   homeGoals: number;
   awayGoals: number;
-  outcome: 0 | 1 | 2; // WinHome | Draw | WinAway
+  outcome: 0 | 1 | 2;
   homePrice: bigint;
   awayPrice: bigint;
+  transactionHash: `0x${string}`;
 }
 
 const PRICE_ORACLE_ABI = parseAbi([
   "event EndPriceSubmitted(uint256 indexed seasonId, uint256 indexed fixtureId, uint256 homePrice, uint256 awayPrice, int16 homeGoals, int16 awayGoals, uint8 outcome)",
 ]);
 
-// PriceOracle deploy block for season 2 (adjust if redeployed)
 const PRICE_ORACLE_DEPLOY_BLOCK = BigInt(
   process.env.NEXT_PUBLIC_PRICE_ORACLE_DEPLOY_BLOCK?.trim() || "0"
 );
 
-/**
- * Fetch the settled scoreline from the PriceOracle's EndPriceSubmitted event.
- * This is the SINGLE SOURCE OF TRUTH — the exact goals the contract computed,
- * not a frontend recomputation. Ensures the displayed scoreline always matches
- * the on-chain settlement, table, and payouts.
- *
- * Returns null while loading or if the fixture is not settled.
- */
 export function useSettledScoreline(
   fixtureId: string | null,
   settled: boolean
@@ -42,9 +35,7 @@ export function useSettledScoreline(
       return;
     }
 
-    const oracle = process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS as
-      | `0x${string}`
-      | undefined;
+    const oracle = CONTRACTS.priceOracle;
     if (!oracle) return;
 
     let alive = true;
@@ -53,15 +44,11 @@ export function useSettledScoreline(
     (async () => {
       try {
         const client = getPublicClient();
-        const seasonId = BigInt(
-          process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2"
-        );
-
         const logs = await client.getContractEvents({
           address: oracle,
           abi: PRICE_ORACLE_ABI,
           eventName: "EndPriceSubmitted",
-          args: { seasonId, fixtureId: BigInt(fixtureId) },
+          args: { seasonId: SEASON_ID, fixtureId: BigInt(fixtureId) },
           fromBlock: PRICE_ORACLE_DEPLOY_BLOCK,
           toBlock: "latest",
         });
@@ -76,10 +63,13 @@ export function useSettledScoreline(
             outcome: Number(a.outcome) as 0 | 1 | 2,
             homePrice: a.homePrice as bigint,
             awayPrice: a.awayPrice as bigint,
+            transactionHash: latest.transactionHash,
           });
+        } else {
+          setScoreline(null);
         }
       } catch {
-        // Event fetch failed — caller falls back to recomputation
+
         if (alive) setScoreline(null);
       } finally {
         if (alive) setLoading(false);

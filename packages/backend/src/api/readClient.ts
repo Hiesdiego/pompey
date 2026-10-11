@@ -1,5 +1,4 @@
 
-
 import { parseAbiItem, type PublicClient } from "viem";
 import { config } from "../config.js";
 import { logger } from "../lib/logger.js";
@@ -63,9 +62,7 @@ const PREDICTION_POOL_ABI = [
           { name: "seed", type: "uint256" },
           { name: "settled", type: "bool" },
           { name: "winningOutcome", type: "uint8" },
-          // NOTE: the reused PredictionPool is the v0.3 build — its MatchPool
-          // struct has no `voided` field. Do not add one here or the
-          // getPool decode fails and every pool read 502s.
+
         ],
       },
     ],
@@ -120,6 +117,24 @@ export interface TableRow {
   goalsAgainst: number;
 }
 
+export interface RecentFormEntry {
+  fixtureId: string;
+  opponentTeamId: number;
+  result: "W" | "D" | "L";
+  goalsFor: number;
+  goalsAgainst: number;
+}
+
+interface RecordedFixtureResult {
+  fixtureId: string;
+  homeTeamId: number;
+  awayTeamId: number;
+  homeGoals: number;
+  awayGoals: number;
+  blockNumber: bigint;
+  logIndex: number;
+}
+
 export interface PoolView {
   seasonId: string;
   fixtureId: string;
@@ -146,27 +161,58 @@ export interface PlayerView {
 }
 
 const LEADERBOARD_CACHE_MS = 60_000;
-/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000 — we intend to stay under it. */
+
 const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
 export class ChainReader {
   private readonly publicClient: PublicClient;
   private leaderboardCache: { at: number; rows: PlayerView[] } | null = null;
-  /** Per-player stats cache — only players with new events are re-read. */
+
   private readonly leaderboardRows = new Map<`0x${string}`, PlayerView>();
-  /** Highest block already scanned for OutcomeRecorded events (null = never). */
+
   private leaderboardScannedTo: bigint | null = null;
-  /** Goals for/against per teamId, built incrementally from ResultRecorded events. */
+
   private readonly goalsByTeam = new Map<number, { gf: number; ga: number }>();
-  /** Season the goals cache was built for — a new season resets it. */
+  private readonly resultsByFixture = new Map<string, RecordedFixtureResult>();
+
   private goalsSeasonId: bigint | null = null;
-  /** Highest block already scanned for ResultRecorded events (null = never). */
+
   private resultsScannedTo: bigint | null = null;
-  /** Prevent a cold historical scan from competing with API reads. */
+  private resultHistoryReady = false;
+
   private resultScanPromise: Promise<void> | null = null;
 
+  getRecentForm(seasonId: bigint, homeTeamId: number, awayTeamId: number): {
+    ready: boolean;
+    home: RecentFormEntry[];
+    away: RecentFormEntry[];
+  } {
+    this.refreshResultEventsInBackground(seasonId);
+    const recent = (teamId: number): RecentFormEntry[] => [...this.resultsByFixture.values()]
+      .filter((result) => result.homeTeamId === teamId || result.awayTeamId === teamId)
+      .sort((a, b) => a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1)
+      .slice(0, 5)
+      .map((result) => {
+        const isHome = result.homeTeamId === teamId;
+        const goalsFor = isHome ? result.homeGoals : result.awayGoals;
+        const goalsAgainst = isHome ? result.awayGoals : result.homeGoals;
+        return {
+          fixtureId: result.fixtureId,
+          opponentTeamId: isHome ? result.awayTeamId : result.homeTeamId,
+          result: goalsFor > goalsAgainst ? "W" : goalsFor < goalsAgainst ? "L" : "D",
+          goalsFor,
+          goalsAgainst,
+        };
+      });
+    return {
+      ready: this.goalsSeasonId === seasonId && this.resultHistoryReady,
+      home: recent(homeTeamId),
+      away: recent(awayTeamId),
+    };
+  }
+
   constructor() {
-    // Shared resilient transport (lib/rpc.ts): retry + batching + fallback.
+
     this.publicClient = publicClient;
   }
 
@@ -182,8 +228,7 @@ export class ChainReader {
         error: String(err),
       });
     }
-    // Read all team records in one RPC request. Issuing one readContract call
-    // per team here caused the public RPC to throttle the table endpoint.
+
     const results = (await this.publicClient.multicall({
       contracts: TICKR_TEAMS.map((team) => ({
         address: config.contracts.resultEngine,
@@ -232,8 +277,7 @@ export class ChainReader {
         goalsAgainst: g.ga,
       } satisfies TableRow;
     });
-    // League ordering: points > goal difference > goals scored >
-    // games won > fewer games lost.
+
     rows.sort(
       (a, b) =>
         b.points - a.points ||
@@ -259,17 +303,22 @@ export class ChainReader {
       });
   }
 
-
   private async scanNewResultEvents(seasonId: bigint): Promise<void> {
     if (this.goalsSeasonId !== seasonId) {
       this.goalsByTeam.clear();
+      this.resultsByFixture.clear();
       this.goalsSeasonId = seasonId;
       this.resultsScannedTo = null;
+      this.resultHistoryReady = false;
     }
     const latest = await this.publicClient.getBlockNumber();
     let from =
       this.resultsScannedTo !== null ? this.resultsScannedTo + 1n : config.leaderboard.scanStartBlock;
-    if (from > latest) return;
+    if (from > latest) {
+      if (this.resultsScannedTo === null) this.resultsScannedTo = latest;
+      this.resultHistoryReady = true;
+      return;
+    }
     while (from <= latest) {
       const chunkEnd = from + LOG_SCAN_CHUNK_BLOCKS - 1n;
       const to = chunkEnd > latest ? latest : chunkEnd;
@@ -294,6 +343,7 @@ export class ChainReader {
       });
       for (const l of logs) {
         const a = l.args as unknown as {
+          fixtureId: bigint;
           homeTeamId: number;
           awayTeamId: number;
           homeGoals: number;
@@ -301,6 +351,15 @@ export class ChainReader {
         };
         const hg = Number(a.homeGoals);
         const ag = Number(a.awayGoals);
+        this.resultsByFixture.set(String(a.fixtureId), {
+          fixtureId: String(a.fixtureId),
+          homeTeamId: Number(a.homeTeamId),
+          awayTeamId: Number(a.awayTeamId),
+          homeGoals: hg,
+          awayGoals: ag,
+          blockNumber: l.blockNumber,
+          logIndex: l.logIndex,
+        });
         const home = this.goalsByTeam.get(a.homeTeamId) ?? { gf: 0, ga: 0 };
         home.gf += hg;
         home.ga += ag;
@@ -310,9 +369,10 @@ export class ChainReader {
         away.ga += hg;
         this.goalsByTeam.set(a.awayTeamId, away);
       }
+      this.resultsScannedTo = to;
       from = to + 1n;
     }
-    this.resultsScannedTo = latest;
+    this.resultHistoryReady = true;
   }
 
   async getPool(seasonId: bigint, fixtureId: bigint): Promise<PoolView> {
@@ -338,8 +398,7 @@ export class ChainReader {
       seed: p.seed.toString(),
       totalPool: (p.totalHome + p.totalDraw + p.totalAway).toString(),
       settled: p.settled,
-      // The reused v0.3 pool cannot void — always false. Kept on the view
-      // for forward-compat with a future pool upgrade.
+
       voided: false,
       winningOutcome: p.settled ? p.winningOutcome : null,
     };
@@ -391,12 +450,11 @@ export class ChainReader {
       touched = await this.scanNewOutcomeEvents();
     } catch (err) {
       logger.warn("[ChainReader] event scan for leaderboard failed", { error: String(err) });
-      // Serve the last good snapshot instead of wiping the leaderboard.
+
       if (this.leaderboardCache) return this.leaderboardCache.rows.slice(0, limit);
       return [];
     }
-    // Re-read only players with new events (includes brand-new players);
-    // everyone else keeps their cached stats — no redundant RPC calls.
+
     const fresh = await Promise.all([...touched].map((p) => this.getPlayer(p)));
     for (const row of fresh) this.leaderboardRows.set(row.address as `0x${string}`, row);
 
@@ -406,13 +464,6 @@ export class ChainReader {
     return rows.slice(0, limit);
   }
 
-  /**
-   * Incrementally index OutcomeRecorded events, paging in 900-block chunks
-   * (Base Sepolia caps eth_getLogs at 1,000 blocks per call). The watermark
-   * means each refresh only fetches blocks since the previous scan.
-   *
-   * @returns addresses that appeared in the newly scanned range.
-   */
   private async scanNewOutcomeEvents(): Promise<Set<`0x${string}`>> {
     const touched = new Set<`0x${string}`>();
     const latest = await this.publicClient.getBlockNumber();

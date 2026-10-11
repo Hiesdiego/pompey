@@ -1,8 +1,3 @@
-/**
- * Match page (spec P3.6–P3.8): pre-match staking, live % bars, post-match
- * result + claim. State derives from the fixture (backend) merged with
- * live WebSocket updates, plus the PriceOracle kickoff snapshot on-chain.
- */
 
 "use client";
 
@@ -29,6 +24,8 @@ import { getPublicClient } from "../../../hooks/usePublicClient";
 import { fixtureStatus, type FixtureStatus } from "../../../components/FixtureCard";
 import { LiveMatchPanel } from "../../../components/LiveMatchPanel";
 import { PostMatchPanel, type FullSnapshot } from "../../../components/PostMatchPanel";
+import { OracleAuditCard } from "../../../components/OracleAuditCard";
+import { PreMatchBriefing } from "../../../components/PreMatchBriefing";
 import { Countdown } from "../../../components/Countdown";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../../components/States";
@@ -74,7 +71,7 @@ export default function MatchPage() {
   const id = params.id as string;
   const { authenticated, login, playerAddress } = useTickr();
   const { balance, refresh: refreshBalance } = useTickBalance(playerAddress);
-  const { prices } = usePriceFeed(true);
+  const { prices, updatedAt } = usePriceFeed(true);
 
   const [fixture, setFixture] = useState<ApiFixture | null>(null);
   const [pool, setPool] = useState<ApiPool | null>(null);
@@ -87,14 +84,12 @@ export default function MatchPage() {
   const [bettingOpen, setBettingOpen] = useState(false);
   const [stakeOpen, setStakeOpen] = useState(false);
   const [stakeOpening, setStakeOpening] = useState(false);
-  // Must be called before any early return (Rules of Hooks). Uses nullable
-  // fixture — falls back to recomputation until the event loads.
+
   const { scoreline: settledScoreline } = useSettledScoreline(
     fixture?.fixtureId ?? null,
     fixture?.settled ?? false
   );
 
-  // Tick so the status recomputes as kickoff/windows pass.
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(t);
@@ -149,7 +144,7 @@ export default function MatchPage() {
       });
       setBettingOpen(Boolean(open));
     } catch {
-      /* Keep the last known state if the RPC read fails. */
+
     }
   }, [id]);
 
@@ -165,7 +160,7 @@ export default function MatchPage() {
         return [...previous.slice(-59), { pcts, raw }];
       });
     } catch {
-      /* pool may 404 before first stake — non-fatal */
+
     }
   }, [id]);
 
@@ -192,7 +187,7 @@ export default function MatchPage() {
         });
       }
     } catch {
-      /* oracle read failed — panels degrade gracefully */
+
     }
   }, [id]);
 
@@ -212,7 +207,6 @@ export default function MatchPage() {
     };
   }, [loadFixture, loadPool, loadSnapshot]);
 
-  // Fixture state is refreshed over the API while a match is active.
   useEffect(() => {
     if (!fixture || fixture.settled) return;
     const timer = setInterval(() => {
@@ -233,7 +227,6 @@ export default function MatchPage() {
     return () => window.clearInterval(timer);
   }, [fixture, loadSnapshot]);
 
-  // Live pool polling while the match is still open for staking / in play.
   useEffect(() => {
     if (!fixture) return;
     const status = fixtureStatus(fixture);
@@ -289,14 +282,15 @@ export default function MatchPage() {
   const effectiveBettingCloseMs = bettingCloseMs ?? (
     effectiveMatchEndMs !== null ? effectiveMatchEndMs - 5 * 60 * 1000 : null
   );
+  const pricesFresh = now - (updatedAt[fixture.home.symbol] ?? 0) < 60_000 &&
+    now - (updatedAt[fixture.away.symbol] ?? 0) < 60_000;
   const homeMove = status === "settled" && snapshot?.endSubmitted
     ? priceMovePct(snapshot.homeStart, snapshot.homeEnd)
-    : status === "live" ? priceMovePct(snapshot?.homeStart ?? 0n, prices[fixture.home.symbol]) : null;
+    : status === "live" && pricesFresh ? priceMovePct(snapshot?.homeStart ?? 0n, prices[fixture.home.symbol]) : null;
   const awayMove = status === "settled" && snapshot?.endSubmitted
     ? priceMovePct(snapshot.awayStart, snapshot.awayEnd)
-    : status === "live" ? priceMovePct(snapshot?.awayStart ?? 0n, prices[fixture.away.symbol]) : null;
-  // settledScoreline comes from the hook at the top (single source of truth).
-  // Falls back to recomputation if the event hasn't loaded yet.
+    : status === "live" && pricesFresh ? priceMovePct(snapshot?.awayStart ?? 0n, prices[fixture.away.symbol]) : null;
+
   const score = settledScoreline
     ? [settledScoreline.homeGoals, settledScoreline.awayGoals] as [number, number]
     : homeMove !== null && awayMove !== null
@@ -327,11 +321,15 @@ export default function MatchPage() {
         </div>
         <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-8">
           <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:text-left"><TeamBadge teamId={fixture.home.teamId} size={56} showName={false} /><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold text-zinc-900 dark:text-white sm:text-lg">{fixture.home.name}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500 dark:text-white/45">HOME · {fixture.home.symbol}</p></div></div>
-          <div className="min-w-[112px] rounded-2xl border border-black/[.08] bg-black/[.03] px-4 py-3 text-center shadow-inner dark:border-white/10 dark:bg-white/[.06] sm:min-w-[160px] sm:px-6 sm:py-4"><p className="font-display text-4xl font-black tracking-tight tabular-nums sm:text-6xl">{status === "live" || status === "settled" ? score ? `${score[0]}–${score[1]}` : "– : –" : "VS"}</p><p className="mt-1 text-[9px] font-extrabold uppercase tracking-[.22em] text-zinc-500 dark:text-white/40">{status === "settled" ? "Final score" : status === "live" ? "Live score" : status === "awaiting" ? "Result pending" : status === "voided" ? "No result" : "Kickoff soon"}</p></div>
+          <div className="min-w-[112px] rounded-2xl border border-black/[.08] bg-black/[.03] px-4 py-3 text-center shadow-inner dark:border-white/10 dark:bg-white/[.06] sm:min-w-[160px] sm:px-6 sm:py-4"><p className="font-display text-4xl font-black tracking-tight tabular-nums sm:text-6xl">{status === "live" || status === "settled" ? score ? `${score[0]}–${score[1]}` : "– : –" : "VS"}</p><p className="mt-1 text-[9px] font-extrabold uppercase tracking-[.22em] text-zinc-500 dark:text-white/40">{status === "settled" ? "Final score" : status === "live" ? "Projected live score" : status === "awaiting" ? "Result pending" : status === "voided" ? "No result" : "Kickoff soon"}</p></div>
           <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:justify-end sm:text-right"><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold text-zinc-900 dark:text-white sm:text-lg">{fixture.away.name}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500 dark:text-white/45">AWAY · {fixture.away.symbol}</p></div><TeamBadge teamId={fixture.away.teamId} size={56} showName={false} /></div>
         </div>
         <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10 dark:text-white/40"><span>Real price performance</span><span>{status === "live" && homeMove !== null && awayMove !== null ? `${formatSignedPct(homeMove)} · ${formatSignedPct(awayMove)}` : "TICKR League"}</span></div>
       </div>
+
+      {(status === "upcoming" || status === "scheduled" || status === "tba") && (
+        <PreMatchBriefing key={fixture.fixtureId} fixture={fixture} pool={pool} />
+      )}
 
       {(status === "upcoming" ||
         status === "scheduled" ||
@@ -360,12 +358,13 @@ export default function MatchPage() {
         </button>
       )}
 
-      {status === "live" && <div className="mb-6"><LiveMatchPanel fixture={fixture} snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null} prices={prices} windowEndMs={windowEndMs} /></div>}
+      {status === "live" && <div className="mb-6"><LiveMatchPanel key={fixture.fixtureId} fixture={fixture} snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null} prices={prices} pricesFresh={pricesFresh} projectedScore={score} windowEndMs={windowEndMs} /></div>}
       {(status === "settled" || status === "voided") && <div className="mb-6"><PostMatchPanel fixture={fixture} pool={pool} snapshot={snapshot} playerAddress={playerAddress} onClaimed={handleStaked} /></div>}
+      {status === "settled" && <OracleAuditCard fixture={fixture} snapshot={snapshot} scoreline={settledScoreline} />}
       {status === "settled" && <div className="mb-6"><PoolOddsChart pool={pool} history={poolHistory} /></div>}
       {status === "awaiting" && <div className="glass mb-6 rounded-3xl border-amber-500/25! p-5 text-center"><p className="font-display text-lg font-bold">The match window has ended</p><p className="mt-1 text-sm text-zinc-500">Final oracle prices are being confirmed on-chain.</p></div>}
 
-      {status !== "settled" && status !== "voided" && <div className="mb-6">
+      {(status === "live" || status === "awaiting") && <div className="mb-6">
         {status === "live" && bettingOpen && effectiveBettingCloseMs !== null && effectiveBettingCloseMs > now ? <div className="mb-3 flex items-center justify-between rounded-2xl border border-red-500/20 bg-red-500/[.06] px-4 py-3"><p className="text-xs font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400">In-play betting open</p><p className="text-right text-[10px] text-zinc-500">Closes in <Countdown target={effectiveBettingCloseMs} /></p></div> : status === "live" && bettingOpen ? <p className="mb-3 text-center text-xs text-amber-600">In-play betting closes five minutes before full time.</p> : null}
         <PoolOddsChart pool={pool} history={poolHistory} />
       </div>}

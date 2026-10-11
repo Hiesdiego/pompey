@@ -1,20 +1,9 @@
-/**
- * StakePanel — pre-match staking form (spec P3.6).
- * Outcome picker (1/X/2) + amount input + approve→stake via the
- * gas-sponsored smart-wallet path. Shows live pool distribution and an
- * estimated payout.
- *
- * Estimated payout for a new stake a on outcome with current winning pool w
- * and pool total T (mirrors PredictionPool.claim):
- *   payout ≈ a · (T + a) · (1 − fee) / (w + a),  fee = 700 bps
- */
 
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Wallet, X } from "lucide-react";
 import type { Address } from "viem";
-import { PLATFORM_FEE_BPS } from "@tickr/shared/constants";
 import {
   CONTRACTS,
   MIN_STAKE_TICK,
@@ -62,10 +51,7 @@ export function StakePanel({
   authenticated: boolean;
   onLogin: () => void;
   onStaked: () => void;
-  /**
-   * Render without the outer card chrome — for embedding inside a modal
-   * shell (StakeModal) that provides its own card.
-   */
+
   bare?: boolean;
 }) {
   const [outcome, setOutcome] = useState<number>(0);
@@ -73,12 +59,27 @@ export function StakePanel({
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
+  const [feeBps, setFeeBps] = useState<number | null>(null);
   const { write, writeBatch } = useContractWrite();
 
   const fixtureId = BigInt(fixture.fixtureId);
   const amount = useMemo(() => parseTickInput(amountStr), [amountStr]);
 
-  // Refresh allowance when the player/amount changes.
+  useEffect(() => {
+    if (!CONTRACTS.predictionPool) return;
+    let alive = true;
+    getPublicClient().readContract({
+      address: CONTRACTS.predictionPool,
+      abi: PREDICTION_POOL_ABI,
+      functionName: "platformFeeBps",
+    }).then((value) => {
+      if (alive) setFeeBps(Number(value));
+    }).catch(() => {
+      if (alive) setFeeBps(null);
+    });
+    return () => { alive = false; };
+  }, []);
+
   useEffect(() => {
     let alive = true;
     if (!playerAddress || !CONTRACTS.tickToken || !CONTRACTS.predictionPool) {
@@ -106,20 +107,18 @@ export function StakePanel({
   const totals = pool
     ? [BigInt(pool.totalHome), BigInt(pool.totalDraw), BigInt(pool.totalAway)]
     : [0n, 0n, 0n];
-  // Prize pool includes the protocol seed, which is paid into the winners'
-  // pool at settlement but is not itself a selectable outcome.
+
   const seed = pool ? BigInt(pool.seed ?? "0") : 0n;
   const totalPool = (pool ? BigInt(pool.totalPool) : 0n) + seed;
 
   const estimatedPayout = useMemo(() => {
-    if (!amount || totalPool < 0n) return null;
+    if (!amount || totalPool < 0n || feeBps === null || feeBps < 0 || feeBps > 10_000) return null;
     const w = totals[outcome];
     const T = totalPool + amount;
-    const distributable = (T * BigInt(10_000 - PLATFORM_FEE_BPS)) / 10_000n;
+    const distributable = (T * BigInt(10_000 - feeBps)) / 10_000n;
     return (amount * distributable) / (w + amount);
-  }, [amount, outcome, totals, totalPool]);
+  }, [amount, outcome, totals, totalPool, feeBps]);
 
-  // Null allowance (read failed) → approve defensively; approve is idempotent.
   const needsApproval = amount !== null && (allowance === null || allowance < amount);
   const balanceOk = amount !== null && balance !== null && balance >= amount;
   const minOk = amount !== null;
@@ -150,10 +149,7 @@ export function StakePanel({
     }
     setStep("staking");
     try {
-      // Improvement B — when the allowance is short, batch approve+stake:
-      // one userOp on smart wallets, sequential sponsored txs on embedded.
-      // The approve grants a buffer (max amount × 10, 10k TICK) so later
-      // stakes need no approve at all.
+
       const stakeCall = {
         to: CONTRACTS.predictionPool,
         abi: PREDICTION_POOL_ABI,
@@ -186,8 +182,7 @@ export function StakePanel({
           {
             label: "Stake",
             onHashed: (hash) => {
-              // Optimistic: toast at broadcast — receipt is awaited in the
-              // background; the match page reconciles from queries.
+
               toast.success("Stake submitted ⚡", {
                 detail: `${Number(amount / 10n ** 18n).toLocaleString()} TICK on ${OUTCOME_LABELS[outcome]}`,
                 link: `https://sepolia.basescan.org/tx/${hash}`,
@@ -366,9 +361,6 @@ export function StakePanel({
   );
 }
 
-/**
- * StakeModal — the match staking form in the shared viewport anchored shell.
- */
 export function StakeModal({
   fixture,
   pool,

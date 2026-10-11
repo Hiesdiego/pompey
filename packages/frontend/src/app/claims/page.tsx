@@ -1,11 +1,3 @@
-/**
- * Claims page (spec P3.11): all claimable rewards for the connected player
- * across settled matches, with sequential batch claiming.
- *
- * Scan: settled fixtures → chunked multicall of
- * getStake(season, fixture, player, outcome)×3 + claimed(gid, player).
- * A fixture is claimable when the player backed its winner and hasn't claimed.
- */
 
 "use client";
 
@@ -29,20 +21,25 @@ import { cn } from "../../lib/cn";
 import { celebrateClaim } from "../../lib/confetti";
 import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../components/States";
 import { TeamBadge } from "../../components/TeamBadge";
+import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, TEMPLATE_NAMES } from "../../lib/marketFactory";
+import { scanMarketClaims, type ClaimableMarket } from "../../lib/marketClaims";
 
-interface Claimable {
+interface ClaimableMatch {
+  kind: "match";
   fixture: ApiFixture;
   stakes: [bigint, bigint, bigint];
   winningOutcome: number | null;
-  won: boolean;
+  voided: boolean;
 }
 
-const CHUNK = 25; // fixtures per multicall
+type Claimable = ClaimableMatch | ClaimableMarket;
+
+const CHUNK = 25;
 
 async function scanClaimable(player: Address): Promise<Claimable[]> {
-  if (!CONTRACTS.predictionPool) throw new Error("PredictionPool address not configured.");
+  if (!CONTRACTS.predictionPool) return [];
   const fixtures = await api.fixtures();
-  const settled = fixtures.filter((f) => f.settled);
+  const settled = fixtures.filter((f) => f.settled || f.voided);
   const client = getPublicClient();
   const out: Claimable[] = [];
 
@@ -76,12 +73,14 @@ async function scanClaimable(player: Address): Promise<Claimable[]> {
       if (stakes.some((s) => s > 0n) && !claimed) {
         const pool = await api.pool(chunk[j].fixtureId);
         const winningOutcome = pool.winningOutcome;
-        if (pool.voided || winningOutcome === null || stakes[winningOutcome] <= 0n) continue;
+        const voided = chunk[j].voided || pool.voided;
+        if (!voided && (winningOutcome === null || stakes[winningOutcome] <= 0n)) continue;
         out.push({
+          kind: "match",
           fixture: chunk[j],
           stakes,
           winningOutcome,
-          won: winningOutcome !== null && stakes[winningOutcome] > 0n,
+          voided,
         });
       }
     }
@@ -108,11 +107,12 @@ export default function ClaimsPage() {
     setError(null);
     setDone(false);
     try {
-      const [claimables, stats] = await Promise.all([
+      const [matches, markets, stats] = await Promise.all([
         scanClaimable(playerAddress),
+        scanMarketClaims(playerAddress),
         api.player(playerAddress).catch(() => null),
       ]);
-      setItems(claimables);
+      setItems([...matches, ...markets]);
       setPlayerStats(stats ? {
         totalStakedTick: stats.totalStakedTick,
         totalWonTick: stats.totalWonTick,
@@ -128,8 +128,6 @@ export default function ClaimsPage() {
     if (authenticated && playerAddress) runScan();
   }, [authenticated, playerAddress, runScan]);
 
-  // Settlement is reflected by the backend fixture feed; refresh frequently
-  // while the claims page is open so newly claimable payouts show up promptly.
   useEffect(() => {
     if (!authenticated || !playerAddress) return;
     const timer = window.setInterval(runScan, 15_000);
@@ -142,20 +140,32 @@ export default function ClaimsPage() {
   }, [authenticated, playerAddress, runScan]);
 
   const claimAll = async () => {
-    if (!items || items.length === 0 || !CONTRACTS.predictionPool) return;
+    if (!items || items.length === 0) return;
     setClaiming(true);
     setClaimError(null);
     setProgress({ done: 0, total: items.length });
     try {
       for (let i = 0; i < items.length; i++) {
         const c = items[i];
-        await write({
-          to: CONTRACTS.predictionPool,
-          abi: PREDICTION_POOL_ABI,
-          functionName: "claim",
-          args: [BigInt(c.fixture.seasonId), BigInt(c.fixture.fixtureId)],
-          label: `Claim match ${c.fixture.fixtureId}`,
-        });
+        if (c.kind === "market") {
+          if (!MARKET_FACTORY_ADDRESS) throw new Error("MarketFactory address not configured.");
+          await write({
+            to: MARKET_FACTORY_ADDRESS,
+            abi: MARKET_FACTORY_ABI,
+            functionName: "claim",
+            args: [BigInt(c.market.id)],
+            label: `Claim market ${c.market.id}`,
+          });
+        } else {
+          if (!CONTRACTS.predictionPool) throw new Error("PredictionPool address not configured.");
+          await write({
+            to: CONTRACTS.predictionPool,
+            abi: PREDICTION_POOL_ABI,
+            functionName: c.voided ? "claimVoid" : "claim",
+            args: [BigInt(c.fixture.seasonId), BigInt(c.fixture.fixtureId)],
+            label: `${c.voided ? "Reclaim" : "Claim"} match ${c.fixture.fixtureId}`,
+          });
+        }
         celebrateClaim();
         setProgress({ done: i + 1, total: items.length });
       }
@@ -164,7 +174,7 @@ export default function ClaimsPage() {
       refreshBalance();
     } catch (e) {
       setClaimError(e instanceof Error ? e.message : String(e));
-      // Rescan to show what remains.
+
       runScan();
     } finally {
       setClaiming(false);
@@ -225,7 +235,7 @@ export default function ClaimsPage() {
             <div className="glass rounded-2xl p-4">
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Pending claims</p>
               <p className="mt-1 font-display text-xl font-bold tabular-nums text-zinc-900 dark:text-white">{items?.length ?? "—"}</p>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">settled matches</p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">matches and markets</p>
             </div>
           </section>
         );
@@ -238,13 +248,13 @@ export default function ClaimsPage() {
       )}
 
       {scanning || items === null ? (
-        <LoadingState label="Scanning settled matches for your stakes…" />
+        <LoadingState label="Scanning matches and markets for your claims…" />
       ) : items.length === 0 ? (
         <EmptyState
           icon={<CheckCircle2 className="h-8 w-8 text-[#1D9E75]" />}
           title={done ? "All claimed — nice work!" : "Nothing to claim right now."}
         >
-          Settle a winning prediction and it will show up here.
+          Winning predictions and refundable stakes will show up here after settlement.
         </EmptyState>
       ) : (
         <>
@@ -253,7 +263,7 @@ export default function ClaimsPage() {
               <span className="font-display font-bold tabular-nums text-zinc-900 dark:text-white">
                 {items.length}
               </span>{" "}
-              match{items.length === 1 ? "" : "es"} ready to claim
+              claim{items.length === 1 ? "" : "s"} ready
             </p>
             <div className="flex flex-col gap-2">
               {claiming && (
@@ -289,9 +299,27 @@ export default function ClaimsPage() {
             </p>
           )}
           <div className="space-y-3">
-            {items.map((c) => (
+            {items.map((c) => c.kind === "market" ? (
               <Link
-                key={c.fixture.fixtureId}
+                key={`market-${c.market.id}`}
+                href={`/markets/${c.market.id}`}
+                className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
+              >
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    {TEMPLATE_NAMES[c.market.templateId] ?? "Market"} #{c.market.id}
+                  </span>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {c.market.state === 2 ? "Stake refund" : "Winnings"} · {formatTick(c.amount)} TICK
+                  </span>
+                </div>
+                <span className="shrink-0 rounded-full bg-[#1D9E75]/12 px-3 py-1 text-xs font-bold text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]">
+                  {c.market.state === 2 ? "Claim refund" : "Claim winnings"}
+                </span>
+              </Link>
+            ) : (
+              <Link
+                key={`match-${c.fixture.seasonId}-${c.fixture.fixtureId}`}
                 href={`/match/${c.fixture.fixtureId}`}
                 className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
               >
@@ -317,24 +345,20 @@ export default function ClaimsPage() {
                 <span
                   className={cn(
                     "shrink-0 rounded-full px-3 py-1 text-xs font-bold",
-                    c.won
-                      ? "bg-[#1D9E75]/12 text-[#0f7a55] shadow-[0_0_14px_rgba(29,158,117,.25)] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]"
-                      : c.winningOutcome !== null
-                        ? "bg-black/5 text-zinc-500 dark:bg-white/8 dark:text-zinc-400"
-                        : "bg-amber-500/12 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300"
+                    c.voided
+                      ? "bg-amber-500/12 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                      : "bg-[#1D9E75]/12 text-[#0f7a55] shadow-[0_0_14px_rgba(29,158,117,.25)] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]"
                   )}
                 >
-                  {c.won
-                    ? `Won — ${outcomeLabel(c.winningOutcome!)}`
-                    : c.winningOutcome !== null
-                      ? `Lost — ${outcomeLabel(c.winningOutcome)}`
-                      : "Settled"}
+                  {c.voided
+                    ? "Claim refund"
+                    : `Won — ${outcomeLabel(c.winningOutcome!)}`}
                 </span>
               </Link>
             ))}
           </div>
           <p className="mt-4 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
-            Batch claiming sends one gasless transaction per match, in sequence.
+            Batch claiming sends one gasless transaction per claim, in sequence.
           </p>
         </>
       )}

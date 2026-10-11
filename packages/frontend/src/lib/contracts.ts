@@ -1,9 +1,3 @@
-/**
- * TICKR frontend contract config.
- *
- * Every address comes from a NEXT_PUBLIC_* env var — nothing is hardcoded.
- * An empty string means "not configured yet" (the user fills .env.local).
- */
 
 import { baseSepolia, baseMainnet } from "@tickr/shared/chains";
 import type { Address } from "viem";
@@ -15,23 +9,14 @@ export function getChainEnv(): ChainEnv {
 }
 
 export const ACTIVE_CHAIN = getChainEnv() === "mainnet" ? baseMainnet : baseSepolia;
-export const ACTIVE_CHAIN_ID = ACTIVE_CHAIN.id; // 84532 on testnet
+export const ACTIVE_CHAIN_ID = ACTIVE_CHAIN.id;
 export const ACTIVE_CHAIN_NAME = getChainEnv() === "mainnet" ? "Base" : "Base Sepolia";
 
 export const SEASON_ID: bigint = BigInt(process.env.NEXT_PUBLIC_SEASON_ID ?? "1");
 
-/**
- * Product name for the current season, shown everywhere the UI names the
- * season. The on-chain seasonId is an internal append-only key (it can never
- * be "redone" — SeasonRegistry.startNewSeason always increments), so the
- * user-facing name is decoupled: e.g. on-chain season 2 displays as
- * "CTF Season 1". Override with NEXT_PUBLIC_SEASON_NAME.
- */
 export const SEASON_DISPLAY_NAME: string =
   process.env.NEXT_PUBLIC_SEASON_NAME?.trim() || "CTF Season 1";
 
-// Browser requests go through a same-origin Next.js rewrite. The backend's
-// origin stays in the server-only BACKEND_API_URL environment variable.
 export const BACKEND_API_URL = "/backend-api";
 
 function envAddress(value: string | undefined): Address | "" {
@@ -39,10 +24,8 @@ function envAddress(value: string | undefined): Address | "" {
   return v === "" ? "" : (v as Address);
 }
 
-/** Deployed contract addresses. "" = not configured yet. */
 export const CONTRACTS = {
-  // Keep these references static: Next.js inlines NEXT_PUBLIC_* values only
-  // when it can see the property access at build time.
+
   tickToken: envAddress(process.env.NEXT_PUBLIC_TICK_TOKEN_ADDRESS),
   playerStats: envAddress(process.env.NEXT_PUBLIC_PLAYER_STATS_ADDRESS),
   priceOracle: envAddress(process.env.NEXT_PUBLIC_PRICE_ORACLE_ADDRESS),
@@ -54,21 +37,17 @@ export const CONTRACTS = {
 } as const;
 
 export const TICK_DECIMALS = 18;
-/** PriceOracle stores prices scaled by 1e8 (see backend lib/priceMath.ts). */
+
 export const PRICE_DECIMALS = 8;
-/** SeasonMath.FIXTURE_ID_SPACE — composite key for persistent contracts. */
+
 export const FIXTURE_ID_SPACE = 1_000_000n;
 
 export function globalFixtureId(seasonId: bigint, fixtureId: bigint): bigint {
   return seasonId * FIXTURE_ID_SPACE + fixtureId;
 }
 
-/** Minimum stake enforced by PredictionPool (also mirrored in UI). */
 export const MIN_STAKE_TICK = 10;
 
-// ── Minimal ABIs (copied from the Solidity sources, not invented) ───────────
-
-/** TickToken: ERC-20 bits + testnet faucet. See contracts/TickToken.sol */
 export const TICK_TOKEN_ABI = [
   {
     type: "function",
@@ -127,14 +106,14 @@ export const TICK_TOKEN_ABI = [
   },
 ] as const;
 
-/**
- * PredictionPool. See contracts/PredictionPool.sol
- * stake(seasonId, fixtureId, outcome, amount) — outcome is the Outcome enum as uint8
- * (WinHome=0, Draw=1, WinAway=2). claim(seasonId, fixtureId). claimed() is the
- * auto-getter for `mapping(uint256 => mapping(address => bool)) public claimed`
- * keyed by GLOBAL fixture id (see globalFixtureId above).
- */
 export const PREDICTION_POOL_ABI = [
+  {
+    type: "function",
+    name: "platformFeeBps",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
   {
     type: "function",
     name: "stake",
@@ -160,9 +139,7 @@ export const PREDICTION_POOL_ABI = [
   {
     type: "function",
     name: "claimVoid",
-    // DORMANT: the reused v0.3 PredictionPool does not expose claimVoid.
-    // Kept for forward-compat; only reachable when a pool reports
-    // voided=true, which cannot happen on the current deployment.
+
     stateMutability: "nonpayable",
     inputs: [
       { name: "seasonId", type: "uint256" },
@@ -188,8 +165,7 @@ export const PREDICTION_POOL_ABI = [
           { name: "seed", type: "uint256" },
           { name: "settled", type: "bool" },
           { name: "winningOutcome", type: "uint8" },
-          // NOTE: the reused PredictionPool is the v0.3 build — no `voided`
-          // field. Do not add one here or pool reads fail to decode.
+
         ],
       },
     ],
@@ -218,7 +194,6 @@ export const PREDICTION_POOL_ABI = [
   },
 ] as const;
 
-/** PriceOracle.getSnapshot — see contracts/PriceOracle.sol (prices scaled 1e8). */
 export const PRICE_ORACLE_ABI = [
   {
     type: "function",
@@ -244,7 +219,6 @@ export const PRICE_ORACLE_ABI = [
   },
 ] as const;
 
-/** MatchRegistry read-only views — see contracts/MatchRegistry.sol */
 export const MATCH_REGISTRY_ABI = [
   {
     type: "function",

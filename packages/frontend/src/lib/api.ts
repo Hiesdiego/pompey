@@ -1,11 +1,3 @@
-/**
- * Typed client for the TICKR backend REST API (spec P2.7).
- * Base URL: same-origin Next.js proxy. BigInts arrive as strings.
- *
- * Resilience: no `cache: "no-store"` — caching is the data layer's job
- * (React Query). All failures throw CodedError (lib/errors) with calm,
- * user-safe messages — never infrastructure wording, never the backend URL.
- */
 
 import { BACKEND_API_URL } from "./contracts";
 import { CodedError, toAppError, type ErrorCode } from "./errors";
@@ -30,13 +22,13 @@ export interface ApiFixture {
   home: ApiFixtureTeam | null;
   away: ApiFixtureTeam | null;
   matchdayIndex: number;
-  windowStart: string; // ISO
-  windowEnd: string; // ISO
-  kickoff: string | null; // ISO
-  scheduledKickoff: string | null; // ISO; provisional deterministic slot before on-chain reveal
+  windowStart: string;
+  windowEnd: string;
+  kickoff: string | null;
+  scheduledKickoff: string | null;
   kickoffRevealed: boolean;
   settled: boolean;
-  voided: boolean; // escape hatch: fixture voided by owner, stakes refundable via claimVoid
+  voided: boolean;
 }
 
 export interface ApiPool {
@@ -48,8 +40,27 @@ export interface ApiPool {
   seed: string;
   totalPool: string;
   settled: boolean;
-  voided: boolean; // escape hatch: stakes refundable via claimVoid, never payable via claim
+  voided: boolean;
   winningOutcome: number | null;
+}
+
+export interface ApiFormEntry {
+  fixtureId: string;
+  opponentTeamId: number;
+  result: "W" | "D" | "L";
+  goalsFor: number;
+  goalsAgainst: number;
+}
+
+export interface ApiFixtureForm {
+  ready: boolean;
+  home: ApiFormEntry[];
+  away: ApiFormEntry[];
+}
+
+export interface ApiPriceHistoryPoint {
+  t: number;
+  p: number;
 }
 
 export interface ApiTableRow {
@@ -87,10 +98,6 @@ export interface ApiPrice {
   error?: string;
 }
 
-/**
- * @deprecated Use CodedError from "./errors". Kept so existing
- * `instanceof ApiError` / `.status` catch sites compile during migration.
- */
 export class ApiError extends CodedError {
   status: number;
   constructor(status: number, code: ErrorCode, detail?: string) {
@@ -112,8 +119,7 @@ async function get<T>(path: string): Promise<T> {
   }
   if (!res.ok) {
     if (res.status === 404) throw new ApiError(404, "NOT_FOUND");
-    // Backend answered with an error — normalize via the shared taxonomy.
-    // The raw body is never surfaced (it may contain infra wording).
+
     throw toAppError({ ok: false, code: "query_failed" });
   }
   return (await res.json()) as T;
@@ -125,7 +131,9 @@ export const api = {
   fixtures: () => get<ApiFixture[]>("/api/fixtures"),
   fixture: (id: string | number) => get<ApiFixture>(`/api/fixtures/${id}`),
   pool: (id: string | number) => get<ApiPool>(`/api/fixtures/${id}/pool`),
+  fixtureForm: (id: string | number) => get<ApiFixtureForm>(`/api/fixtures/${id}/form`),
   table: () => get<ApiTableRow[]>("/api/table"),
+  priceHistory: (symbol: string) => get<ApiPriceHistoryPoint[]>(`/api/price-history/${encodeURIComponent(symbol)}`),
   player: (address: string) => get<ApiPlayer>(`/api/players/${address}`),
   prices: () => get<ApiPrice[]>("/api/prices"),
 };

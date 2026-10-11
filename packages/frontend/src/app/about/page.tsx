@@ -196,15 +196,17 @@ export default function AboutPage() {
 
       <Section id="audit" kicker="04 — Trustless" title="Run your own private audit">
         <P>
-          You don’t have to trust TICKR’s backend, frontend, or operators. Every
-          settlement is independently reproducible from public on-chain data:
+          You can independently recompute every settlement from the prices recorded
+          on-chain. The price snapshots themselves are submitted by TICKR’s authorized
+          backend signer, so checking their external accuracy is a separate step:
         </P>
         <ol className="mt-4 list-decimal space-y-3 pl-5 text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400">
           <li>
-            <strong className="text-zinc-900 dark:text-white">Read the settlement event.</strong> Each fixture’s
-            settlement emits <code className="font-mono text-[13px]">EndPriceSubmitted</code> on the
-            PriceOracle, containing the exact start/end prices, the computed
-            goals, and the outcome the contract recorded.
+            <strong className="text-zinc-900 dark:text-white">Read the oracle events.</strong> The
+            PriceOracle emits <code className="font-mono text-[13px]">StartPriceSubmitted</code> at kickoff
+            with the start prices, and <code className="font-mono text-[13px]">EndPriceSubmitted</code> at
+            settlement with the final prices, computed goals, and outcome. Its
+            snapshot also stores all four prices for the fixture.
           </li>
           <li>
             <strong className="text-zinc-900 dark:text-white">Recompute the scoreline.</strong> Apply the scoring
@@ -230,8 +232,9 @@ export default function AboutPage() {
           The backend itself runs this verification before every settlement —
           simulating the transaction and aborting if its independent computation
           disagrees. But the design doesn’t require you to trust that it does:
-          the audit path above works with nothing but a block explorer and the
-          published scoring rules.
+          the scoring audit above works with a block explorer and the published
+          rules. Checking whether the submitted prices matched the external feed
+          requires comparing them with that feed’s historical data.
         </P>
       </Section>
 
@@ -246,10 +249,10 @@ export default function AboutPage() {
         <P>
           Match results, the league table, market outcomes, and payouts are all
           computed and stored by smart contracts on Base. The backend is an{" "}
-          <strong className="text-zinc-900 dark:text-white">operator, not an authority</strong>: it submits price
-          snapshots and triggers settlement, but it cannot invent a result —
-          the contracts enforce the scoring math, and every input it submits is
-          emitted as a public event anyone can re-derive the outcome from.
+          <strong className="text-zinc-900 dark:text-white">price feed operator</strong>: it submits price
+          snapshots and triggers settlement. The contracts enforce the scoring
+          math on those snapshots, and every submitted input is public so anyone
+          can re-derive the outcome.
         </P>
         <h3 className="mt-6 font-display text-lg font-bold text-zinc-900 dark:text-white">
           Funds are never custodied
