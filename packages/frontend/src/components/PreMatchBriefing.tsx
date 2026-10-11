@@ -2,29 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, BarChart3, Clock3, Trophy } from "lucide-react";
+import { Activity, BarChart3, Trophy } from "lucide-react";
 import { getTeamById } from "@tickr/shared/teams";
-import { api, type ApiFixture, type ApiFixtureForm, type ApiPool, type ApiPriceHistoryPoint, type ApiTableRow, type ApiFormEntry } from "../lib/api";
+import { api, type ApiFixture, type ApiFixtureForm, type ApiPool, type ApiTableRow, type ApiFormEntry } from "../lib/api";
 import { CONTRACTS, MIN_STAKE_TICK, PREDICTION_POOL_ABI, TICK_DECIMALS } from "../lib/contracts";
-import { formatSignedPct, formatTick } from "../lib/format";
+import { formatTick } from "../lib/format";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { cn } from "../lib/cn";
-
-type PriceSeries = { values: number[]; change: number; range: number; lastAt: number; source: string };
-
-function makeSeries(points: ApiPriceHistoryPoint[] | null): PriceSeries | null {
-  const valid = (points ?? []).filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p) && point.p > 0).sort((a, b) => a.t - b.t);
-  if (valid.length < 2 || Date.now() - valid[valid.length - 1].t > 30 * 60_000) return null;
-  const first = valid[0].p;
-  const values = valid.map((point) => ((point.p - first) / first) * 100);
-  return {
-    values,
-    change: values[values.length - 1],
-    range: Math.max(...values) - Math.min(...values),
-    lastAt: valid[valid.length - 1].t,
-    source: valid[valid.length - 1].source ?? "Spot",
-  };
-}
+import { TradingViewChart } from "./TradingViewChart";
+import { getRecentFormDirect } from "../lib/recentFormDirect";
 
 function formLabel(entry: ApiFormEntry): string {
   const opponent = getTeamById(entry.opponentTeamId)?.symbol ?? "opponent";
@@ -46,8 +32,6 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
   const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [form, setForm] = useState<ApiFixtureForm | null>(null);
   const [formUnavailable, setFormUnavailable] = useState(false);
-  const [homeHistory, setHomeHistory] = useState<ApiPriceHistoryPoint[] | null>(null);
-  const [awayHistory, setAwayHistory] = useState<ApiPriceHistoryPoint[] | null>(null);
   const [feeBps, setFeeBps] = useState<number | null>(null);
   const home = fixture.home;
   const away = fixture.away;
@@ -56,13 +40,11 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
     if (!home || !away) return;
     let alive = true;
     const load = () => {
-      void Promise.allSettled([api.table(), api.priceHistory(home.symbol), api.priceHistory(away.symbol)]).then((results) => {
+      void api.table().then((rows) => {
         if (!alive) return;
-        setTable(results[0].status === "fulfilled" ? results[0].value : null);
-        setHomeHistory(results[1].status === "fulfilled" ? results[1].value : null);
-        setAwayHistory(results[2].status === "fulfilled" ? results[2].value : null);
+        setTable(rows);
         setSummaryLoaded(true);
-      });
+      }).catch(() => { if (alive) setSummaryLoaded(true); });
     };
     load();
     const timer = window.setInterval(load, 60_000);
@@ -71,9 +53,12 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
 
   useEffect(() => {
     let alive = true;
-    const load = () => void api.fixtureForm(fixture.fixtureId).then((value) => { if (alive) { setForm(value); setFormUnavailable(false); } }).catch(() => { if (alive) { setForm(null); setFormUnavailable(true); } });
+    const load = () => void api.fixtureForm(fixture.fixtureId)
+      .catch(() => getRecentFormDirect(fixture))
+      .then((value) => { if (alive) { setForm(value); setFormUnavailable(false); } })
+      .catch(() => { if (alive) setFormUnavailable(true); });
     load();
-    const timer = window.setInterval(load, 15_000);
+    const timer = window.setInterval(load, 60_000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [fixture.fixtureId]);
 
@@ -96,13 +81,6 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
   const awayRow = table?.find((row) => row.teamId === away.teamId);
   const homePosition = homeRow && table ? table.indexOf(homeRow) + 1 : null;
   const awayPosition = awayRow && table ? table.indexOf(awayRow) + 1 : null;
-  const homeSeries = makeSeries(homeHistory);
-  const awaySeries = makeSeries(awayHistory);
-  const allValues = [...(homeSeries?.values ?? []), ...(awaySeries?.values ?? []), 0];
-  const min = Math.min(...allValues);
-  const max = Math.max(...allValues);
-  const span = Math.max(max - min, 0.1);
-  const sparkline = (series: PriceSeries) => series.values.map((value, index) => `${index ? "L" : "M"}${(index / (series.values.length - 1)) * 240},${69 - ((value - min) / span) * 58}`).join(" ");
   const totals = pool ? [BigInt(pool.totalHome), BigInt(pool.totalDraw), BigInt(pool.totalAway)] : null;
   const totalStaked = totals?.reduce((sum, value) => sum + value, 0n) ?? 0n;
   const seed = pool ? BigInt(pool.seed ?? "0") : 0n;
@@ -133,16 +111,13 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
     </div>
 
     <div className="mt-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-display text-sm font-bold"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movement</h3><span className="text-[11px] text-zinc-500">Spot price history · up to 24h</span></div>
-      <div className="grid gap-3 sm:grid-cols-2">{[
-        { team: home, series: homeSeries, color: "#1D9E75" },
-        { team: away, series: awaySeries, color: "#2E7CF6" },
-      ].map(({ team, series, color }) => <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
-        <div className="flex items-center justify-between gap-2"><span className="font-display text-sm font-bold">{team.symbol}</span><strong className={cn("font-display text-lg tabular-nums", series && series.change < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400")}>{series ? formatSignedPct(series.change) : "—"}</strong></div>
-        {series ? <svg viewBox="0 0 240 80" preserveAspectRatio="none" className="mt-3 h-20 w-full" role="img" aria-label={`${team.name} price movement over the available 24-hour ${series.source} history, on a shared percentage scale`}><line x1="0" x2="240" y1={69 - ((0 - min) / span) * 58} y2={69 - ((0 - min) / span) * 58} stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" strokeDasharray="4 5" /><path d={sparkline(series)} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg> : <div className="mt-3 flex h-20 items-center justify-center text-xs text-zinc-500">{summaryLoaded ? "Price history unavailable" : "Loading price history…"}</div>}
-        <div className="mt-2 flex flex-wrap justify-between gap-1 text-[11px] text-zinc-500"><span>{series ? `${series.source} range ${series.range.toFixed(2)}%` : summaryLoaded ? "Try again shortly" : ""}</span>{series && <span className="flex items-center gap-1"><Clock3 className="h-3 w-3" /> Through {new Date(series.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-display text-sm font-bold"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movement</h3><span className="text-[11px] text-zinc-500">TradingView · Binance spot · 5-minute chart</span></div>
+      <div className="grid gap-3 sm:grid-cols-2">{[home, away].map((team) => <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
+        <div className="mb-2 font-display text-sm font-bold">{team.symbol} / USDT</div>
+        <TradingViewChart teamId={team.teamId} />
+        <p className="mt-2 text-[11px] text-zinc-500">Oracle start price is recorded at kickoff.</p>
       </div>)}</div>
-      <p className="mt-2 text-[11px] text-zinc-500">Both charts use the same percentage scale. Spot history is market context; final match prices come from the on-chain oracle snapshots.</p>
+      <p className="mt-2 text-[11px] text-zinc-500">TradingView charts show market context. Match results use on-chain oracle snapshots.</p>
     </div>
 
     <div className="mt-5 border-t border-black/[.07] pt-5 dark:border-white/[.07]">

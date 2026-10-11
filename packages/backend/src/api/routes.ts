@@ -237,7 +237,7 @@ export function buildRouter(deps: ApiDeps): Router {
       const fixtureId = BigInt(String(req.params.id));
       const fixture = deps.lifecycle.getFixtures().find((item) => item.fixtureId === fixtureId);
       if (!fixture) { res.status(404).json({ error: "fixture not found" }); return; }
-      res.json(await deps.reader.getRecentForm(config.seasonId, fixture.homeTeamId, fixture.awayTeamId));
+      res.json(await deps.reader.getRecentForm(config.seasonId, fixture.homeTeamId, fixture.awayTeamId, deps.lifecycle.getFixtures()));
     } catch (err) {
       logger.warn("[api] getRecentForm failed", { error: String(err) });
       res.status(502).json({ error: "recent form unavailable" });

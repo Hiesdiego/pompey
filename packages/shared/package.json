@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./chains": "./src/chains.ts",
     "./teams": "./src/teams.ts",
+    "./matchScore": "./src/matchScore.ts",
     "./constants": "./src/constants.ts"
   },
   "scripts": {

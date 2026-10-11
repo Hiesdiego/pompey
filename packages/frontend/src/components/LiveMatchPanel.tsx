@@ -7,13 +7,13 @@ import { formatSignedPct } from "../lib/format";
 import { cn } from "../lib/cn";
 import { useCountdown } from "./Countdown";
 import type { ApiFixture } from "../lib/api";
+import { TradingViewChart } from "./TradingViewChart";
 
 export interface Snapshot {
   homeStart: bigint;
   awayStart: bigint;
 }
 
-type TrendPoint = { at: number; home: number; away: number };
 type MatchMoment = { at: number; title: string; score: string };
 
 function pctChange(start: bigint, current: number | null): number | null {
@@ -47,7 +47,6 @@ export function LiveMatchPanel({
   windowEndMs: number | null;
 }) {
   const { expired } = useCountdown(windowEndMs);
-  const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [moments, setMoments] = useState<MatchMoment[]>([]);
   const [pulse, setPulse] = useState<MatchMoment | null>(null);
   const latest = useRef<{ home: number | null; away: number | null; score: [number, number] | null }>({ home: null, away: null, score: null });
@@ -65,7 +64,6 @@ export function LiveMatchPanel({
         return;
       }
       const at = Date.now();
-      setTrend((points) => [...points.slice(-719), { at, home, away }]);
       const previous = previousScore.current;
       if (previous && (previous[0] !== score[0] || previous[1] !== score[1])) {
         const moment = { at, title: momentTitle(previous, score, fixture.home?.name ?? "Home", fixture.away?.name ?? "Away"), score: `${score[0]}–${score[1]}` };
@@ -85,15 +83,6 @@ export function LiveMatchPanel({
     return () => window.clearTimeout(timer);
   }, [pulse]);
 
-  const values = trend.flatMap((point) => [point.home, point.away]);
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const padding = Math.max((rawMax - rawMin) * 0.12, 0.05);
-  const min = rawMin - padding;
-  const max = rawMax + padding;
-  const y = (value: number) => 104 - ((value - min) / (max - min)) * 88;
-  const x = (index: number) => trend.length < 2 ? 300 : ((trend[index].at - trend[0].at) / (trend[trend.length - 1].at - trend[0].at || 1)) * 600;
-  const path = (key: "home" | "away") => trend.map((point, index) => `${index && point.at - trend[index - 1].at <= 10_000 ? "L" : "M"}${x(index)},${y(point[key])}`).join(" ");
   const leader = projectedScore ? leaderOf(projectedScore) : "draw";
   const home = fixture.home;
   const away = fixture.away;
@@ -114,15 +103,9 @@ export function LiveMatchPanel({
         <strong className="font-display text-xl tabular-nums">{pulse.score}</strong>
       </div>}
 
-      <div className="relative mb-5 overflow-hidden rounded-2xl border border-black/[.06] bg-black/[.025] px-3 py-4 dark:border-white/[.07] dark:bg-white/[.025]">
-        <div className="mb-2 flex items-center justify-between gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400"><span>Recent live samples</span><span className="tabular-nums">Shared scale {formatSignedPct(min)} to {formatSignedPct(max)}</span></div>
-        <svg viewBox="0 0 600 120" preserveAspectRatio="none" className="h-32 w-full sm:h-40" role="img" aria-label="Both coins' recent price changes, shown on the same percentage scale">
-          {[0, 1, 2, 3].map((index) => <line key={index} x1="0" x2="600" y1={20 + index * 28} y2={20 + index * 28} stroke="currentColor" className="text-zinc-300/50 dark:text-zinc-700/60" strokeDasharray="4 8" />)}
-          <line x1="0" x2="600" y1={y(0)} y2={y(0)} stroke="currentColor" className="text-zinc-400/70 dark:text-zinc-500/70" strokeDasharray="5 5" />
-          {trend.length > 1 && <><path d={path("home")} fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><path d={path("away")} fill="none" stroke="#2E7CF6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></>}
-          {trend.length > 0 && <><circle cx={x(trend.length - 1)} cy={y(trend[trend.length - 1].home)} r="4" fill="#22c55e" /><circle cx={x(trend.length - 1)} cy={y(trend[trend.length - 1].away)} r="4" fill="#2E7CF6" /></>}
-        </svg>
-        <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-500"><span>{trend.length ? new Date(trend[0].at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Collecting live prices…"}</span><span>{trend.length ? new Date(trend[trend.length - 1].at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span></div>
+      <div className="relative mb-5 grid gap-3 sm:grid-cols-2">
+        <div><p className="mb-2 text-xs font-bold">{home.symbol} · oracle start {snapshot ? `$${(Number(snapshot.homeStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p><TradingViewChart teamId={home.teamId} /></div>
+        <div><p className="mb-2 text-xs font-bold">{away.symbol} · oracle start {snapshot ? `$${(Number(snapshot.awayStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p><TradingViewChart teamId={away.teamId} /></div>
       </div>
 
       <div className="space-y-4">

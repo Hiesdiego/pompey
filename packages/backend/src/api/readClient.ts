@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { logger } from "../lib/logger.js";
 import { publicClient } from "../lib/rpc.js";
 import { TICKR_TEAMS } from "@tickr/shared";
+import { scoreFromSnapshot } from "@tickr/shared/matchScore";
 
 const RESULT_ENGINE_ABI = [
   {
@@ -125,6 +126,15 @@ export interface RecentFormEntry {
   goalsAgainst: number;
 }
 
+export interface SettledFixtureForForm {
+  fixtureId: bigint;
+  homeTeamId: number;
+  awayTeamId: number;
+  kickoffMs: number;
+  settled: boolean;
+  voided: boolean;
+}
+
 interface RecordedFixtureResult {
   fixtureId: string;
   homeTeamId: number;
@@ -164,6 +174,18 @@ const LEADERBOARD_CACHE_MS = 60_000;
 
 const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
+const PRICE_ORACLE_SNAPSHOT_ABI = [{
+  type: "function",
+  name: "getSnapshot",
+  stateMutability: "view",
+  inputs: [{ name: "seasonId", type: "uint256" }, { name: "fixtureId", type: "uint256" }],
+  outputs: [{ type: "tuple", components: [
+    { name: "homeStart", type: "uint256" }, { name: "awayStart", type: "uint256" },
+    { name: "homeEnd", type: "uint256" }, { name: "awayEnd", type: "uint256" },
+    { name: "startSubmitted", type: "bool" }, { name: "endSubmitted", type: "bool" },
+  ] }],
+}] as const;
+
 function resultScanStartBlock(seasonId: bigint): bigint {
   // The current season's factory is deployed before its fixtures can settle.
   // Its deployment block avoids replaying every prior season on restart.
@@ -189,113 +211,65 @@ export class ChainReader {
   private resultHistoryReady = false;
 
   private resultScanPromise: Promise<void> | null = null;
+  private readonly recentFormCache = new Map<string, { at: number; fixtureIds: string; value: { ready: boolean; home: RecentFormEntry[]; away: RecentFormEntry[] } }>();
 
-  private recentSeasonId: bigint | null = null;
-  private recentScannedTo: bigint | null = null;
-  private recentCompleteAt = 0;
-  private readonly recentResultsByFixture = new Map<string, RecordedFixtureResult>();
-  private recentScanPromise: Promise<boolean> | null = null;
-
-  async getRecentForm(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<{
+  async getRecentForm(seasonId: bigint, homeTeamId: number, awayTeamId: number, fixtures: SettledFixtureForForm[]): Promise<{
     ready: boolean;
     home: RecentFormEntry[];
     away: RecentFormEntry[];
   }> {
-    const ready = await this.scanRecentResultEvents(seasonId, homeTeamId, awayTeamId);
-    const results = this.resultHistoryReady && this.goalsSeasonId === seasonId
-      ? this.resultsByFixture.values()
-      : this.recentResultsByFixture.values();
-    const recent = (teamId: number): RecentFormEntry[] => [...results]
-      .filter((result) => result.homeTeamId === teamId || result.awayTeamId === teamId)
-      .sort((a, b) => a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1)
+    const settled = fixtures.filter((item) => item.settled && !item.voided);
+    const latestFor = (teamId: number) => settled
+      .filter((item) => item.homeTeamId === teamId || item.awayTeamId === teamId)
+      .sort((a, b) => b.kickoffMs - a.kickoffMs || (a.fixtureId < b.fixtureId ? 1 : -1))
+      .slice(0, 5);
+    const candidates = [...new Map([...latestFor(homeTeamId), ...latestFor(awayTeamId)]
+      .map((item) => [item.fixtureId.toString(), item])).values()];
+    if (candidates.length === 0) return { ready: true, home: [], away: [] };
+    const cacheKey = `${seasonId}:${homeTeamId}:${awayTeamId}`;
+    const fixtureIds = candidates.map((item) => item.fixtureId.toString()).join(",");
+    const cached = this.recentFormCache.get(cacheKey);
+    if (cached && cached.fixtureIds === fixtureIds && Date.now() - cached.at < 30_000) return cached.value;
+    const snapshots = await this.publicClient.multicall({
+      contracts: candidates.map((item) => ({
+        address: config.contracts.priceOracle,
+        abi: PRICE_ORACLE_SNAPSHOT_ABI,
+        functionName: "getSnapshot" as const,
+        args: [seasonId, item.fixtureId] as const,
+      })),
+      allowFailure: false,
+    });
+    const scored = candidates.flatMap((item, index) => {
+      const snapshot = snapshots[index] as {
+        homeStart: bigint; awayStart: bigint; homeEnd: bigint; awayEnd: bigint; endSubmitted: boolean;
+      };
+      if (!snapshot.endSubmitted || snapshot.homeStart === 0n || snapshot.awayStart === 0n) return [];
+      const [homeGoals, awayGoals] = scoreFromSnapshot(snapshot.homeStart, snapshot.awayStart, snapshot.homeEnd, snapshot.awayEnd);
+      return [{ item, homeGoals, awayGoals }];
+    });
+    const recent = (teamId: number): RecentFormEntry[] => scored
+      .filter(({ item }) => item.homeTeamId === teamId || item.awayTeamId === teamId)
+      .sort((a, b) => b.item.kickoffMs - a.item.kickoffMs || (a.item.fixtureId < b.item.fixtureId ? 1 : -1))
       .slice(0, 5)
-      .map((result) => {
-        const isHome = result.homeTeamId === teamId;
-        const goalsFor = isHome ? result.homeGoals : result.awayGoals;
-        const goalsAgainst = isHome ? result.awayGoals : result.homeGoals;
+      .map(({ item, homeGoals, awayGoals }) => {
+        const isHome = item.homeTeamId === teamId;
+        const goalsFor = isHome ? homeGoals : awayGoals;
+        const goalsAgainst = isHome ? awayGoals : homeGoals;
         return {
-          fixtureId: result.fixtureId,
-          opponentTeamId: isHome ? result.awayTeamId : result.homeTeamId,
+          fixtureId: item.fixtureId.toString(),
+          opponentTeamId: isHome ? item.awayTeamId : item.homeTeamId,
           result: goalsFor > goalsAgainst ? "W" : goalsFor < goalsAgainst ? "L" : "D",
           goalsFor,
           goalsAgainst,
         };
       });
-    return {
-      ready,
+    const value = {
+      ready: true,
       home: recent(homeTeamId),
       away: recent(awayTeamId),
     };
-  }
-
-  private async scanRecentResultEvents(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<boolean> {
-    if (this.resultHistoryReady && this.goalsSeasonId === seasonId) return true;
-    if (this.recentScanPromise) {
-      await this.recentScanPromise;
-      return this.scanRecentResultEvents(seasonId, homeTeamId, awayTeamId);
-    }
-    this.recentScanPromise = this.scanRecentResultEventsNow(seasonId, homeTeamId, awayTeamId)
-      .finally(() => { this.recentScanPromise = null; });
-    return this.recentScanPromise;
-  }
-
-  private async scanRecentResultEventsNow(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<boolean> {
-    if (this.recentSeasonId !== seasonId || (this.recentCompleteAt > 0 && Date.now() - this.recentCompleteAt > 5 * 60_000)) {
-      this.recentResultsByFixture.clear();
-      this.recentScannedTo = null;
-      this.recentCompleteAt = 0;
-      this.recentSeasonId = seasonId;
-    }
-    const records = await this.publicClient.multicall({
-      contracts: [homeTeamId, awayTeamId].map((teamId) => ({
-        address: config.contracts.resultEngine,
-        abi: RESULT_ENGINE_ABI,
-        functionName: "getTeamRecord" as const,
-        args: [seasonId, teamId] as const,
-      })),
-      allowFailure: false,
-    });
-    const needed = [homeTeamId, awayTeamId].map((teamId, index) => ({
-      teamId,
-      count: Math.min(5, Number((records[index] as { played: number }).played)),
-    }));
-    const haveEnough = () => needed.every(({ teamId, count }) =>
-      [...this.recentResultsByFixture.values()].filter((result) => result.homeTeamId === teamId || result.awayTeamId === teamId).length >= count);
-    if (haveEnough()) {
-      if (!this.recentCompleteAt) this.recentCompleteAt = Date.now();
-      return true;
-    }
-    const latest = await this.publicClient.getBlockNumber();
-    let to = this.recentScannedTo ?? latest;
-    const first = resultScanStartBlock(seasonId);
-    // Bound each HTTP request; the client polls until enough settled results are found.
-    for (let page = 0; page < 12 && to >= first && !haveEnough(); page++) {
-      const from = to - LOG_SCAN_CHUNK_BLOCKS + 1n > first ? to - LOG_SCAN_CHUNK_BLOCKS + 1n : first;
-      const logs = await this.publicClient.getLogs({
-        address: config.contracts.resultEngine,
-        event: RESULT_ENGINE_ABI[1],
-        args: { seasonId },
-        fromBlock: from,
-        toBlock: to,
-      });
-      for (const log of logs) {
-        const args = log.args;
-        this.recentResultsByFixture.set(String(args.fixtureId), {
-          fixtureId: String(args.fixtureId),
-          homeTeamId: Number(args.homeTeamId),
-          awayTeamId: Number(args.awayTeamId),
-          homeGoals: Number(args.homeGoals),
-          awayGoals: Number(args.awayGoals),
-          blockNumber: log.blockNumber,
-          logIndex: log.logIndex,
-        });
-      }
-      to = from - 1n;
-      this.recentScannedTo = to;
-    }
-    const complete = haveEnough() || to < first;
-    if (complete) this.recentCompleteAt = Date.now();
-    return complete;
+    this.recentFormCache.set(cacheKey, { at: Date.now(), fixtureIds, value });
+    return value;
   }
 
   constructor() {
@@ -406,7 +380,8 @@ export class ChainReader {
       this.resultHistoryReady = true;
       return;
     }
-    while (from <= latest) {
+    let pages = 0;
+    while (from <= latest && pages < 30) {
       const chunkEnd = from + LOG_SCAN_CHUNK_BLOCKS - 1n;
       const to = chunkEnd > latest ? latest : chunkEnd;
       const logs = await this.publicClient.getLogs({
@@ -458,8 +433,9 @@ export class ChainReader {
       }
       this.resultsScannedTo = to;
       from = to + 1n;
+      pages++;
     }
-    this.resultHistoryReady = true;
+    this.resultHistoryReady = from > latest;
   }
 
   async getPool(seasonId: bigint, fixtureId: bigint): Promise<PoolView> {

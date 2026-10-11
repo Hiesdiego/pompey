@@ -19,7 +19,7 @@ import { formatTick, formatSignedPct, isoToMs, normalizeScoreline, roundPctLikeO
 import { useTickr } from "../../../hooks/useTickr";
 import { useTickBalance } from "../../../hooks/useTickBalance";
 import { useSettledScoreline } from "../../../hooks/useSettledScoreline";
-import { usePriceFeed } from "../../../lib/price/usePriceFeed";
+import { useSharedPrices } from "../../../lib/price/useSharedPrices";
 import { getPublicClient } from "../../../hooks/usePublicClient";
 import { fixtureStatus, type FixtureStatus } from "../../../components/FixtureCard";
 import { LiveMatchPanel } from "../../../components/LiveMatchPanel";
@@ -71,7 +71,7 @@ export default function MatchPage() {
   const id = params.id as string;
   const { authenticated, login, playerAddress } = useTickr();
   const { balance, refresh: refreshBalance } = useTickBalance(playerAddress);
-  const { prices, updatedAt } = usePriceFeed(true);
+  const { prices, updatedAt } = useSharedPrices(true);
 
   const [fixture, setFixture] = useState<ApiFixture | null>(null);
   const [pool, setPool] = useState<ApiPool | null>(null);
