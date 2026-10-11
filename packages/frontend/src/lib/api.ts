@@ -61,6 +61,7 @@ export interface ApiFixtureForm {
 export interface ApiPriceHistoryPoint {
   t: number;
   p: number;
+  source?: "Binance" | "CoinGecko";
 }
 
 export interface ApiTableRow {

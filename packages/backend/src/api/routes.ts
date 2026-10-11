@@ -11,8 +11,9 @@ import type { PriceFeed } from "../services/priceFeed.js";
 import type { CoingeckoPoller } from "../services/coingecko.js";
 import { ChainCache, ChainApiError } from "../services/chainCache.js";
 import { scaledToPrice } from "../lib/priceMath.js";
+import { fetchPriceHistory, type PriceHistoryPoint } from "../services/priceHistory.js";
 
-const priceHistoryCache = new Map<string, { at: number; points: Array<{ t: number; p: number }> }>();
+const priceHistoryCache = new Map<string, { at: number; points: PriceHistoryPoint[] }>();
 
 export interface HealthReport {
   status: "ok" | "degraded";
@@ -231,12 +232,12 @@ export function buildRouter(deps: ApiDeps): Router {
     }
   });
 
-  router.get("/api/fixtures/:id/form", (req: Request, res: Response) => {
+  router.get("/api/fixtures/:id/form", async (req: Request, res: Response) => {
     try {
       const fixtureId = BigInt(String(req.params.id));
       const fixture = deps.lifecycle.getFixtures().find((item) => item.fixtureId === fixtureId);
       if (!fixture) { res.status(404).json({ error: "fixture not found" }); return; }
-      res.json(deps.reader.getRecentForm(config.seasonId, fixture.homeTeamId, fixture.awayTeamId));
+      res.json(await deps.reader.getRecentForm(config.seasonId, fixture.homeTeamId, fixture.awayTeamId));
     } catch (err) {
       logger.warn("[api] getRecentForm failed", { error: String(err) });
       res.status(502).json({ error: "recent form unavailable" });
@@ -270,23 +271,15 @@ export function buildRouter(deps: ApiDeps): Router {
     const team = TICKR_TEAMS.find((t) => t.symbol === String(req.params.symbol).toUpperCase());
     if (!team) { res.status(404).json({ error: "unknown team" }); return; }
     const cached = priceHistoryCache.get(team.symbol);
-    if (cached && Date.now() - cached.at < 60_000) { res.json(cached.points); return; }
+    const cacheMs = cached?.points[0]?.source === "CoinGecko" ? 5 * 60_000 : 60_000;
+    if (cached && Date.now() - cached.at < cacheMs) { res.json(cached.points); return; }
     try {
-      const url = `${config.binance.restBaseUrl.replace(/\/$/, "")}/api/v3/klines?symbol=${team.binanceSymbol}&interval=5m&limit=288`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-      if (!response.ok) throw new Error(`history source ${response.status}`);
-      const rows = await response.json() as unknown;
-      if (!Array.isArray(rows)) throw new Error("invalid history response");
-      const points = rows.map((row) => {
-        const candle = row as unknown[];
-        return { t: Number(candle[0]), p: Number(candle[4]) };
-      }).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.p) && p.p > 0);
-      if (!points.length) throw new Error("empty history response");
+      const points = await fetchPriceHistory(team, config.binance.restBaseUrl, config.coingecko.baseUrl, config.coingecko.apiKey);
       priceHistoryCache.set(team.symbol, { at: Date.now(), points });
-      res.setHeader("Cache-Control", "public, max-age=60");
+      res.setHeader("Cache-Control", `public, max-age=${points[0].source === "CoinGecko" ? 300 : 60}`);
       res.json(points);
     } catch (err) {
-      if (cached && Date.now() - cached.at < 5 * 60_000) { res.json(cached.points); return; }
+      if (cached && Date.now() - cached.at < 15 * 60_000) { res.json(cached.points); return; }
       logger.warn("[api] price history unavailable", { symbol: team.symbol, error: String(err) });
       res.status(502).json({ error: "price history unavailable" });
     }

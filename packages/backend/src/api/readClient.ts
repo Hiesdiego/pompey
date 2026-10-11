@@ -164,6 +164,14 @@ const LEADERBOARD_CACHE_MS = 60_000;
 
 const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
+function resultScanStartBlock(seasonId: bigint): bigint {
+  // The current season's factory is deployed before its fixtures can settle.
+  // Its deployment block avoids replaying every prior season on restart.
+  return seasonId === config.seasonId && config.social.marketFactoryDeployBlock
+    ? BigInt(config.social.marketFactoryDeployBlock)
+    : config.leaderboard.scanStartBlock;
+}
+
 export class ChainReader {
   private readonly publicClient: PublicClient;
   private leaderboardCache: { at: number; rows: PlayerView[] } | null = null;
@@ -182,13 +190,22 @@ export class ChainReader {
 
   private resultScanPromise: Promise<void> | null = null;
 
-  getRecentForm(seasonId: bigint, homeTeamId: number, awayTeamId: number): {
+  private recentSeasonId: bigint | null = null;
+  private recentScannedTo: bigint | null = null;
+  private recentCompleteAt = 0;
+  private readonly recentResultsByFixture = new Map<string, RecordedFixtureResult>();
+  private recentScanPromise: Promise<boolean> | null = null;
+
+  async getRecentForm(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<{
     ready: boolean;
     home: RecentFormEntry[];
     away: RecentFormEntry[];
-  } {
-    this.refreshResultEventsInBackground(seasonId);
-    const recent = (teamId: number): RecentFormEntry[] => [...this.resultsByFixture.values()]
+  }> {
+    const ready = await this.scanRecentResultEvents(seasonId, homeTeamId, awayTeamId);
+    const results = this.resultHistoryReady && this.goalsSeasonId === seasonId
+      ? this.resultsByFixture.values()
+      : this.recentResultsByFixture.values();
+    const recent = (teamId: number): RecentFormEntry[] => [...results]
       .filter((result) => result.homeTeamId === teamId || result.awayTeamId === teamId)
       .sort((a, b) => a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1)
       .slice(0, 5)
@@ -205,10 +222,80 @@ export class ChainReader {
         };
       });
     return {
-      ready: this.goalsSeasonId === seasonId && this.resultHistoryReady,
+      ready,
       home: recent(homeTeamId),
       away: recent(awayTeamId),
     };
+  }
+
+  private async scanRecentResultEvents(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<boolean> {
+    if (this.resultHistoryReady && this.goalsSeasonId === seasonId) return true;
+    if (this.recentScanPromise) {
+      await this.recentScanPromise;
+      return this.scanRecentResultEvents(seasonId, homeTeamId, awayTeamId);
+    }
+    this.recentScanPromise = this.scanRecentResultEventsNow(seasonId, homeTeamId, awayTeamId)
+      .finally(() => { this.recentScanPromise = null; });
+    return this.recentScanPromise;
+  }
+
+  private async scanRecentResultEventsNow(seasonId: bigint, homeTeamId: number, awayTeamId: number): Promise<boolean> {
+    if (this.recentSeasonId !== seasonId || (this.recentCompleteAt > 0 && Date.now() - this.recentCompleteAt > 5 * 60_000)) {
+      this.recentResultsByFixture.clear();
+      this.recentScannedTo = null;
+      this.recentCompleteAt = 0;
+      this.recentSeasonId = seasonId;
+    }
+    const records = await this.publicClient.multicall({
+      contracts: [homeTeamId, awayTeamId].map((teamId) => ({
+        address: config.contracts.resultEngine,
+        abi: RESULT_ENGINE_ABI,
+        functionName: "getTeamRecord" as const,
+        args: [seasonId, teamId] as const,
+      })),
+      allowFailure: false,
+    });
+    const needed = [homeTeamId, awayTeamId].map((teamId, index) => ({
+      teamId,
+      count: Math.min(5, Number((records[index] as { played: number }).played)),
+    }));
+    const haveEnough = () => needed.every(({ teamId, count }) =>
+      [...this.recentResultsByFixture.values()].filter((result) => result.homeTeamId === teamId || result.awayTeamId === teamId).length >= count);
+    if (haveEnough()) {
+      if (!this.recentCompleteAt) this.recentCompleteAt = Date.now();
+      return true;
+    }
+    const latest = await this.publicClient.getBlockNumber();
+    let to = this.recentScannedTo ?? latest;
+    const first = resultScanStartBlock(seasonId);
+    // Bound each HTTP request; the client polls until enough settled results are found.
+    for (let page = 0; page < 12 && to >= first && !haveEnough(); page++) {
+      const from = to - LOG_SCAN_CHUNK_BLOCKS + 1n > first ? to - LOG_SCAN_CHUNK_BLOCKS + 1n : first;
+      const logs = await this.publicClient.getLogs({
+        address: config.contracts.resultEngine,
+        event: RESULT_ENGINE_ABI[1],
+        args: { seasonId },
+        fromBlock: from,
+        toBlock: to,
+      });
+      for (const log of logs) {
+        const args = log.args;
+        this.recentResultsByFixture.set(String(args.fixtureId), {
+          fixtureId: String(args.fixtureId),
+          homeTeamId: Number(args.homeTeamId),
+          awayTeamId: Number(args.awayTeamId),
+          homeGoals: Number(args.homeGoals),
+          awayGoals: Number(args.awayGoals),
+          blockNumber: log.blockNumber,
+          logIndex: log.logIndex,
+        });
+      }
+      to = from - 1n;
+      this.recentScannedTo = to;
+    }
+    const complete = haveEnough() || to < first;
+    if (complete) this.recentCompleteAt = Date.now();
+    return complete;
   }
 
   constructor() {
@@ -313,7 +400,7 @@ export class ChainReader {
     }
     const latest = await this.publicClient.getBlockNumber();
     let from =
-      this.resultsScannedTo !== null ? this.resultsScannedTo + 1n : config.leaderboard.scanStartBlock;
+      this.resultsScannedTo !== null ? this.resultsScannedTo + 1n : resultScanStartBlock(seasonId);
     if (from > latest) {
       if (this.resultsScannedTo === null) this.resultsScannedTo = latest;
       this.resultHistoryReady = true;

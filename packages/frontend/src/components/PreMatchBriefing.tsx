@@ -10,7 +10,7 @@ import { formatSignedPct, formatTick } from "../lib/format";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { cn } from "../lib/cn";
 
-type PriceSeries = { values: number[]; change: number; range: number; lastAt: number };
+type PriceSeries = { values: number[]; change: number; range: number; lastAt: number; source: string };
 
 function makeSeries(points: ApiPriceHistoryPoint[] | null): PriceSeries | null {
   const valid = (points ?? []).filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p) && point.p > 0).sort((a, b) => a.t - b.t);
@@ -22,6 +22,7 @@ function makeSeries(points: ApiPriceHistoryPoint[] | null): PriceSeries | null {
     change: values[values.length - 1],
     range: Math.max(...values) - Math.min(...values),
     lastAt: valid[valid.length - 1].t,
+    source: valid[valid.length - 1].source ?? "Spot",
   };
 }
 
@@ -33,10 +34,10 @@ function formLabel(entry: ApiFormEntry): string {
 function FormRow({ name, entries, ready, unavailable }: { name: string; entries: ApiFormEntry[]; ready: boolean; unavailable: boolean }) {
   return <div className="flex flex-wrap items-center justify-between gap-2">
     <span className="text-sm font-semibold">{name}</span>
-    {!ready ? <span className="text-xs text-zinc-500">{unavailable ? "Recent results unavailable" : "Loading results…"}</span> : entries.length ? <div className="flex items-center gap-1.5" aria-label={`${name} recent form, newest first`}>
+    {entries.length ? <div className="flex items-center gap-1.5" aria-label={`${name} recent form, newest first`}>
       {entries.map((entry) => <Link key={entry.fixtureId} href={`/match/${entry.fixtureId}`} title={formLabel(entry)} aria-label={formLabel(entry)} className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-xs font-black text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2E7CF6]", entry.result === "W" ? "bg-emerald-500" : entry.result === "D" ? "bg-zinc-500" : "bg-red-500")}>{entry.result}</Link>)}
       <span className="ml-1 text-[11px] text-zinc-500">{entries.length}/5</span>
-    </div> : <span className="text-xs text-zinc-500">No settled matches yet</span>}
+    </div> : <span className="text-xs text-zinc-500">{!ready ? unavailable ? "Recent results unavailable" : "Loading results…" : "No settled matches yet"}</span>}
   </div>;
 }
 
@@ -132,16 +133,16 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
     </div>
 
     <div className="mt-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-display text-sm font-bold"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movement</h3><span className="text-[11px] text-zinc-500">Binance spot · 5-minute closes · up to 24h</span></div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-display text-sm font-bold"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movement</h3><span className="text-[11px] text-zinc-500">Spot price history · up to 24h</span></div>
       <div className="grid gap-3 sm:grid-cols-2">{[
         { team: home, series: homeSeries, color: "#1D9E75" },
         { team: away, series: awaySeries, color: "#2E7CF6" },
       ].map(({ team, series, color }) => <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
         <div className="flex items-center justify-between gap-2"><span className="font-display text-sm font-bold">{team.symbol}</span><strong className={cn("font-display text-lg tabular-nums", series && series.change < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400")}>{series ? formatSignedPct(series.change) : "—"}</strong></div>
-        {series ? <svg viewBox="0 0 240 80" preserveAspectRatio="none" className="mt-3 h-20 w-full" role="img" aria-label={`${team.name} price movement over the available 24-hour Binance history, on a shared percentage scale`}><line x1="0" x2="240" y1={69 - ((0 - min) / span) * 58} y2={69 - ((0 - min) / span) * 58} stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" strokeDasharray="4 5" /><path d={sparkline(series)} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg> : <div className="mt-3 flex h-20 items-center justify-center text-xs text-zinc-500">{summaryLoaded ? "Price history unavailable" : "Loading price history…"}</div>}
-        <div className="mt-2 flex flex-wrap justify-between gap-1 text-[11px] text-zinc-500"><span>{series ? `5-minute close range ${series.range.toFixed(2)}%` : summaryLoaded ? "Try again shortly" : ""}</span>{series && <span className="flex items-center gap-1"><Clock3 className="h-3 w-3" /> Through {new Date(series.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>
+        {series ? <svg viewBox="0 0 240 80" preserveAspectRatio="none" className="mt-3 h-20 w-full" role="img" aria-label={`${team.name} price movement over the available 24-hour ${series.source} history, on a shared percentage scale`}><line x1="0" x2="240" y1={69 - ((0 - min) / span) * 58} y2={69 - ((0 - min) / span) * 58} stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" strokeDasharray="4 5" /><path d={sparkline(series)} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg> : <div className="mt-3 flex h-20 items-center justify-center text-xs text-zinc-500">{summaryLoaded ? "Price history unavailable" : "Loading price history…"}</div>}
+        <div className="mt-2 flex flex-wrap justify-between gap-1 text-[11px] text-zinc-500"><span>{series ? `${series.source} range ${series.range.toFixed(2)}%` : summaryLoaded ? "Try again shortly" : ""}</span>{series && <span className="flex items-center gap-1"><Clock3 className="h-3 w-3" /> Through {new Date(series.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>
       </div>)}</div>
-      <p className="mt-2 text-[11px] text-zinc-500">Both charts use the same percentage scale. Binance history is market context; final match prices come from the on-chain oracle snapshots.</p>
+      <p className="mt-2 text-[11px] text-zinc-500">Both charts use the same percentage scale. Spot history is market context; final match prices come from the on-chain oracle snapshots.</p>
     </div>
 
     <div className="mt-5 border-t border-black/[.07] pt-5 dark:border-white/[.07]">

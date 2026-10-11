@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { usePriceFeed } from "../lib/price/usePriceFeed";
 import { decodeTargetTerms, formatUsd } from "../lib/targetMarket";
 
-type Point = { t: number; p: number };
+type Point = { t: number; p: number; source?: "Binance" | "CoinGecko" };
 
 export function TargetTracker({ params, symbol, settled = false }: {
   params: `0x${string}`;
@@ -62,7 +62,7 @@ export function TargetTracker({ params, symbol, settled = false }: {
     </div>
     <div className="mt-4 rounded-2xl border border-black/[.06] bg-white/70 p-3 dark:border-white/[.07] dark:bg-black/20">
       {points.length > 1 ? <svg viewBox="0 0 600 120" className="h-32 w-full" role="img" aria-label={`${symbol} price movement over the last 24 hours with target line`} preserveAspectRatio="none"><line x1="0" x2="600" y1={y(terms.target)} y2={y(terms.target)} stroke="#10b981" strokeWidth="2" strokeDasharray="6 5" /><path d={path} fill="none" stroke="#2E7CF6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg> : <div className="flex h-32 items-center justify-center gap-2 text-sm text-zinc-500"><TrendingUp className="h-4 w-4" /> {historyStatus === "error" ? <>Price history unavailable <button type="button" onClick={() => setRetry((value) => value + 1)} className="font-semibold text-[#1D4ED8] underline dark:text-[#7db3ff]">Retry</button></> : "Price history is loading"}</div>}
-      <div className="flex justify-between text-[11px] font-semibold text-zinc-500"><span>Last 24 hours · Binance spot</span><span className="text-emerald-600">Dashed line = target</span></div>
+      <div className="flex justify-between text-[11px] font-semibold text-zinc-500"><span>Last 24 hours · {history[0]?.source ?? "spot history"}</span><span className="text-emerald-600">Dashed line = target</span></div>
     </div>
     <p className="mt-3 text-sm font-semibold">{yesNow === null ? "Waiting for a fresh spot quote" : yesNow ? "Yes is currently on side" : "No is currently on side"} <span className="font-normal text-zinc-500">· The result uses the latest available hourly oracle checkpoint at or before {new Date(terms.atTime * 1000).toLocaleString()}. {symbolUpdatedAt && !settled ? `Spot updated ${new Date(symbolUpdatedAt).toLocaleTimeString()}.` : ""}</span></p>
   </section>;
