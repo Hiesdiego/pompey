@@ -1,5 +1,8 @@
 
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { gzip } from "node:zlib";
+import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
 import { isAddress } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared";
@@ -14,6 +17,7 @@ import { scaledToPrice } from "../lib/priceMath.js";
 import { fetchPriceHistory, type PriceHistoryPoint } from "../services/priceHistory.js";
 
 const priceHistoryCache = new Map<string, { at: number; points: PriceHistoryPoint[] }>();
+const gzipAsync = promisify(gzip);
 
 export interface HealthReport {
   status: "ok" | "degraded";
@@ -84,6 +88,7 @@ function apiError(
   code: string,
   message: string
 ): void {
+  res.setHeader("Cache-Control", "no-store");
   res.status(status).json({ ok: false, code, message });
 }
 
@@ -104,6 +109,39 @@ function chainError(res: Response, err: unknown): void {
 
 export function buildRouter(deps: ApiDeps): Router {
   const router = Router();
+
+  // Render can cache JSON only when edge caching is set to "All files".
+  // Explicitly opt in public reads and keep every other response uncached.
+  router.use((req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (req.method === "GET" || req.method === "HEAD") {
+      const path = req.path;
+      const ttl = path === "/api/chain/markets" ? 10
+        : /^\/api\/chain\/markets\/\d+$/.test(path) ? 10
+        : /^\/api\/chain\/odds-history\/\d+$/.test(path) ? 20
+        : path === "/api/fixtures" || /^\/api\/fixtures\/\d+$/.test(path) ? 10
+        : /^\/api\/fixtures\/\d+\/(pool|form)$/.test(path) ? 5
+        : path === "/api/table" ? 30
+        : path === "/api/prices" ? 5
+        : path === "/api/teams" ? 3600
+        : 0;
+      if (ttl > 0) {
+        // Browser revalidates; only the shared edge keeps a short copy.
+        res.setHeader("Cache-Control", `public, max-age=0, s-maxage=${ttl}, stale-while-revalidate=${ttl}`);
+      }
+    }
+    next();
+  });
+
+  // Never edge-cache an error, including a temporary RPC failure or unknown ID.
+  router.use((_req: Request, res: Response, next: NextFunction) => {
+    const send = res.send.bind(res);
+    res.send = ((body: unknown) => {
+      if (res.statusCode >= 400) res.setHeader("Cache-Control", "no-store");
+      return send(body);
+    }) as typeof res.send;
+    next();
+  });
 
   router.use((req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
@@ -149,10 +187,27 @@ export function buildRouter(deps: ApiDeps): Router {
     }
   });
 
-  router.get("/api/chain/markets", async (_req: Request, res: Response) => {
+  router.get("/api/chain/markets", async (req: Request, res: Response) => {
     try {
       const data = await deps.chainCache.getMarkets();
-      res.json({ ok: true, data });
+      // The block advances even when market data has not changed. Keep the
+      // validator stable so browser revalidation can return a tiny 304.
+      const marketsJson = JSON.stringify(data.markets);
+      const etag = `W/"${createHash("sha1").update(marketsJson).digest("hex")}"`;
+      res.setHeader("ETag", etag);
+      res.vary("Accept-Encoding");
+      if (req.fresh) {
+        res.status(304).end();
+        return;
+      }
+      const body = JSON.stringify({ ok: true, data });
+      if (/\bgzip\b/.test(req.headers["accept-encoding"] ?? "") && body.length > 1024) {
+        const zipped = await gzipAsync(Buffer.from(body));
+        res.setHeader("Content-Encoding", "gzip");
+        res.type("json").send(zipped);
+      } else {
+        res.type("json").send(body);
+      }
     } catch (err) {
       chainError(res, err);
     }

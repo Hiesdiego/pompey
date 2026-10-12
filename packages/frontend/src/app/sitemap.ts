@@ -2,7 +2,8 @@ import type { MetadataRoute } from "next";
 import { siteUrl } from "../lib/siteUrl";
 import { backendUrl } from "./api/social/og/_shared";
 
-export const dynamic = 'force-dynamic';
+// Catalogue additions are hourly; avoid rebuilding the full sitemap for each bot.
+export const revalidate = 3600;
 
 type Fixture = { fixtureId: string | number };
 type Market = { id: string | number };
@@ -10,7 +11,7 @@ type Market = { id: string | number };
 async function catalogue<T>(path: string): Promise<T | null> {
   try {
     const response = await fetch(`${backendUrl()}${path}`, {
-      next: { revalidate: 0 },
+      next: { revalidate: 3600 },
       signal: AbortSignal.timeout(5_000),
     });
     return response.ok ? (await response.json()) as T : null;

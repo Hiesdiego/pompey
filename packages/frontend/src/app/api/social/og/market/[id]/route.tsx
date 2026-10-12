@@ -12,6 +12,8 @@ import {
   OG_WIDTH,
   OG_HEIGHT,
   OG_COLORS,
+  OG_LIVE_CACHE,
+  OG_FINAL_CACHE,
   ogBaseUrl,
   backendUrl,
   formatTickShort,
@@ -178,7 +180,7 @@ function fallbackMarketCard(title: string, resolution?: { status: string; outcom
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
+      headers: { "Cache-Control": resolution ? OG_FINAL_CACHE : OG_LIVE_CACHE },
     }
   );
 }
@@ -442,7 +444,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
     {
       width: OG_WIDTH,
       height: OG_HEIGHT,
-      headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
+      headers: { "Cache-Control": resolved || voided ? OG_FINAL_CACHE : OG_LIVE_CACHE },
     }
   );
 }

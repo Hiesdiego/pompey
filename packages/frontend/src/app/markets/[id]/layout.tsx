@@ -5,6 +5,8 @@ import { parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
 import { getPublicClient } from "../../../hooks/usePublicClient";
 import { backendUrl, isNumericId, siteUrl } from "../../api/social/og/_shared";
 
+export const revalidate = 60;
+
 const FACTORY_ABI = parseAbi([
   "function marketInfo(uint256 marketId) external view returns (uint8 templateId, address creator, string creatorName, uint64 createdAt, uint64 bettingCloseTime, uint64 endTime, uint64 voidAfter, bytes params, uint8 outcomeCount)",
 ]);

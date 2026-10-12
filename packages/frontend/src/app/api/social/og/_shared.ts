@@ -7,6 +7,10 @@ import { siteUrl } from "../../../../lib/siteUrl";
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
 
+// Live figures change; final results are immutable and can stay at the edge.
+export const OG_LIVE_CACHE = "public, max-age=0, s-maxage=300, stale-while-revalidate=300";
+export const OG_FINAL_CACHE = "public, max-age=0, s-maxage=31536000, immutable";
+
 
 export const OG_COLORS = {
   bg: "#0B1B3D",

@@ -3,6 +3,8 @@
 import type { Metadata } from "next";
 import { backendUrl, isNumericId, siteUrl } from "../../api/social/og/_shared";
 
+export const revalidate = 60;
+
 export async function generateMetadata({
   params,
 }: {
