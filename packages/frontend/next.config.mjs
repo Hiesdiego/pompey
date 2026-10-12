@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 const swBuildId = randomBytes(8).toString("hex");
 
 /** @type {import('next').NextConfig} */
-const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-3aca.onrender.com" || "http://localhost:4000").replace(/\/$/, "");
+const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-lsq6.onrender.com" || "http://localhost:4000").replace(/\/$/, "");
 
 const nextConfig = {
   reactStrictMode: true,
