@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   chainCache.startWarmer();
 
 
-  const buildHealth = async (): Promise<HealthReport> => {
+  const calculateHealth = async (): Promise<HealthReport> => {
     const rpcStart = Date.now();
     const latestBlock = await getBlockNumberSafe();
     const rpcLatencyMs = Date.now() - rpcStart;
@@ -152,8 +152,29 @@ async function main(): Promise<void> {
     };
   };
 
+  let cachedHealth: { at: number; report: HealthReport } | null = null;
+  let healthInFlight: Promise<HealthReport> | null = null;
+  const buildHealth = async (): Promise<HealthReport> => {
+    if (cachedHealth && Date.now() - cachedHealth.at < 30_000) {
+      return {
+        ...cachedHealth.report,
+        uptimeSec: Math.round(process.uptime()),
+        bandwidth: meter.snapshot(),
+      };
+    }
+    healthInFlight ??= calculateHealth();
+    try {
+      const report = await healthInFlight;
+      cachedHealth = { at: Date.now(), report };
+      return report;
+    } finally {
+      healthInFlight = null;
+    }
+  };
+
 
   const app = express();
+  if (process.env.RENDER === "true") app.set("trust proxy", 1);
   const allowedOrigins = new Set(config.corsOrigins);
   app.use((req, res, next) => {
     const origin = req.header("Origin");

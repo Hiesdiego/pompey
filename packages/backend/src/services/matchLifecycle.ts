@@ -321,6 +321,7 @@ export class MatchLifecycle {
 
   private readonly leadMs: number;
   private readonly failures = new Map<bigint, FailureState>();
+  private readonly startVerifiedAt = new Map<bigint, number>();
 
   private readonly slotWarned = new Set<string>();
   private loop: LoopHandle | null = null;
@@ -572,6 +573,7 @@ export class MatchLifecycle {
   private async processFixture(f: FixtureView, now: number): Promise<void> {
     const matchEndMs = f.kickoffMs + this.durationMs;
     const wantEnd = now >= matchEndMs;
+    if (!wantEnd && now - (this.startVerifiedAt.get(f.fixtureId) ?? 0) < 5 * 60_000) return;
 
     let home, away;
     try {
@@ -602,9 +604,12 @@ export class MatchLifecycle {
         f.fixtureId, home.scaled, away.scaled, home.source, away.source
       );
     } else {
-      await this.submitter.submitStartPrice(
+      const audit = await this.submitter.submitStartPrice(
         f.fixtureId, home.scaled, away.scaled, home.source, away.source
       );
+      if (audit.skipped && audit.skipReason === "startPrice already submitted on-chain") {
+        this.startVerifiedAt.set(f.fixtureId, now);
+      }
     }
   }
 }

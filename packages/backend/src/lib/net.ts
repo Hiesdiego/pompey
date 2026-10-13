@@ -66,11 +66,12 @@ export function installProcessGuards(): void {
 
 const MONTH_MS = 30 * 24 * 3600 * 1000;
 
-export const BANDWIDTH_WARN_BYTES = 800 * 1024 * 1024;
+export const BANDWIDTH_WARN_BYTES = Math.round(2.4 * 1024 * 1024 * 1024);
 
 class Meter {
   private readonly counts = new Map<string, number>();
   private readonly startedAt = Date.now();
+  private lastBudgetWarningAt = 0;
 
   count(key: string, n = 1): void {
     this.counts.set(key, (this.counts.get(key) ?? 0) + n);
@@ -96,7 +97,11 @@ class Meter {
     const projected = Object.entries(this.snapshot().projectedMonthly)
       .filter(([key]) => key.startsWith("outbound_bytes:"))
       .reduce((sum, [, bytes]) => sum + bytes, 0);
-    if (projected > BANDWIDTH_WARN_BYTES) {
+    const now = Date.now();
+    if (now - this.startedAt >= 60 * 60_000 &&
+        projected > BANDWIDTH_WARN_BYTES &&
+        now - this.lastBudgetWarningAt >= 60 * 60_000) {
+      this.lastBudgetWarningAt = now;
       logger.warn("[net] bandwidth projection over budget", {
         projectedMonthlyBytes: projected,
         warnAtBytes: BANDWIDTH_WARN_BYTES,

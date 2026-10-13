@@ -1,22 +1,3 @@
-/**
- * Shared chain transport for the whole backend — the single choke point for
- * every eth_call / eth_getLogs the backend makes.
- *
- * Why this exists: the backend previously created SIX independent viem
- * publicClients (matchLifecycle, checkpointSubmitter, factoryKeeper,
- * snapshotSubmitter, api/readClient, lib/socialChain), each a bare
- * `http(rpcUrl)` with zero retry, zero fallback and zero batching — a 429 or
- * a blip on the public RPC just failed the call, and hundreds of concurrent
- * users multiplied the request volume straight through to the provider.
- *
- * What this module gives every consumer:
- * - ONE publicClient shared process-wide (connection reuse, single config).
- * - JSON-RPC batching (`batch: true`) — viem packs concurrent calls into
- *   one HTTP request. Free throughput.
- * - Transport-level retry with exponential backoff (3 attempts).
- * - Optional fallback RPCs: FALLBACK_RPC_URL through FALLBACK_RPC_URL_8.
- * - `withRpcRetry()` for operation-level retries on top of the transport.
- */
 import {
   createPublicClient,
   createWalletClient,
@@ -44,12 +25,10 @@ export function primaryRpcUrl(): string {
 
 const RPC_TIMEOUT_MS = 20_000;
 const RPC_RETRY_COUNT = 3;
-/** viem transport delay between retries. */
 const RPC_RETRY_DELAY_MS = 250;
 
 let sharedTransport: Transport | null = null;
 
-/** Build (once) the resilient transport every client in the backend shares. */
 function getSharedTransport(): Transport {
   if (sharedTransport) return sharedTransport;
   const urls = [...new Set([primaryRpcUrl(), ...config.fallbackRpcUrls,
@@ -62,7 +41,7 @@ function getSharedTransport(): Transport {
       retryDelay: RPC_RETRY_DELAY_MS,
     }));
   if (transports.length > 1) {
-    sharedTransport = fallback(transports, { rank: true });
+    sharedTransport = fallback(transports);
     logger.info("[rpc] shared transport ready", {
       chain: tickrChain().name,
       endpoints: transports.length,
@@ -76,20 +55,11 @@ function getSharedTransport(): Transport {
   return sharedTransport;
 }
 
-/**
- * THE backend publicClient. Import this instead of creating your own —
- * every read in the process shares its batching, retry and fallback.
- */
 export const publicClient: PublicClient = createPublicClient({
   chain: tickrChain(),
   transport: getSharedTransport(),
 }) as PublicClient;
 
-/**
- * Wallet client for the backend signer, on the same resilient transport.
- * Nonce management still belongs to each service's TxQueue — this only
- * changes the transport underneath.
- */
 export function createBackendWalletClient(account: PrivateKeyAccount): WalletClient {
   return createWalletClient({
     account,
@@ -98,10 +68,6 @@ export function createBackendWalletClient(account: PrivateKeyAccount): WalletCli
   }) as WalletClient;
 }
 
-/**
- * Best-effort block number — returns null instead of throwing, for health
- * checks and other paths that must never fail the caller.
- */
 export async function getBlockNumberSafe(): Promise<bigint | null> {
   try {
     return await publicClient.getBlockNumber();
@@ -111,7 +77,6 @@ export async function getBlockNumberSafe(): Promise<bigint | null> {
   }
 }
 
-/** A revert with a reason is deterministic — retrying is pointless. */
 function isDeterministicRevert(err: unknown): boolean {
   if (err instanceof ContractFunctionRevertedError) return true;
   const msg = String(err);
@@ -125,12 +90,6 @@ function isDeterministicRevert(err: unknown): boolean {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Operation-level retry around an RPC-dependent function. The transport
- * already retries individual requests; this covers the operation as a whole
- * (e.g. a multi-chunk log scan) with a wider backoff. Deterministic
- * reverts are never retried.
- */
 export async function withRpcRetry<T>(
   label: string,
   fn: () => Promise<T>,
