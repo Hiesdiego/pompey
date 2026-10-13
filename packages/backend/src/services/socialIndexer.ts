@@ -1,28 +1,28 @@
-/**
- * SocialIndexer — watches MarketFactory events and mirrors them into Supabase.
- *
- * Events: MarketCreated, MarketStaked, MarketResolved, MarketVoided
- * (VoidInitiated/VoidCancelled are ignored for stats).
- *
- * Strategy mirrors the existing backend event scans: getLogs in 900-block
- * chunks (Base Sepolia caps eth_getLogs at 1,000 blocks), a high-water mark
- * in `indexer_state`, backfill on boot, then a 15s poll loop. Handlers are
- * idempotent so a replayed range never double-counts.
- *
- * If Supabase is not configured the indexer is a no-op (warns once).
- *
- * Optimization pass changes:
- * - Uses the shared resilient RPC client (lib/rpc.ts) instead of its own
- *   bare http() client — inherits retry, batching and fallback transport.
- * - parseEventLogs runs with strict:false (was strict:true, contradicting
- *   the comment) — a foreign log at the deploy block (e.g. Ownable's
- *   OwnershipTransferred) previously threw out of scanChunk, the watermark
- *   never advanced, and the poll retried the same chunk every 15s forever.
- * - The poll loop runs through lib/loop.ts (non-overlapping, backoff).
- * - onMarketResolved batches Supabase writes: one bulk stakes upsert + one
- *   bulk user_season_stats upsert instead of ~2 round trips per staker
- *   (a 200-staker market was ~400+ round trips in one handler).
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import {
   decodeAbiParameters,
   parseEventLogs,
@@ -40,7 +40,7 @@ import {
 
 const WATERMARK_KEY = "market_factory";
 const CHUNK_BLOCKS = 900n;
-const POLL_MS = 15_000;
+const POLL_MS = 120_000;
 const BACKFILL_FALLBACK_BLOCKS = 200_000n;
 
 const FACTORY_EVENTS_ABI = [
@@ -85,7 +85,7 @@ const FACTORY_EVENTS_ABI = [
       { name: "voider", type: "address", indexed: false },
     ],
   },
-  // Parsed but intentionally ignored (no stats impact).
+
   {
     type: "event",
     name: "VoidInitiated",
@@ -212,12 +212,12 @@ export class SocialIndexer {
     this.seasonId = createSeasonIdCache(this.client);
   }
 
-  /** Works even when the indexer is disabled (used by the API for season gating). */
+
   getSeasonId(): Promise<number> {
     return this.seasonId.get();
   }
 
-  /** Current watermark block (null = never indexed) — for /health. */
+
   async getWatermarkBlock(): Promise<bigint | null> {
     if (!this.db) return null;
     try {
@@ -251,8 +251,8 @@ export class SocialIndexer {
     }
 
     await this.scanRange(from, null).catch((err) => {
-      // A failed backfill (e.g. RPC down at boot) must not kill the indexer:
-      // the poll loop below retries from the watermark and catches up.
+
+
       logger.warn("[social] initial backfill failed, poll loop will retry", {
         error: String(err),
       });
@@ -266,7 +266,7 @@ export class SocialIndexer {
     this.loop = null;
   }
 
-  // --- scanning ------------------------------------------------------------
+
 
   private async loadWatermark(): Promise<bigint | null> {
     const { data, error } = await this.db!
@@ -300,7 +300,7 @@ export class SocialIndexer {
     await this.scanRange(from + 1n, null);
   }
 
-  /** Scan [from, to ?? latest]; advances the watermark chunk by chunk. */
+
   private async scanRange(from: bigint, to: bigint | null): Promise<void> {
     if (this.scanning) return;
     this.scanning = true;
@@ -326,8 +326,8 @@ export class SocialIndexer {
     });
     if (logs.length === 0) return;
 
-    // Block timestamps (getLogs carries none) — one RPC per unique block,
-    // fetched in chunks of 25 to stay kind to the RPC.
+
+
     const tsCache = new Map<bigint, string>();
     const blocks = [...new Set(logs.map((l) => l.blockNumber))];
     for (let i = 0; i < blocks.length; i += 25) {
@@ -340,11 +340,11 @@ export class SocialIndexer {
       );
     }
 
-    // strict:false — skip logs outside the ABI (e.g. Ownable's
-    // OwnershipTransferred at the deploy block) instead of throwing. A
-    // strict parse here used to livelock the indexer: the throw escaped
-    // scanChunk, the watermark never advanced, and the poll retried the
-    // same chunk every 15s forever.
+
+
+
+
+
     const parsed = parseEventLogs({ abi: FACTORY_EVENTS_ABI, logs, strict: false });
     const ordered = parsed
       .map((p, i) => ({ p, log: logs[i] }))
@@ -364,8 +364,8 @@ export class SocialIndexer {
         else if (p.eventName === "MarketVoided")
           await this.onMarketVoided(p.args as Parameters<SocialIndexer["onMarketVoided"]>[0], log.blockNumber);
       } catch (err) {
-        // A single bad log must not kill the chunk; the watermark only
-        // advances after the chunk completes, so a crash still replays.
+
+
         logger.warn("[social] event handler failed", {
           event: p.eventName,
           tx: log.transactionHash,
@@ -380,11 +380,11 @@ export class SocialIndexer {
     });
   }
 
-  /**
-   * Reconstruct a markets row from chain state. Used when a stake/resolve
-   * event arrives without a prior MarketCreated (e.g. the backfill started
-   * mid-history) — the stakes→markets FK requires the row to exist.
-   */
+
+
+
+
+
   private async backfillMarketRow(marketId: bigint, blockNumber: bigint): Promise<void> {
     const [info, settlement] = await Promise.all([
       this.client.readContract({
@@ -441,13 +441,13 @@ export class SocialIndexer {
     if (error) throw new Error(`markets backfill upsert failed: ${error.message}`);
   }
 
-  // --- handlers ------------------------------------------------------------
 
-  /** Decode the season id from MarketCreated params by template. */
+
+
   private decodeSeason(templateId: number, params: `0x${string}`, fallback: number): number {
     try {
       if (templateId === 0) {
-        // TOP_GAINER: (uint256 seasonId, uint8 matchdayIndex)
+
         const [seasonId] = decodeAbiParameters(
           [{ type: "uint256" }, { type: "uint8" }],
           params
@@ -455,12 +455,12 @@ export class SocialIndexer {
         return Number(seasonId);
       }
       if (templateId === 1) {
-        // CHAMPION: (uint256 seasonId)
+
         const [seasonId] = decodeAbiParameters([{ type: "uint256" }], params);
         return Number(seasonId);
       }
       if (templateId === 4) {
-        // SPREAD: (uint256 seasonId, uint256 fixtureId, int16 spreadPoints)
+
         const [seasonId] = decodeAbiParameters(
           [{ type: "uint256" }, { type: "uint256" }, { type: "int16" }],
           params
@@ -468,9 +468,9 @@ export class SocialIndexer {
         return Number(seasonId);
       }
     } catch {
-      // fall through to fallback
+
     }
-    // H2H (2) / TARGET (3) carry no season — attribute to the current one.
+
     return fallback;
   }
 
@@ -490,7 +490,7 @@ export class SocialIndexer {
     const season = await this.seasonId.get();
     const seasonId = this.decodeSeason(args.templateId, args.params, season);
 
-    // seedAmount is immutable post-creation; read once at the event block.
+
     let seedAmount = "0";
     try {
       const settlement = await this.client.readContract({
@@ -502,7 +502,7 @@ export class SocialIndexer {
       });
       seedAmount = (settlement[0] as bigint).toString();
     } catch {
-      // leave as "0"
+
     }
 
     const { error } = await this.db!.from("markets").upsert(
@@ -533,7 +533,7 @@ export class SocialIndexer {
     const staker = args.user.toLowerCase();
     const marketIdStr = args.marketId.toString();
 
-    // Idempotency: skip already-processed logs.
+
     const { data: seen } = await db
       .from("stakes")
       .select("id")
@@ -543,9 +543,9 @@ export class SocialIndexer {
       .limit(1);
     if (seen && seen.length > 0) return;
 
-    // Market context (denormalized onto the stake row for cheap analytics).
-    // Self-heal: the markets row may be missing when the backfill started
-    // after the market was created — the stakes→markets FK requires it.
+
+
+
     let marketRow = (
       await db
         .from("markets")
@@ -568,7 +568,7 @@ export class SocialIndexer {
     const seasonId: number = marketRow?.season_id ?? (await this.seasonId.get());
     const templateId: number | null = marketRow?.template_id ?? null;
 
-    // Best-effort implied win probability right after the stake.
+
     let oddsBps: number | null = null;
     try {
       const [outcomeTotal, settlement] = await Promise.all([
@@ -590,7 +590,7 @@ export class SocialIndexer {
       const total = settlement[1] as bigint;
       if (total > 0n) oddsBps = Number((outcomeTotal * 10_000n) / total);
     } catch {
-      // leave null (e.g. historical backfill against a pruned node)
+
     }
 
     const { error: insertError } = await db.from("stakes").insert({
@@ -611,7 +611,7 @@ export class SocialIndexer {
     });
     if (insertError) throw new Error(`stakes insert failed: ${insertError.message}`);
 
-    // predictions counts DISTINCT markets staked (multiple stakes, one prediction).
+
     const { data: prior } = await db
       .from("stakes")
       .select("id")
@@ -619,7 +619,7 @@ export class SocialIndexer {
       .eq("staker", staker)
       .eq("market_id", marketIdStr)
       .limit(2);
-    const isNewPrediction = (prior?.length ?? 0) <= 1; // 1 = the row just inserted
+    const isNewPrediction = (prior?.length ?? 0) <= 1;
     await this.bumpStats(staker, seasonId, (s) => {
       s.volume_tick = (BigInt(s.volume_tick) + args.amount).toString();
       if (isNewPrediction) s.predictions += 1;
@@ -634,7 +634,7 @@ export class SocialIndexer {
     const db = this.db!;
     const marketIdStr = args.marketId.toString();
 
-    // Idempotency: a market resolves exactly once.
+
     let market = (
       await db
         .from("markets")
@@ -644,7 +644,7 @@ export class SocialIndexer {
         .maybeSingle()
     ).data;
     if (!market) {
-      // Backfill started after creation: reconstruct the row from chain state.
+
       await this.backfillMarketRow(args.marketId, blockNumber);
       market = (
         await db
@@ -677,9 +677,9 @@ export class SocialIndexer {
       .eq("market_id", marketIdStr);
     if (stakesError) throw new Error(`stakes read failed: ${stakesError.message}`);
 
-    // Per-stake realized PnL, aggregated per staker — then written back in
-    // BULK (one stakes upsert + one stats upsert) instead of ~2 round trips
-    // per staker.
+
+
+
     const byStaker = new Map<string, bigint>();
     const wonByStaker = new Set<string>();
     const stakeUpdates: Array<{ id: number; won: boolean; pnl_tick: string }> = [];
@@ -702,7 +702,7 @@ export class SocialIndexer {
       if (error) logger.warn("[social] bulk stake pnl update failed", { error: error.message });
     }
 
-    // Per-(staker, market) net outcome → season stats, in ONE bulk upsert.
+
     const stakers = [...byStaker.keys()];
     if (stakers.length > 0) {
       const { data: existing } = await db
@@ -731,7 +731,7 @@ export class SocialIndexer {
           s.losses += 1;
           s.current_streak = 0;
         }
-        // net == 0 is a push: counts as settled, streak untouched.
+
         return { ...s, updated_at: now };
       });
       const { error } = await db
@@ -754,8 +754,8 @@ export class SocialIndexer {
         .maybeSingle()
     ).data;
     if (!market) {
-      // Backfill started after creation: reconstruct the row from chain state
-      // (already voided on-chain, so the backfill marks it correctly).
+
+
       await this.backfillMarketRow(args.marketId, blockNumber);
       return;
     }
@@ -768,7 +768,7 @@ export class SocialIndexer {
       .eq("market_id", marketIdStr);
     if (marketError) throw new Error(`markets void update failed: ${marketError.message}`);
 
-    // Voided stakes refund in full: zero PnL, excluded from settled stats.
+
     const { error: stakesError } = await db
       .from("stakes")
       .update({ won: null, pnl_tick: "0" })
@@ -777,7 +777,7 @@ export class SocialIndexer {
     if (stakesError) throw new Error(`stakes void update failed: ${stakesError.message}`);
   }
 
-  // --- stats helper ----------------------------------------------------------
+
 
   private async bumpStats(
     wallet: string,

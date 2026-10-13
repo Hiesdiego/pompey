@@ -1,27 +1,27 @@
-/**
- * PriceHeartbeat — the backend's lightweight Binance price source.
- *
- * This REPLACES the always-on Binance WebSocket stream + 10s REST poller
- * for backend needs. The 24/7 WS stream moved ~20 miniTicker messages/sec
- * (~8–13 GB/month) just so the backend could price snapshots — but the
- * backend only needs a price at the moments it actually submits:
- * kickoff reveals, start/end snapshots, checkpoint submissions. Live
- * per-second streaming is now the FRONTEND's job (each client streams
- * Binance directly; see the frontend's usePriceFeed).
- *
- * Behavior:
- * - Idle cadence: one REST `ticker/price?symbols=[20]` call every 60s.
- *   Weight 4 per call — ~5.8k calls/day, ~86 MB/month at ~1.5 KB/response.
- * - Hot cadence: every 15s while `isHotWindow()` is true (any fixture
- *   within 10 min of kickoff or settlement — wired to MatchLifecycle).
- * - Backoff 30s → 5min on failure; never throws out of the loop.
- * - Implements PriceFeed's `PrimaryPriceSource` (getLatest), so it drops
- *   into the existing validation pipeline unchanged: CoinGecko still
- *   cross-validates / falls back exactly as before.
- *
- * The old BinanceWsFeed / BinanceRestPoller modules are kept in the tree
- * but no longer started by index.ts (documented there).
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { logger } from "../lib/logger.js";
 import { meter } from "../lib/net.js";
 import type { PrimaryPriceSource } from "./priceFeed.js";
@@ -41,10 +41,10 @@ export class PriceHeartbeat implements PrimaryPriceSource {
   private backoffMs = BACKOFF_MIN_MS;
   private lastTickAtMs: number | null = null;
 
-  /**
-   * @param isHotWindow — true when any fixture is within ~10 min of kickoff
-   *   or settlement; the heartbeat polls every 15s instead of 60s.
-   */
+
+
+
+
   constructor(
     symbols: string[],
     restBaseUrl: string,
@@ -73,12 +73,12 @@ export class PriceHeartbeat implements PrimaryPriceSource {
     this.timer = null;
   }
 
-  /** PriceFeed.PrimaryPriceSource — freshest tick wins. */
+
   getLatest(symbol: string): { price: string; receivedAtMs: number } | undefined {
     return this.latest.get(symbol.toUpperCase());
   }
 
-  /** Seconds since the last successful poll (null = never). For /health. */
+
   stalenessSec(): number | null {
     if (this.lastTickAtMs === null) return null;
     return Math.round((Date.now() - this.lastTickAtMs) / 1000);
@@ -90,7 +90,7 @@ export class PriceHeartbeat implements PrimaryPriceSource {
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.poll().catch(() => {});
-      // Next cadence depends on the CURRENT hot-window state.
+
       this.armTimer(this.isHotWindow() ? HOT_MS : IDLE_MS);
     }, delayMs);
     this.timer.unref?.();
@@ -120,7 +120,7 @@ export class PriceHeartbeat implements PrimaryPriceSource {
       this.onFailure(err);
       return;
     }
-    meter.count("egress_bytes", text.length);
+    meter.count("inbound_bytes:binance", Buffer.byteLength(text));
     meter.count("price_heartbeat_polls", 1);
 
     let list: Array<{ symbol?: string; price?: string | number }>;
@@ -145,7 +145,7 @@ export class PriceHeartbeat implements PrimaryPriceSource {
       return;
     }
     this.lastTickAtMs = now;
-    this.backoffMs = BACKOFF_MIN_MS; // healthy poll resets backoff
+    this.backoffMs = BACKOFF_MIN_MS;
     logger.debug("[PriceHeartbeat] prices updated", { symbols: count });
   }
 
@@ -155,7 +155,7 @@ export class PriceHeartbeat implements PrimaryPriceSource {
       message,
       nextInMs: this.backoffMs,
     });
-    // Back off, but keep trying — snapshots depend on this feed.
+
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.backoffMs = Math.min(this.backoffMs * 2, BACKOFF_MAX_MS);

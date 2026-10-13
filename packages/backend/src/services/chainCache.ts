@@ -1,30 +1,30 @@
-/**
- * ChainCache — backend-side read cache + request coalescing for chain data.
- *
- * This is the RPC shield: instead of every frontend client hammering the
- * RPC provider directly (N users × M calls each = rate-limit death), all
- * hot-path chain reads go through these three cached endpoints:
- *
- *   GET /api/chain/markets            — all markets + outcome totals (10s TTL)
- *   GET /api/chain/markets/:id        — one market (10s TTL)
- *   GET /api/chain/odds-history/:id   — stake-driven odds history (incremental)
- *
- * Design points:
- * - TTL caching: the markets list refreshes at most every 10s no matter how
- *   many clients ask. A thousand users polling every 15s costs the RPC
- *   ~6 multicall-sets per minute, not thousands.
- * - In-flight coalescing: concurrent identical requests share one promise —
- *   a thundering herd still issues a single upstream fetch.
- * - Multicall everywhere: marketInfo ×N + marketSettlement ×N + all
- *   outcomeTotals collapse into a handful of RPC calls (the old frontend
- *   path needed 3+2N+1 calls per market page — 44 for a 20-outcome market).
- * - Odds history is cursor-based: the server remembers the last indexed
- *   block per market and only fetches NEW MarketStaked logs. Cumulative
- *   outcome totals are replayed from the events themselves (exact — totals
- *   only grow via stakes), so no per-block state reads. A background warmer
- *   keeps cursors advancing; the endpoint does a bounded catch-up per
- *   request so it always answers fast.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { publicClient, withRpcRetry } from "../lib/rpc.js";
 import { runLoop, type LoopHandle } from "../lib/loop.js";
 import { config } from "../config.js";
@@ -96,7 +96,7 @@ const FACTORY_READ_ABI = [
   },
 ] as const;
 
-/** Wire format for the frontend hooks (bigints serialized as strings). */
+
 export interface MarketSummary {
   id: number;
   templateId: number;
@@ -115,11 +115,11 @@ export interface MarketSummary {
 }
 
 export interface OddsPoint {
-  /** Block number (safe integer). */
+
   block: number;
-  /** Block timestamp, Unix seconds. */
+
   ts: number;
-  /** Cumulative outcome totals at this block, as decimal strings. */
+
   totals: string[];
 }
 
@@ -132,12 +132,12 @@ export class ChainApiError extends Error {
   }
 }
 
-/**
- * viem may expose a multi-value Solidity return as a positional tuple
- * rather than an object with the ABI output names. Normalize both shapes
- * at the contract boundary (same convention as the frontend's
- * normalizeMarketInfo / normalizeMarketSettlement in lib/marketFactory.ts).
- */
+
+
+
+
+
+
 export interface MarketInfoFields {
   templateId: number;
   creator: string;
@@ -188,10 +188,10 @@ const MARKETS_TTL_MS = 10_000;
 const MARKET_TTL_MS = 10_000;
 const MULTICALL_CHUNK = 100;
 const LOG_CHUNK_BLOCKS = 900n;
-/** First-seen markets seed history from ~11.5 days back (2s blocks). */
+
 const ODDS_SEED_LOOKBACK_BLOCKS = 500_000n;
-/** Max log chunks processed per request — keeps the endpoint fast; the */
-/** background warmer does the heavy lifting. */
+
+
 const ODDS_MAX_CHUNKS_PER_CALL = 30;
 const ODDS_MAX_POINTS = 500;
 
@@ -221,6 +221,7 @@ export class ChainCache {
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly oddsCursors = new Map<bigint, OddsCursor>();
   private readonly oddsLocks = new Map<bigint, Promise<void>>();
+  private readonly oddsLastViewed = new Map<bigint, number>();
   private warmer: LoopHandle | null = null;
   private warmerCursor = 0;
 
@@ -228,7 +229,7 @@ export class ChainCache {
     this.factory = config.contracts.marketFactory;
   }
 
-  // --- public API ----------------------------------------------------------
+
 
   async getMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string }> {
     return this.coalesce("markets", async () => {
@@ -258,7 +259,7 @@ export class ChainCache {
         throw new ChainApiError("RPC_UNAVAILABLE", rpcUnavailableMessage(err));
       });
       this.marketCache.set(key, { at: now, value });
-      // Keep the single-market cache bounded.
+
       if (this.marketCache.size > 500) {
         const oldest = this.marketCache.keys().next().value;
         if (oldest !== undefined) this.marketCache.delete(oldest);
@@ -274,6 +275,7 @@ export class ChainCache {
       throw new ChainApiError("BAD_REQUEST", "Market id must be a non-negative integer.");
     }
     const marketId = BigInt(id);
+    this.oddsLastViewed.set(marketId, Date.now());
     const cursor = await this.withOddsLock(marketId, () =>
       this.advanceOddsCursor(marketId, ODDS_MAX_CHUNKS_PER_CALL).catch((err) => {
         if (err instanceof ChainApiError) throw err;
@@ -287,26 +289,23 @@ export class ChainCache {
     };
   }
 
-  /** Background warmer: advances odds cursors so endpoints stay fast. */
+
   startWarmer(): void {
     if (this.warmer) return;
     this.warmer = runLoop(
       "chaincache-odds-warmer",
-      30_000,
+      5 * 60_000,
       async () => {
-        const count = await withRpcRetry("odds-warmer:marketCount", () =>
-          publicClient.readContract({
-            address: this.factory,
-            abi: FACTORY_READ_ABI,
-            functionName: "marketCount",
-          })
-        );
-        const n = Number(count);
+        const now = Date.now();
+        for (const [id, viewedAt] of this.oddsLastViewed) {
+          if (now - viewedAt > 24 * 60 * 60_000) this.oddsLastViewed.delete(id);
+        }
+        const ids = [...this.oddsLastViewed.keys()];
+        const n = ids.length;
         if (n === 0) return;
-        // Round-robin: at most 20 markets per pass so one pass stays cheap.
-        const perPass = Math.min(20, n);
+        const perPass = Math.min(2, n);
         for (let k = 0; k < perPass; k++) {
-          const id = BigInt((this.warmerCursor + k) % n);
+          const id = ids[(this.warmerCursor + k) % n];
           try {
             await this.withOddsLock(id, () => this.advanceOddsCursor(id, ODDS_MAX_CHUNKS_PER_CALL));
           } catch (err) {
@@ -327,7 +326,7 @@ export class ChainCache {
     this.warmer = null;
   }
 
-  // --- markets ---------------------------------------------------------------
+
 
   private async fetchMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string }> {
     const [count, asOfBlock] = await Promise.all([
@@ -346,7 +345,7 @@ export class ChainCache {
 
     const ids = Array.from({ length: n }, (_, i) => BigInt(i));
 
-    // ONE multicall for all marketInfo + ONE for all marketSettlement.
+
     const infoResults = await this.multicallChunked(
       ids.map((id) => ({
         address: this.factory,
@@ -364,7 +363,7 @@ export class ChainCache {
       }))
     );
 
-    // ONE multicall for every (market, outcome) pair.
+
     const totalPairs: Array<{ marketIdx: number; outcome: bigint }> = [];
     const outcomeCounts: number[] = [];
     const pairOffset: number[] = [];
@@ -392,7 +391,7 @@ export class ChainCache {
       const settlement = normalizeMarketSettlementResult(
         unwrap(settlementResults[i], `marketSettlement(${id})`)
       );
-      // totalsResults entries for market i start at its prefix offset.
+
       const start = pairOffset[i];
       const outcomeTotals: string[] = [];
       for (let k = 0; k < outcomeCounts[i]; k++) {
@@ -466,14 +465,14 @@ export class ChainCache {
     };
   }
 
-  // --- odds history ------------------------------------------------------------
 
-  /**
-   * Advance one market's cursor by up to maxChunks log chunks. Cumulative
-   * totals are replayed from MarketStaked events (exact — outcome totals
-   * only grow via stakes), so this costs ~1 getLogs per 900 blocks plus
-   * one getBlock per block that actually had stakes.
-   */
+
+
+
+
+
+
+
   private async advanceOddsCursor(marketId: bigint, maxChunks: number): Promise<OddsCursor> {
     let cursor = this.oddsCursors.get(marketId);
     const latest = await withRpcRetry(`odds(${marketId}):blockNumber`, () =>
@@ -507,22 +506,22 @@ export class ChainCache {
     return cursor;
   }
 
-  /**
-   * First sight of a market: read the CURRENT outcome totals at the seed
-   * block (one multicall — exact, no replay needed), then replay only logs
-   * after the seed block. Without this, seeding mid-history would silently
-   * under-count every earlier stake.
-   */
+
+
+
+
+
+
   private async seedOddsCursor(marketId: bigint, latest: bigint): Promise<OddsCursor> {
     const market = await this.getMarket(Number(marketId)).catch(() => null);
     if (!market) throw new ChainApiError("NOT_FOUND", `Market #${marketId} does not exist.`);
     const outcomeCount = market.outcomeCount;
     const seedFrom = latest > ODDS_SEED_LOOKBACK_BLOCKS ? latest - ODDS_SEED_LOOKBACK_BLOCKS : 0n;
-    // Never seed from before the factory existed: at earlier blocks the
-    // address has no code, so outcomeTotals returns empty ("0x") and viem
-    // throws "returned no data". No stakes can predate deployment, so
-    // clamping is exact, not approximate. Requires MARKET_FACTORY_DEPLOY_BLOCK
-    // in the backend .env (set it on every factory redeploy).
+
+
+
+
+
     const deployBlock = config.social.marketFactoryDeployBlock ? BigInt(config.social.marketFactoryDeployBlock) : 0n;
     const anchoredSeedFrom = seedFrom < deployBlock ? deployBlock : seedFrom;
     let totals = Array<bigint>(outcomeCount).fill(0n);
@@ -539,9 +538,9 @@ export class ChainCache {
       );
       totals = results.map((r) => unwrap(r, `seedTotals(${marketId})`) as bigint);
     } catch (err) {
-      // Historical state read failed (pruned node) — fall back to replaying
-      // from the seed block with zeroed totals. Totals may under-count if
-      // stakes predate the seed window; points still show correct SHAPE.
+
+
+
       logger.warn("[chaincache] seed totals read failed — replaying from zero", {
         marketId: marketId.toString(),
         error: String(err),
@@ -563,7 +562,7 @@ export class ChainCache {
         ? a.logIndex - b.logIndex
         : a.blockNumber < b.blockNumber ? -1 : 1
     );
-    // One RPC per block that actually had stakes, in chunks of 25.
+
     const blocks = [...new Set(ordered.map((l) => l.blockNumber))];
     const tsByBlock = new Map<bigint, number>();
     for (let i = 0; i < blocks.length; i += 25) {
@@ -577,9 +576,9 @@ export class ChainCache {
     }
     let currentBlock: bigint | null = null;
     for (const log of ordered) {
-      // Defensive: public RPCs occasionally return log entries viem could not
-      // decode (args undefined). Counting one would corrupt totals, so skip
-      // it — the warmer retries the range on its next pass.
+
+
+
       const args = log.args;
       if (!args) continue;
       const outcome = Number(args.outcome ?? 0);
@@ -593,21 +592,21 @@ export class ChainCache {
           totals: cursor.totals.map((t) => t.toString()),
         });
       } else {
-        // Same block as the previous point — update it in place so there is
-        // exactly one point per block (cumulative within the block).
+
+
         const last = cursor.points[cursor.points.length - 1];
         last.totals = cursor.totals.map((t) => t.toString());
       }
     }
-    // Bound memory: decimate oldest points when over the cap.
+
     while (cursor.points.length > ODDS_MAX_POINTS) {
       cursor.points = cursor.points.filter((_, i) => i % 2 === 0);
     }
   }
 
-  // --- helpers -----------------------------------------------------------------
 
-  /** In-flight coalescing: concurrent callers share one upstream promise. */
+
+
   private coalesce<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.inflight.get(key);
     if (existing) return existing as Promise<T>;
@@ -618,7 +617,7 @@ export class ChainCache {
     return p;
   }
 
-  /** Per-market mutex so the warmer and request path never interleave a cursor. */
+
   private async withOddsLock<T>(id: bigint, fn: () => Promise<T>): Promise<T> {
     const prev = this.oddsLocks.get(id) ?? Promise.resolve();
     let release!: () => void;
@@ -642,9 +641,9 @@ export class ChainCache {
     const out: MulticallResult[] = [];
     for (let i = 0; i < contracts.length; i += chunkSize) {
       const chunk = contracts.slice(i, i + chunkSize);
-      // The contracts array is well-formed (each functionName has matching
-      // args); the cast sidesteps viem's correlated-union generics, which
-      // cannot express "union of functionName × matching args" as an array.
+
+
+
       const results = (await withRpcRetry(`chaincache:multicall(chunk ${i / chunkSize})`, () =>
         publicClient.multicall({
           contracts: chunk as unknown as Array<{
@@ -669,7 +668,7 @@ function unwrap(r: MulticallResult, label: string): unknown {
   return r.result;
 }
 
-/** A read for a market id past marketCount reverts — treat as 404, not 502. */
+
 function looksLikeMissingMarket(err: unknown): boolean {
   const msg = String(err);
   return (

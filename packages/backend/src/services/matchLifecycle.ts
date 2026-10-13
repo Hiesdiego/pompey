@@ -1,46 +1,46 @@
-/**
- * Match lifecycle — kickoff monitor (spec P2.5) + match timer (spec P2.6).
- *
- * One 30-second loop drives the whole on-chain match flow:
- *
- *   1. REVEAL — for every fixture whose matchday window has opened but whose
- *      kickoff is still secret: each matchday's fixtures are spread evenly
- *      across the usable part of the window (deterministic slots on a
- *      15-minute grid), so every day has matches instead of the whole
- *      matchday playing in the first hour. The contract only accepts a
- *      reveal 30–120 min before kickoff, so a fixture is revealed
- *      progressively as its slot enters the 120-min lead window. If a slot
- *      was missed (backend downtime), the fixture is revealed late with
- *      kickoff = now + leadMinutes; a fixture that can't be revealed
- *      legally at all is flagged for manual review — never send a doomed
- *      transaction.
- *   2. START — when now >= kickoff and the start snapshot isn't on-chain:
- *      validate both teams' prices → PriceOracle.submitStartPrice.
- *   3. END — when now >= kickoff + matchDuration: validate prices →
- *      PriceOracle.submitEndPrice, which cascades into ResultEngine →
- *      league table, MatchRegistry.markSettled, PredictionPool.settleFixture.
- *      If the start snapshot is missing (backend was down over the start
- *      window), the submitter performs a late-start recovery first so the
- *      fixture can still settle instead of reverting forever.
- *
- * Idempotency: every step pre-checks on-chain state AND the contracts revert
- * on double-submit, so restarts and overlapping ticks are safe. One fixture
- * failing never blocks the others. A per-fixture exponential backoff keeps a
- * persistently failing fixture from spamming doomed transactions every tick.
- * Multiple concurrent matches are handled independently (the signer's TxQueue
- * serializes the actual transactions).
- *
- * Optimization pass changes:
- * - Fixture refresh uses ONE multicall per 50 fixtures instead of one
- *   eth_call per fixture (was ~380 calls/30s ≈ 1.1M calls/day early season
- *   against the public RPC).
- * - Per-tick refresh covers only fixtures NEAR a state transition (within
- *   15 min of window open / kickoff / match end); a full refresh runs every
- *   10th tick. Quiescent fixtures can't change state — re-reading them was
- *   pure RPC burn.
- * - Reads go through the shared resilient client (lib/rpc.ts).
- * - The tick runs on lib/loop.ts (non-overlapping, backoff on failure).
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import type { PublicClient } from "viem";
 import { config } from "../config.js";
@@ -76,17 +76,17 @@ const REGISTRY_READ_ABI = [
           { name: "kickoffTimestamp", type: "uint64" },
           { name: "kickoffRevealed", type: "bool" },
           { name: "settled", type: "bool" },
-          { name: "matchEndTimestamp", type: "uint64" }, // v0.2: pinned at reveal = kickoff + matchDuration
-          { name: "voided", type: "bool" }, // escape hatch: fixture voided by owner, stakes refundable via claimVoid
+          { name: "matchEndTimestamp", type: "uint64" },
+          { name: "voided", type: "bool" },
         ],
       },
     ],
   },
 ] as const;
 
-// Season 1 was deployed before matchEndTimestamp was added to Fixture. Keep
-// the old decoder available because a backend must be able to read the
-// configured registry while that season is still live.
+
+
+
 const LEGACY_REGISTRY_READ_ABI = [
   {
     type: "function",
@@ -118,25 +118,25 @@ export interface FixtureView {
   matchdayIndex: number;
   windowStartMs: number;
   windowEndMs: number;
-  kickoffMs: number; // 0 until revealed
+  kickoffMs: number;
   kickoffRevealed: boolean;
-  matchEndMs: number; // v0.2: 0 until revealed, then kickoff + matchDuration
+  matchEndMs: number;
   settled: boolean;
-  voided: boolean; // escape hatch: fixture voided by owner, stakes refundable via claimVoid
+  voided: boolean;
 }
 
-/**
- * A fixture only needs re-reading when it's near a state transition —
- * window opening (reveal), kickoff, or match end (settle). Everything else
- * is immutable on-chain between ticks.
- */
+
+
+
+
+
 const HOT_WINDOW_MS = 15 * 60_000;
-/** Full cache refresh every Nth tick (10 × 30s = 5 min). */
-const FULL_REFRESH_EVERY_TICKS = 10;
-/** Fixtures per multicall chunk — kind to public RPC payload limits. */
+
+const FULL_REFRESH_EVERY_TICKS = 120;
+
 const READ_CHUNK = 50;
 
-/** In-memory fixture cache. Revealed+settled fixtures are immutable → cached forever. */
+
 class FixtureCache {
   private fixtures = new Map<bigint, FixtureView>();
 
@@ -158,7 +158,7 @@ class FixtureCache {
     logger.info("[FixtureCache] loaded", { fixtures: this.fixtures.size });
   }
 
-  /** Re-read every fixture that can still change (unrevealed or unsettled). */
+
   async refresh(): Promise<void> {
     const mutable = [...this.fixtures.values()].filter((f) => !f.settled);
     if (mutable.length === 0) return;
@@ -167,19 +167,19 @@ class FixtureCache {
     }
   }
 
-  /**
-   * Re-read only fixtures near a state transition. This is the per-tick
-   * path — it turns ~380 eth_calls/30s into ~1 multicall (often zero, when
-   * nothing is live).
-   */
+
+
+
+
+
   async refreshHot(): Promise<void> {
     const now = Date.now();
     const hot = [...this.fixtures.values()].filter(
       (f) =>
         !f.settled &&
         (f.kickoffRevealed
-          ? now >= f.kickoffMs - HOT_WINDOW_MS // live, or about to start/end
-          : f.windowStartMs <= now + HOT_WINDOW_MS && now < f.windowEndMs) // reveal window open/imminent
+          ? now >= f.kickoffMs - HOT_WINDOW_MS
+          : f.windowStartMs <= now + HOT_WINDOW_MS && now < f.windowEndMs)
     );
     if (hot.length === 0) return;
     for (const f of await this.readFixtures(hot.map((x) => x.fixtureId))) {
@@ -187,11 +187,11 @@ class FixtureCache {
     }
   }
 
-  /**
-   * Batch-read fixtures via multicall (one RPC call per 50 fixtures).
-   * Items that fail to decode against the modern ABI fall back to an
-   * individual legacy-ABI read (pre-v0.2 8-field registries).
-   */
+
+
+
+
+
   private async readFixtures(ids: bigint[]): Promise<FixtureView[]> {
     const out: FixtureView[] = [];
     for (let i = 0; i < ids.length; i += READ_CHUNK) {
@@ -210,8 +210,8 @@ class FixtureCache {
       for (let k = 0; k < chunk.length; k++) {
         const r = results[k];
         if (r.status === "success") {
-          // The ABI returns a Fixture tuple; multicall's broad PublicClient
-          // type erases that shape, so restore it at this contract boundary.
+
+
           out.push(this.toFixtureView(chunk[k], r.result as Parameters<FixtureCache["toFixtureView"]>[1]));
         } else {
           logger.debug("[FixtureCache] modern read failed, trying legacy ABI", {
@@ -291,12 +291,12 @@ class FixtureCache {
   }
 }
 
-/**
- * Per-fixture failure backoff: a fixture whose processing keeps throwing
- * (bad signer, deterministic revert, RPC trouble) waits progressively longer
- * between retries — 1m, 2m, 4m … capped at 30m — instead of firing a doomed
- * transaction every 30s tick. Success clears the backoff.
- */
+
+
+
+
+
+
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 
@@ -305,23 +305,23 @@ interface FailureState {
   nextRetryAtMs: number;
 }
 
-/** Contract bounds: revealKickoff requires kickoff within [now+30min, now+120min]. */
+
 const REVEAL_LEAD_MIN_MS = 30 * 60_000;
 const REVEAL_LEAD_MAX_MS = 120 * 60_000;
-/** Breathing room after windowStart before the first kickoff slot. */
+
 const SLOT_START_PAD_MS = 30 * 60_000;
-/** Settlement slack reserved before windowEnd after the last match ends. */
+
 const SLOT_END_PAD_MS = 60 * 60_000;
-/** Kickoff slots snap to this grid for human-friendly times. */
+
 const SLOT_GRID_MS = 15 * 60_000;
 
 export class MatchLifecycle {
   private readonly cache: FixtureCache;
   private readonly durationMs: number;
-  /** Late-reveal fallback lead (clamped into the contract's 30–120 min bounds). */
+
   private readonly leadMs: number;
   private readonly failures = new Map<bigint, FailureState>();
-  /** Fixtures already flagged for an unschedulable window (log-once guard). */
+
   private readonly slotWarned = new Set<string>();
   private loop: LoopHandle | null = null;
   private tickCount = 0;
@@ -333,9 +333,9 @@ export class MatchLifecycle {
   ) {
     this.cache = new FixtureCache(publicClient ?? sharedPublicClient);
     this.durationMs = config.leagues.main.matchDurationMinutes * 60 * 1000;
-    // Fallback lead used only when a scheduled slot was missed (backend
-    // downtime) — clamped inside the contract's 30–120 min reveal bounds.
-    // On-schedule reveals always use the slot time itself.
+
+
+
     this.leadMs = Math.min(Math.max(config.kickoff.leadMinutes, 35), 115) * 60 * 1000;
   }
 
@@ -360,17 +360,17 @@ export class MatchLifecycle {
     this.loop = null;
   }
 
-  /** Read-only fixture list for the REST API. */
+
   getFixtures(): FixtureView[] {
     return this.cache.all();
   }
 
-  /**
-   * Deterministic scheduled kickoff slots for all unsettled fixtures
-   * (fixtureId → slot ms). Published via the API so users see start times
-   * well before the on-chain reveal — the contract only accepts reveals
-   * 30–120 min before kickoff, but each slot is fixed for the season.
-   */
+
+
+
+
+
+
   getScheduledKickoffs(): Map<bigint, number> {
     const out = new Map<bigint, number>();
     for (const f of this.cache.all()) {
@@ -381,12 +381,12 @@ export class MatchLifecycle {
     return out;
   }
 
-  /**
-   * True when any fixture needs price attention soon: a scheduled reveal
-   * entering its 120-min lead window, or within ~10 min of kickoff /
-   * settlement. Drives the price heartbeat's hot cadence — the backend only
-   * needs fresh prices when it might actually submit.
-   */
+
+
+
+
+
+
   isHotWindow(): boolean {
     const now = Date.now();
     const MARGIN_MS = 10 * 60_000;
@@ -395,7 +395,7 @@ export class MatchLifecycle {
       if (!f.kickoffRevealed) {
         if (f.windowStartMs > now || now >= f.windowEndMs) return false;
         const slot = this.kickoffSlotMs(f);
-        // Unschedulable window — stay hot; it needs operator attention.
+
         if (slot === null) return true;
         return now >= slot - REVEAL_LEAD_MAX_MS - MARGIN_MS;
       }
@@ -405,9 +405,9 @@ export class MatchLifecycle {
 
   private async tick(): Promise<void> {
     this.tickCount++;
-    // Cheap per-tick path: only fixtures near a transition. Full refresh
-    // every Nth tick catches anything the hot filter missed (clock skew,
-    // reorgs, manual on-chain changes).
+
+
+
     if (this.tickCount % FULL_REFRESH_EVERY_TICKS === 0) {
       await this.cache.refresh();
     } else {
@@ -417,25 +417,25 @@ export class MatchLifecycle {
     await this.processLiveMatches();
   }
 
-  // ------------------------------------------------------------- P2.5 reveal (window-spread)
 
-  /**
-   * Deterministic kickoff slot for a fixture. A matchday's fixtures are
-   * spread evenly across the usable part of the matchday window — from
-   * 30 min after windowStart until (matchDuration + 60 min) before
-   * windowEnd — snapped to 15-minute boundaries, so every day of the
-   * window has matches instead of the whole matchday playing in the first
-   * hour. Derived purely from on-chain fixture data (fixtureId order
-   * within the matchday + window bounds), so a backend restart re-derives
-   * identical slots. Returns null when the window is too short to fit the
-   * schedule (defensive — never happens with 2-day windows).
-   */
+
+
+
+
+
+
+
+
+
+
+
+
   private kickoffSlotMs(f: FixtureView): number | null {
     const usableStart = f.windowStartMs + SLOT_START_PAD_MS;
     const usableEnd = f.windowEndMs - this.durationMs - SLOT_END_PAD_MS;
     if (usableEnd <= usableStart) return null;
-    // All fixtures of the matchday, settled or not — matchday membership
-    // never changes, so slots are stable for the whole season.
+
+
     const siblings = this.cache
       .all()
       .filter((g) => g.matchdayIndex === f.matchdayIndex)
@@ -447,19 +447,19 @@ export class MatchLifecycle {
     return Math.min(Math.max(snapped, usableStart), usableEnd);
   }
 
-  /**
-   * Window-spread progressive reveal. The contract only accepts
-   * revealKickoff when kickoff lands within [now+30min, now+120min], so a
-   * fixture can't be revealed a day early — instead each fixture is
-   * revealed on the tick where its scheduled slot first enters the
-   * 120-minute lead window, with kickoff = the slot time itself.
-   *
-   * If a slot was missed (backend downtime), the fixture is revealed late
-   * with kickoff = now + leadMinutes (clamped into the legal bounds) so it
-   * still plays rather than dying silently. A fixture that can't be
-   * revealed legally at all is flagged for manual review — never send a
-   * doomed transaction.
-   */
+
+
+
+
+
+
+
+
+
+
+
+
+
   private async revealDueKickoffs(): Promise<void> {
     const now = Date.now();
     const due = this.cache
@@ -488,7 +488,7 @@ export class MatchLifecycle {
         }
         continue;
       }
-      // Slot hasn't entered the 120-min reveal lead window yet — wait for a later tick.
+
       if (now < slot - REVEAL_LEAD_MAX_MS) {
         waiting++;
         continue;
@@ -496,9 +496,9 @@ export class MatchLifecycle {
       let kickoffMs: number;
       let late = false;
       if (now <= slot - REVEAL_LEAD_MIN_MS) {
-        kickoffMs = slot; // on schedule: kickoff lands within [now+30min, now+120min]
+        kickoffMs = slot;
       } else {
-        // Slot missed (backend was down) — reveal ASAP inside the legal bounds.
+
         late = true;
         kickoffMs = now + this.leadMs;
         logger.warn("[MatchLifecycle] kickoff slot missed — revealing late", {
@@ -520,7 +520,7 @@ export class MatchLifecycle {
       try {
         const kickoffSec = BigInt(Math.floor(kickoffMs / 1000));
         await this.submitter.revealKickoff(f.fixtureId, kickoffSec);
-        // Update the cache optimistically — the tx is queued; refresh() will confirm.
+
         f.kickoffRevealed = true;
         f.kickoffMs = kickoffMs;
         revealed++;
@@ -540,7 +540,7 @@ export class MatchLifecycle {
     logger.info("[MatchLifecycle] reveal pass complete", { due: due.length, revealed, waiting });
   }
 
-  // ------------------------------------------------------------- P2.6 match timer
+
 
   private async processLiveMatches(): Promise<void> {
     const now = Date.now();
@@ -549,13 +549,13 @@ export class MatchLifecycle {
       .filter((f) => f.kickoffRevealed && !f.settled && f.kickoffMs <= now);
     for (const f of live) {
       const failure = this.failures.get(f.fixtureId);
-      if (failure && now < failure.nextRetryAtMs) continue; // backing off
+      if (failure && now < failure.nextRetryAtMs) continue;
       try {
         await this.processFixture(f, now);
-        if (failure) this.failures.delete(f.fixtureId); // success resets backoff
+        if (failure) this.failures.delete(f.fixtureId);
       } catch (err) {
-        // One fixture failing must never block the others — and a
-        // persistently failing fixture must not spam doomed txs every tick.
+
+
         const count = (failure?.count ?? 0) + 1;
         const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** (count - 1), BACKOFF_MAX_MS);
         this.failures.set(f.fixtureId, { count, nextRetryAtMs: now + backoffMs });
@@ -579,7 +579,7 @@ export class MatchLifecycle {
       away = this.feed.getValidatedPrice(f.awayTeamId);
     } catch (err) {
       if (err instanceof PriceValidationError || err instanceof PriceUnavailableError) {
-        // Feeds disagree or are down → do NOT submit. Retry next tick.
+
         logger.warn("[MatchLifecycle] snapshot blocked by price validation", {
           fixtureId: f.fixtureId.toString(),
           wantEnd,

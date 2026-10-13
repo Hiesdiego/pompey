@@ -1,33 +1,34 @@
-/**
- * TICKR backend — Phase 2 engine entrypoint (+ v0.2 services + optimization pass).
- *
- * Boot order:
- *   1. process guards (unhandledRejection / uncaughtException) — first
- *   2. config (fails fast on missing env)
- *   3. price heartbeat (Binance REST: 60s idle / 15s in hot windows) + CoinGecko
- *   4. price validator/aggregator
- *   5. chain cache (the RPC shield) + background odds-history warmer
- *   6. snapshot submitter, match lifecycle, checkpoint submitter, factory keeper
- *   7. social indexer
- *   8. REST API + fixtures WebSocket server
- *
- * Optimization-pass notes:
- * - The 24/7 Binance WebSocket stream is OFF. It moved ~20 msgs/sec
- *   (~8–13 GB/month) for data the backend only needs at submission moments.
- *   Live streaming now happens on each frontend client (direct Binance WS);
- *   the backend polls REST on a heartbeat. The binanceWs / binanceRest
- *   modules are kept in the tree (and still tested) but are not started.
- * - The 5s price broadcast on /ws is gone with it (see api/wsServer.ts).
- * - All background loops run through lib/loop.ts (non-overlapping + backoff).
- * - All chain reads share one resilient transport (lib/rpc.ts); set
- *   FALLBACK_RPC_URL for automatic failover.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import express from "express";
 import { createServer } from "node:http";
 import { TICKR_TEAMS } from "@tickr/shared";
 import { config } from "./config.js";
 import { logger } from "./lib/logger.js";
 import { installProcessGuards, meter } from "./lib/net.js";
+import { installOutboundMeter } from "./lib/outboundMeter.js";
 import { getBlockNumberSafe } from "./lib/rpc.js";
 import { PriceHeartbeat } from "./services/priceHeartbeat.js";
 import { CoingeckoPoller } from "./services/coingecko.js";
@@ -44,8 +45,9 @@ import { createSocialDb } from "./lib/supabase.js";
 import { SocialIndexer } from "./services/socialIndexer.js";
 
 async function main(): Promise<void> {
-  // Process-level safety net before anything else can throw.
+
   installProcessGuards();
+  installOutboundMeter();
 
   logger.info("[backend] booting TICKR engine (optimized)", {
     chainEnv: config.chainEnv,
@@ -54,19 +56,19 @@ async function main(): Promise<void> {
     fallbackRpcCount: config.fallbackRpcUrls.length,
   });
 
-  // --- price feeds -------------------------------------------------------
+
   const teamMaps: TeamPriceMap[] = TICKR_TEAMS.map((t) => ({
     teamId: t.teamId,
     binanceSymbol: t.binanceSymbol,
     coingeckoId: t.coingeckoId,
   }));
 
-  // Heartbeat, not firehose: the backend only needs prices when it submits
-  // (reveals, snapshots, checkpoints). 60s idle / 15s in hot windows.
-  // NOTE: the BinanceWsFeed module is intentionally not started anymore —
-  // its 24/7 miniTicker stream cost ~8–13 GB/month of backend bandwidth
-  // against the 1 GB budget. Frontend clients stream Binance directly now.
-  // (lifecycle is assigned below; the closure only runs after boot.)
+
+
+
+
+
+
   let lifecycle!: MatchLifecycle;
   const priceHeartbeat = new PriceHeartbeat(
     teamMaps.map((t) => t.binanceSymbol),
@@ -91,7 +93,7 @@ async function main(): Promise<void> {
   priceHeartbeat.start();
   coingecko.start();
 
-  // --- chain writers -----------------------------------------------------
+
   const submitter = new SnapshotSubmitter();
   lifecycle = new MatchLifecycle(priceFeed, submitter);
   const checkpointSubmitter = new CheckpointSubmitter(priceFeed);
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
   const chainCache = new ChainCache();
   chainCache.startWarmer();
 
-  // --- health assembly ------------------------------------------------------
+
   const buildHealth = async (): Promise<HealthReport> => {
     const rpcStart = Date.now();
     const latestBlock = await getBlockNumberSafe();
@@ -150,7 +152,7 @@ async function main(): Promise<void> {
     };
   };
 
-  // --- HTTP + WS ----------------------------------------------------------
+
   const app = express();
   const allowedOrigins = new Set(config.corsOrigins);
   app.use((req, res, next) => {
@@ -169,7 +171,7 @@ async function main(): Promise<void> {
   });
   app.use(express.json());
   app.use(buildRouter({ reader, lifecycle, priceFeed, coingecko, chainCache, health: buildHealth }));
-  // Last resort: a route that throws must never leak a stack or crash.
+
   app.use(
     (
       err: unknown,
@@ -188,7 +190,7 @@ async function main(): Promise<void> {
   const liveWs = new LiveWsServer(lifecycle);
   liveWs.attach(httpServer, "/ws");
 
-  // Lifecycle starts after the server is listening so the API is up first.
+
   httpServer.listen(config.port, async () => {
     logger.info(`[backend] listening on :${config.port}`);
     try {
@@ -213,7 +215,7 @@ async function main(): Promise<void> {
     }
   });
 
-  // --- graceful shutdown ---------------------------------------------------
+
   const shutdown = (signal: string) => {
     logger.info("[backend] shutting down", { signal });
     liveWs.stop();
@@ -228,7 +230,7 @@ async function main(): Promise<void> {
       logger.info("[backend] shutdown complete");
       process.exit(0);
     });
-    // Force-exit if something hangs.
+
     setTimeout(() => process.exit(1), 10_000).unref();
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
