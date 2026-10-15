@@ -1,11 +1,8 @@
 import { randomBytes } from "node:crypto";
 
-// Shared by the page and its service worker URL. Generate it before Next
-// compiles the client, so Vercel builds work without a post-build file edit.
 const swBuildId = randomBytes(8).toString("hex");
 
-/** @type {import('next').NextConfig} */
-const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-lsq6.onrender.com" || "http://localhost:4000").replace(/\/$/, "");
+const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-ke9k.onrender.com" || "http://localhost:4000").replace(/\/$/, "");
 
 const nextConfig = {
   reactStrictMode: true,
@@ -28,8 +25,6 @@ const nextConfig = {
         }],
       },
       {
-        // The worker and its manifest must never be served from an
-        // intermediary cache, or a deploy can sit invisible for hours.
         source: "/sw.js",
         headers: [
           { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
