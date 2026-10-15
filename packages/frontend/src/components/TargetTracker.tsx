@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Target } from "lucide-react";
 import { useSharedPrices } from "../lib/price/useSharedPrices";
 import { decodeTargetTerms, formatUsd } from "../lib/targetMarket";
@@ -12,6 +12,7 @@ export function TargetTracker({ params, symbol, settled = false }: {
   settled?: boolean;
 }) {
   const terms = useMemo(() => decodeTargetTerms(params), [params]);
+  const [chartOpen, setChartOpen] = useState(false);
   const { prices, status, updatedAt } = useSharedPrices(!settled);
   const symbolUpdatedAt = updatedAt[symbol] ?? 0;
   const price = status !== "stale" && Date.now() - symbolUpdatedAt < 60_000 && !settled ? prices[symbol] : undefined;
@@ -31,10 +32,13 @@ export function TargetTracker({ params, symbol, settled = false }: {
       <div className="rounded-2xl bg-white/80 p-4 dark:bg-white/[.05]"><p className="text-xs font-semibold text-zinc-500">{terms.above ? "Finish at or above" : "Finish at or below"}</p><p className="mt-1 font-display text-2xl font-black tabular-nums">{formatUsd(terms.target)}</p></div>
       <div className="rounded-2xl bg-white/80 p-4 dark:bg-white/[.05]"><p className="text-xs font-semibold text-zinc-500">Distance to target</p><p className="mt-1 font-display text-2xl font-black tabular-nums">{distance === null ? "—" : `${distance >= 0 ? "+" : "−"}${formatUsd(Math.abs(distance))}`}</p><p className="text-xs text-zinc-500">{distance === null ? "Waiting for a fresh price" : `${Math.abs(distance / terms.target * 100).toFixed(2)}% ${distance >= 0 ? "above" : "below"} target`}</p></div>
     </div>
-    <div className="mt-4 rounded-2xl border border-black/[.06] bg-white/70 p-3 dark:border-white/[.07] dark:bg-black/20">
-      <TradingViewChart teamId={terms.teamId} height={280} />
-      <div className="flex flex-wrap justify-between gap-1 text-[11px] font-semibold text-zinc-500"><span>TradingView · Binance spot · 5-minute chart</span><span className="text-emerald-600">Target: {formatUsd(terms.target)}</span></div>
-    </div>
+    <details onToggle={(event) => setChartOpen(event.currentTarget.open)} className="group mt-4 rounded-2xl border border-black/[.06] bg-white/70 p-3 dark:border-white/[.07] dark:bg-black/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span>Recent price movements</span><span className="text-xs font-semibold text-[#2E7CF6] group-open:hidden">Show chart</span><span className="hidden text-xs font-semibold text-[#2E7CF6] group-open:inline">Hide chart</span></summary>
+      <div className="mt-3">
+        {chartOpen && <TradingViewChart teamId={terms.teamId} height={280} />}
+        <div className="flex flex-wrap justify-between gap-1 text-[11px] font-semibold text-zinc-500"><span>TradingView · Binance spot · 5-minute chart</span><span className="text-emerald-600">Target: {formatUsd(terms.target)}</span></div>
+      </div>
+    </details>
     <p className="mt-3 text-sm font-semibold">{yesNow === null ? "Waiting for a fresh spot quote" : yesNow ? "Yes is currently on side" : "No is currently on side"} <span className="font-normal text-zinc-500">· The result uses the latest available hourly oracle checkpoint at or before {new Date(terms.atTime * 1000).toLocaleString()}. {symbolUpdatedAt && !settled ? `Spot updated ${new Date(symbolUpdatedAt).toLocaleTimeString()}.` : ""}</span></p>
   </section>;
 }

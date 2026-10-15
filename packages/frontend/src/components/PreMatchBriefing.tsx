@@ -33,6 +33,7 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
   const [form, setForm] = useState<ApiFixtureForm | null>(null);
   const [formUnavailable, setFormUnavailable] = useState(false);
   const [feeBps, setFeeBps] = useState<number | null>(null);
+  const [chartsOpen, setChartsOpen] = useState(false);
   const home = fixture.home;
   const away = fixture.away;
 
@@ -110,15 +111,18 @@ export function PreMatchBriefing({ fixture, pool }: { fixture: ApiFixture; pool:
       <div className="space-y-3"><FormRow name={home.name} entries={form?.home ?? []} ready={form?.ready ?? false} unavailable={formUnavailable} /><FormRow name={away.name} entries={form?.away ?? []} ready={form?.ready ?? false} unavailable={formUnavailable} /></div>
     </div>
 
-    <div className="mt-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-display text-sm font-bold"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movement</h3><span className="text-[11px] text-zinc-500">TradingView · Binance spot · 5-minute chart</span></div>
-      <div className="grid gap-3 sm:grid-cols-2">{[home, away].map((team) => <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
-        <div className="mb-2 font-display text-sm font-bold">{team.symbol} / USDT</div>
-        <TradingViewChart teamId={team.teamId} />
-        <p className="mt-2 text-[11px] text-zinc-500">Oracle start price is recorded at kickoff.</p>
-      </div>)}</div>
-      <p className="mt-2 text-[11px] text-zinc-500">TradingView charts show market context. Match results use on-chain oracle snapshots.</p>
-    </div>
+    <details onToggle={(event) => setChartsOpen(event.currentTarget.open)} className="group mt-5 rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span className="flex items-center gap-2"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movements</span><span className="text-xs font-semibold text-[#2E7CF6] group-open:hidden">Show charts</span><span className="hidden text-xs font-semibold text-[#2E7CF6] group-open:inline">Hide charts</span></summary>
+      <div className="mt-4">
+        <p className="mb-3 text-[11px] text-zinc-500">TradingView · Binance spot · 5-minute chart</p>
+        <div className="grid gap-3 sm:grid-cols-2">{[home, away].map((team) => <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-white/60 p-4 dark:border-white/[.08] dark:bg-white/[.025]">
+          <div className="mb-2 font-display text-sm font-bold">{team.symbol} / USDT</div>
+          {chartsOpen && <TradingViewChart teamId={team.teamId} />}
+          <p className="mt-2 text-[11px] text-zinc-500">Oracle start price is recorded at kickoff.</p>
+        </div>)}</div>
+        <p className="mt-2 text-[11px] text-zinc-500">TradingView charts show market context. Match results use on-chain oracle snapshots.</p>
+      </div>
+    </details>
 
     <div className="mt-5 border-t border-black/[.07] pt-5 dark:border-white/[.07]">
       <h3 className="flex items-center gap-2 font-display text-sm font-bold"><BarChart3 className="h-4 w-4 text-[#2E7CF6]" /> Pool context</h3>

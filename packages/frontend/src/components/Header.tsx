@@ -1,8 +1,3 @@
-/**
- * Header (spec P3.1 / P3.3): logo, nav, theme toggle, network indicator,
- * TICK balance + faucet button, Privy login/logout.
- */
-
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -72,14 +67,11 @@ function FaucetButton({ inMenu = false }: { inMenu?: boolean }) {
   const remaining = Math.max(0, (nextFaucetClaimAt ?? 0) - now);
   const countdown = `${Math.floor(remaining / 3600).toString().padStart(2, "0")}h ${Math.floor((remaining % 3600) / 60).toString().padStart(2, "0")}m ${(remaining % 60).toString().padStart(2, "0")}s`;
 
-  // Auto-open the faucet popover once per session when the wallet has 0 TICK
-  // — new users shouldn't have to discover the balance-pill dropdown.
   const autoOpenedRef = useRef(false);
   const tryAutoOpen = useCallback(() => {
     if (autoOpenedRef.current) return;
     if (!authenticated || !walletReady) return;
     if (inMenu) return;
-    // The header trigger is hidden on mobile, so only auto-open its popover on desktop.
     if (!inMenu && window.matchMedia("(max-width: 767px)").matches) return;
     if (balance === null || balance > 0n) return;
     if (window.sessionStorage.getItem("tickr:faucet-auto-opened")) return;
@@ -92,8 +84,6 @@ function FaucetButton({ inMenu = false }: { inMenu?: boolean }) {
     tryAutoOpen();
   }, [tryAutoOpen]);
 
-  // OnboardingGate nudges us right after first-login profile creation —
-  // the balance query may not have refreshed yet at that instant.
   useEffect(() => {
     const onProfileCreated = () => tryAutoOpen();
     window.addEventListener("tickr:profile-created", onProfileCreated);
@@ -246,9 +236,11 @@ function WalletAddressButton() {
 }
 
 export function Header() {
-  const { ready, authenticated, login, walletLoading } = useTickr();
+  const { ready, authenticated, login, walletLoading, playerAddress } = useTickr();
   const pathname = usePathname();
   const openClaimCount = useOpenClaimCount();
+  const { balance, faucetReady } = useTickBalance(playerAddress);
+  const claimCount = openClaimCount + (authenticated && balance !== null && faucetReady ? 1 : 0);
 
   return (
     <header className="glass-strong sticky top-0 z-40 !border-x-0 !border-t-0">
@@ -289,9 +281,9 @@ export function Header() {
                 )}
               >
                 {n.label}
-                {n.href === "/claims" && authenticated && openClaimCount > 0 && (
-                  <span className="ml-1 inline-flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold leading-4 text-white" aria-label={`${openClaimCount} open claims`}>
-                    {openClaimCount > 99 ? "99+" : openClaimCount}
+                {n.href === "/claims" && authenticated && claimCount > 0 && (
+                  <span className="ml-1 inline-flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold leading-4 text-white" aria-label={`${claimCount} available claims, including daily TICK when ready`}>
+                    {claimCount > 99 ? "99+" : claimCount}
                   </span>
                 )}
               </Link>
@@ -327,7 +319,6 @@ export function Header() {
           )}
         </div>
       </div>
-      {/* Mobile nav */}
       <nav className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
         {NAV.map((n) => (
           <Link
@@ -341,9 +332,9 @@ export function Header() {
               )}
             >
               {n.label}
-              {n.href === "/claims" && authenticated && openClaimCount > 0 && (
-                <span className="ml-1 inline-flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold leading-4 text-white" aria-label={`${openClaimCount} open claims`}>
-                  {openClaimCount > 99 ? "99+" : openClaimCount}
+              {n.href === "/claims" && authenticated && claimCount > 0 && (
+                <span className="ml-1 inline-flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold leading-4 text-white" aria-label={`${claimCount} available claims, including daily TICK when ready`}>
+                  {claimCount > 99 ? "99+" : claimCount}
                 </span>
               )}
             </Link>

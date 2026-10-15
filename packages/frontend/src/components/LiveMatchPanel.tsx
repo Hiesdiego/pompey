@@ -49,6 +49,7 @@ export function LiveMatchPanel({
   const { expired } = useCountdown(windowEndMs);
   const [moments, setMoments] = useState<MatchMoment[]>([]);
   const [pulse, setPulse] = useState<MatchMoment | null>(null);
+  const [chartsOpen, setChartsOpen] = useState(false);
   const latest = useRef<{ home: number | null; away: number | null; score: [number, number] | null }>({ home: null, away: null, score: null });
   const previousScore = useRef<[number, number] | null>(null);
 
@@ -103,10 +104,13 @@ export function LiveMatchPanel({
         <strong className="font-display text-xl tabular-nums">{pulse.score}</strong>
       </div>}
 
-      <div className="relative mb-5 grid gap-3 sm:grid-cols-2">
-        <div><p className="mb-2 text-xs font-bold">{home.symbol} · oracle start {snapshot ? `$${(Number(snapshot.homeStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p><TradingViewChart teamId={home.teamId} /></div>
-        <div><p className="mb-2 text-xs font-bold">{away.symbol} · oracle start {snapshot ? `$${(Number(snapshot.awayStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p><TradingViewChart teamId={away.teamId} /></div>
-      </div>
+      <details onToggle={(event) => setChartsOpen(event.currentTarget.open)} className="group relative mb-5 rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span className="flex items-center gap-2"><Activity className="h-4 w-4 text-[#2E7CF6]" /> Recent price movements</span><span className="text-xs font-semibold text-[#2E7CF6] group-open:hidden">Show charts</span><span className="hidden text-xs font-semibold text-[#2E7CF6] group-open:inline">Hide charts</span></summary>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div><p className="mb-2 text-xs font-bold">{home.symbol} · oracle start {snapshot ? `$${(Number(snapshot.homeStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p>{chartsOpen && <TradingViewChart teamId={home.teamId} />}</div>
+          <div><p className="mb-2 text-xs font-bold">{away.symbol} · oracle start {snapshot ? `$${(Number(snapshot.awayStart) / 10 ** PRICE_DECIMALS).toLocaleString("en-US")}` : "pending"}</p>{chartsOpen && <TradingViewChart teamId={away.teamId} />}</div>
+        </div>
+      </details>
 
       <div className="space-y-4">
         {[
