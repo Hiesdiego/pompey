@@ -130,8 +130,8 @@ export interface FixtureView {
 
 
 
-const HOT_WINDOW_MS = 15 * 60_000;
-
+const SAFETY_SWEEP_MS = 24 * 60 * 60_000;
+const RETRY_POLL_MS = 5 * 60_000;
 const FULL_REFRESH_EVERY_TICKS = 120;
 
 const READ_CHUNK = 50;
@@ -172,18 +172,24 @@ class FixtureCache {
 
 
 
-  async refreshHot(): Promise<void> {
+  async refreshHot(slotOf: (fixture: FixtureView) => number | null): Promise<void> {
     const now = Date.now();
-    const hot = [...this.fixtures.values()].filter(
-      (f) =>
-        !f.settled &&
-        (f.kickoffRevealed
-          ? now >= f.kickoffMs - HOT_WINDOW_MS
-          : f.windowStartMs <= now + HOT_WINDOW_MS && now < f.windowEndMs)
-    );
+    const hot = [...this.fixtures.values()].filter((f) => {
+      if (f.settled) return false;
+      if (f.kickoffRevealed) return now >= f.kickoffMs;
+      const slot = slotOf(f);
+      return f.windowStartMs <= now && now < f.windowEndMs &&
+        (slot === null || now >= slot - REVEAL_LEAD_MAX_MS);
+    });
     if (hot.length === 0) return;
     for (const f of await this.readFixtures(hot.map((x) => x.fixtureId))) {
       this.fixtures.set(f.fixtureId, f);
+    }
+  }
+
+  async refreshIds(ids: bigint[]): Promise<void> {
+    for (const fixture of await this.readFixtures(ids)) {
+      this.fixtures.set(fixture.fixtureId, fixture);
     }
   }
 
@@ -322,9 +328,16 @@ export class MatchLifecycle {
   private readonly leadMs: number;
   private readonly failures = new Map<bigint, FailureState>();
   private readonly startVerifiedAt = new Map<bigint, number>();
+  private readonly endAttemptAt = new Map<bigint, number>();
+  private readonly endConfirmed = new Set<bigint>();
+  private readonly pendingRevealAt = new Map<bigint, number>();
 
   private readonly slotWarned = new Set<string>();
+  private timer: NodeJS.Timeout | null = null;
   private loop: LoopHandle | null = null;
+  private stopped = false;
+  private nextSweepAt = 0;
+  private retryAfter = 0;
   private tickCount = 0;
 
   constructor(
@@ -341,7 +354,18 @@ export class MatchLifecycle {
   }
 
   async start(): Promise<void> {
-    await this.cache.loadAll();
+    this.stopped = false;
+    try {
+      await this.cache.loadAll();
+    } catch (err) {
+      if (process.env.SCHEDULER_MODE === "poll") throw err;
+      logger.error("[MatchLifecycle] initial fixture read failed", { error: String(err) });
+      this.nextSweepAt = Date.now();
+      this.retryAfter = Date.now() + BACKOFF_BASE_MS;
+      this.armNext();
+      return;
+    }
+    this.nextSweepAt = Date.now() + (this.cache.size === 0 ? 60 * 60_000 : SAFETY_SWEEP_MS);
     if (this.cache.size === 0) {
       logger.warn(
         "[MatchLifecycle] no fixtures on-chain yet — the schedule has not been generated. " +
@@ -349,16 +373,23 @@ export class MatchLifecycle {
       );
     }
     logger.info("[MatchLifecycle] starting", {
-      tickIntervalMs: config.kickoff.tickIntervalMs,
+      mode: process.env.SCHEDULER_MODE === "poll" ? "poll" : "event",
       matchDurationMin: config.leagues.main.matchDurationMinutes,
       kickoffLeadMin: config.kickoff.leadMinutes,
     });
-    this.loop = runLoop("match-lifecycle", config.kickoff.tickIntervalMs, () => this.tick());
+    if (process.env.SCHEDULER_MODE === "poll") {
+      this.loop = runLoop("match-lifecycle", config.kickoff.tickIntervalMs, () => this.pollTick());
+      return;
+    }
+    await this.runScheduled(true);
   }
 
   stop(): void {
+    this.stopped = true;
     this.loop?.stop();
     this.loop = null;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
   }
 
 
@@ -404,18 +435,95 @@ export class MatchLifecycle {
     });
   }
 
-  private async tick(): Promise<void> {
-    this.tickCount++;
-
-
-
-    if (this.tickCount % FULL_REFRESH_EVERY_TICKS === 0) {
-      await this.cache.refresh();
-    } else {
-      await this.cache.refreshHot();
+  private async tick(skipRefresh = false): Promise<void> {
+    if (!skipRefresh) {
+      if (Date.now() >= this.nextSweepAt) {
+        await this.cache.loadAll();
+        this.nextSweepAt = Date.now() + (this.cache.size === 0 ? 60 * 60_000 : SAFETY_SWEEP_MS);
+      } else {
+        await this.cache.refreshHot((fixture) => this.kickoffSlotMs(fixture));
+        const dueConfirmations = [...this.pendingRevealAt]
+          .filter(([, at]) => at <= Date.now())
+          .map(([id]) => id);
+        if (dueConfirmations.length > 0) {
+          await this.cache.refreshIds(dueConfirmations);
+          for (const id of dueConfirmations) this.pendingRevealAt.delete(id);
+        }
+      }
     }
     await this.revealDueKickoffs();
     await this.processLiveMatches();
+  }
+
+  private async pollTick(): Promise<void> {
+    this.tickCount++;
+    if (this.tickCount % FULL_REFRESH_EVERY_TICKS === 0) {
+      await this.cache.refresh();
+    } else {
+      await this.cache.refreshHot((fixture) => this.kickoffSlotMs(fixture));
+    }
+    await this.revealDueKickoffs();
+    await this.processLiveMatches();
+  }
+
+  private async runScheduled(skipRefresh = false): Promise<void> {
+    if (this.stopped) return;
+    this.timer = null;
+    try {
+      await this.tick(skipRefresh);
+      this.retryAfter = 0;
+    } catch (err) {
+      logger.error("[MatchLifecycle] scheduled pass failed", { error: String(err) });
+      this.retryAfter = Date.now() + BACKOFF_BASE_MS;
+    } finally {
+      this.armNext();
+    }
+  }
+
+  private armNext(): void {
+    if (this.stopped) return;
+    const now = Date.now();
+    const next = this.retryAfter > now ? this.retryAfter : this.nextWakeAt(now);
+    this.timer = setTimeout(
+      () => void this.runScheduled(),
+      Math.max(1_000, next - now)
+    );
+    this.timer.unref?.();
+  }
+
+  private nextWakeAt(now: number): number {
+    let next = this.nextSweepAt;
+    for (const confirmationAt of this.pendingRevealAt.values()) next = Math.min(next, confirmationAt);
+    for (const fixture of this.cache.all()) {
+      if (fixture.settled) continue;
+      const failureAt = this.failures.get(fixture.fixtureId)?.nextRetryAtMs ?? 0;
+      if (!fixture.kickoffRevealed) {
+        const slot = this.kickoffSlotMs(fixture);
+        if (slot === null || now >= fixture.windowEndMs) continue;
+        if (now > slot - REVEAL_LEAD_MIN_MS && now + this.leadMs > fixture.windowEndMs) continue;
+        const revealAt = Math.max(fixture.windowStartMs, slot - REVEAL_LEAD_MAX_MS);
+        next = Math.min(next, Math.max(revealAt, failureAt, now));
+        continue;
+      }
+      if (now < fixture.kickoffMs) {
+        next = Math.min(next, fixture.kickoffMs);
+        continue;
+      }
+      const endAt = fixture.kickoffMs + this.durationMs;
+      if (now < endAt) {
+        next = Math.min(next, endAt);
+        const verifiedAt = this.startVerifiedAt.get(fixture.fixtureId);
+        if (verifiedAt !== Number.MAX_SAFE_INTEGER) {
+          const startAt = verifiedAt === undefined ? fixture.kickoffMs : verifiedAt + RETRY_POLL_MS;
+          next = Math.min(next, Math.max(startAt, failureAt, now));
+        }
+      } else if (!this.endConfirmed.has(fixture.fixtureId)) {
+        const endAttemptAt = this.endAttemptAt.get(fixture.fixtureId);
+        const retryAt = endAttemptAt === undefined ? endAt : endAttemptAt + RETRY_POLL_MS;
+        next = Math.min(next, Math.max(retryAt, failureAt, now));
+      }
+    }
+    return next;
   }
 
 
@@ -473,6 +581,8 @@ export class MatchLifecycle {
     let revealed = 0;
     let waiting = 0;
     for (const f of due) {
+      const failure = this.failures.get(f.fixtureId);
+      if (failure && now < failure.nextRetryAtMs) continue;
       const slot = this.kickoffSlotMs(f);
       if (slot === null) {
         const key = f.fixtureId.toString();
@@ -524,6 +634,8 @@ export class MatchLifecycle {
 
         f.kickoffRevealed = true;
         f.kickoffMs = kickoffMs;
+        this.pendingRevealAt.set(f.fixtureId, Date.now() + 2 * 60_000);
+        this.failures.delete(f.fixtureId);
         revealed++;
         logger.info("[MatchLifecycle] kickoff revealed (window-spread)", {
           fixtureId: f.fixtureId.toString(),
@@ -532,6 +644,9 @@ export class MatchLifecycle {
           late,
         });
       } catch (err) {
+        const count = (failure?.count ?? 0) + 1;
+        const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** (count - 1), BACKOFF_MAX_MS);
+        this.failures.set(f.fixtureId, { count, nextRetryAtMs: now + backoffMs });
         logger.error("[MatchLifecycle] revealKickoff failed", {
           fixtureId: f.fixtureId.toString(),
           error: String(err),
@@ -552,8 +667,9 @@ export class MatchLifecycle {
       const failure = this.failures.get(f.fixtureId);
       if (failure && now < failure.nextRetryAtMs) continue;
       try {
-        await this.processFixture(f, now);
-        if (failure) this.failures.delete(f.fixtureId);
+        const processed = await this.processFixture(f, now);
+        if (processed && failure) this.failures.delete(f.fixtureId);
+        if (!processed) this.failures.set(f.fixtureId, { count: 1, nextRetryAtMs: now + BACKOFF_BASE_MS });
       } catch (err) {
 
 
@@ -570,10 +686,12 @@ export class MatchLifecycle {
     }
   }
 
-  private async processFixture(f: FixtureView, now: number): Promise<void> {
+  private async processFixture(f: FixtureView, now: number): Promise<boolean> {
     const matchEndMs = f.kickoffMs + this.durationMs;
     const wantEnd = now >= matchEndMs;
-    if (!wantEnd && now - (this.startVerifiedAt.get(f.fixtureId) ?? 0) < 5 * 60_000) return;
+    if (wantEnd && this.endConfirmed.has(f.fixtureId)) return true;
+    if (wantEnd && now - (this.endAttemptAt.get(f.fixtureId) ?? 0) < RETRY_POLL_MS) return true;
+    if (!wantEnd && now - (this.startVerifiedAt.get(f.fixtureId) ?? 0) < RETRY_POLL_MS) return true;
 
     let home, away;
     try {
@@ -587,7 +705,7 @@ export class MatchLifecycle {
           wantEnd,
           error: err.message,
         });
-        return;
+        return false;
       }
       throw err;
     }
@@ -600,16 +718,24 @@ export class MatchLifecycle {
     });
 
     if (wantEnd) {
-      await this.submitter.submitEndPrice(
+      const audit = await this.submitter.submitEndPrice(
         f.fixtureId, home.scaled, away.scaled, home.source, away.source
       );
+      if (audit.skipped && audit.skipReason === "endPrice already submitted on-chain") {
+        this.endConfirmed.add(f.fixtureId);
+      } else {
+        this.endAttemptAt.set(f.fixtureId, now);
+      }
     } else {
       const audit = await this.submitter.submitStartPrice(
         f.fixtureId, home.scaled, away.scaled, home.source, away.source
       );
       if (audit.skipped && audit.skipReason === "startPrice already submitted on-chain") {
+        this.startVerifiedAt.set(f.fixtureId, Number.MAX_SAFE_INTEGER);
+      } else {
         this.startVerifiedAt.set(f.fixtureId, now);
       }
     }
+    return true;
   }
 }

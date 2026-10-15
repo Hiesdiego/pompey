@@ -41,6 +41,7 @@ import {
 const WATERMARK_KEY = "market_factory";
 const CHUNK_BLOCKS = 900n;
 const POLL_MS = 120_000;
+const MAX_CHUNKS_PER_SCAN = 10;
 const BACKFILL_FALLBACK_BLOCKS = 200_000n;
 
 const FACTORY_EVENTS_ABI = [
@@ -203,6 +204,7 @@ export class SocialIndexer {
   private loop: LoopHandle | null = null;
   private scanning = false;
   private started = false;
+  private nextBlock: bigint | null = null;
 
   constructor(db: Db | null) {
     this.db = db;
@@ -236,7 +238,8 @@ export class SocialIndexer {
     }
     logger.info("[social] indexer starting", { factory: this.factory, chainId: this.chainId });
 
-    let from = await this.loadWatermark();
+    const watermark = await this.loadWatermark();
+    let from = watermark;
     if (from === null) {
       const latest = await this.client.getBlockNumber();
       const configured = config.social.marketFactoryDeployBlock;
@@ -249,8 +252,9 @@ export class SocialIndexer {
             : 0n;
       logger.info("[social] indexer backfilling", { fromBlock: from.toString() });
     }
+    this.nextBlock = watermark === null ? from : from + 1n;
 
-    await this.scanRange(from, null).catch((err) => {
+    await this.scanRange(this.nextBlock, null).catch((err) => {
 
 
       logger.warn("[social] initial backfill failed, poll loop will retry", {
@@ -290,14 +294,13 @@ export class SocialIndexer {
       },
       { onConflict: "key" }
     );
-    if (error) logger.warn("[social] watermark write failed", { error: error.message });
+    if (error) throw new Error(`watermark write failed: ${error.message}`);
   }
 
   private async poll(): Promise<void> {
     if (this.scanning) return;
-    const from = await this.loadWatermark();
-    if (from === null) return;
-    await this.scanRange(from + 1n, null);
+    if (this.nextBlock === null) return;
+    await this.scanRange(this.nextBlock, null);
   }
 
 
@@ -307,12 +310,19 @@ export class SocialIndexer {
     try {
       const latest = to ?? (await this.client.getBlockNumber());
       let cursor = from;
-      while (cursor <= latest) {
+      let chunks = 0;
+      while (cursor <= latest && chunks < MAX_CHUNKS_PER_SCAN) {
         const chunkEnd = cursor + CHUNK_BLOCKS - 1n > latest ? latest : cursor + CHUNK_BLOCKS - 1n;
         await this.scanChunk(cursor, chunkEnd);
         await this.saveWatermark(chunkEnd);
         cursor = chunkEnd + 1n;
+        this.nextBlock = cursor;
+        chunks++;
       }
+      if (cursor <= latest) logger.info("[social] backfill deferred", {
+        nextBlock: cursor.toString(),
+        remainingBlocks: (latest - cursor + 1n).toString(),
+      });
     } finally {
       this.scanning = false;
     }

@@ -3,7 +3,7 @@ import { meter } from "./net.js";
 
 type Usage = { bytes: number; calls: number; failures: number };
 
-const hourly = new Map<string, Usage>();
+const windowUsage = new Map<string, Usage>();
 let installed = false;
 
 function requestBodyBytes(body: RequestInit["body"]): number {
@@ -40,11 +40,11 @@ function groupFor(url: URL, body: RequestInit["body"]): string {
 }
 
 function record(group: string, bytes: number, failed: boolean): void {
-  const current = hourly.get(group) ?? { bytes: 0, calls: 0, failures: 0 };
+  const current = windowUsage.get(group) ?? { bytes: 0, calls: 0, failures: 0 };
   current.bytes += bytes;
   current.calls++;
   if (failed) current.failures++;
-  hourly.set(group, current);
+  windowUsage.set(group, current);
   meter.count(`outbound_bytes:${group}`, bytes);
   meter.count(`outbound_calls:${group}`);
   if (failed) meter.count(`outbound_failures:${group}`);
@@ -77,11 +77,11 @@ export function installOutboundMeter(): void {
     }
   };
   const timer = setInterval(() => {
-    const groups = [...hourly.entries()]
+    const groups = [...windowUsage.entries()]
       .sort((a, b) => b[1].bytes - a[1].bytes)
       .map(([group, usage]) => ({ group, ...usage }));
-    logger.info("[net] outbound request bytes by source", { groups });
-    hourly.clear();
-  }, 60 * 60_000);
+    logger.info("[net] outbound request bytes by source", { windowMinutes: 5, groups });
+    windowUsage.clear();
+  }, 5 * 60_000);
   timer.unref?.();
 }
