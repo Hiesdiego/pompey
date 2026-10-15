@@ -100,8 +100,8 @@ async function main(): Promise<void> {
   const db = createSocialDb();
   const factoryKeeper = new FactoryKeeper(db);
   const reader = new ChainReader();
-  const socialIndexer = new SocialIndexer(db);
   const chainCache = new ChainCache();
+  const socialIndexer = new SocialIndexer(db, (marketId) => chainCache.markMarketDirty(marketId));
   chainCache.startWarmer();
 
 

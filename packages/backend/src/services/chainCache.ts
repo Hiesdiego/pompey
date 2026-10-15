@@ -184,7 +184,7 @@ export function normalizeMarketSettlementResult(raw: unknown): MarketSettlementF
   };
 }
 
-const MARKETS_TTL_MS = 10_000;
+const MARKETS_TTL_MS = 10 * 60_000;
 const MARKET_TTL_MS = 10_000;
 const MULTICALL_CHUNK = 100;
 const LOG_CHUNK_BLOCKS = 900n;
@@ -216,8 +216,9 @@ type FactoryCall = {
 
 export class ChainCache {
   private readonly factory: `0x${string}`;
-  private marketsCache: { at: number; value: { markets: MarketSummary[]; asOfBlock: string } } | null = null;
+  private marketsCache: { at: number; value: { markets: MarketSummary[]; asOfBlock: string; refreshedAt: string } } | null = null;
   private readonly marketCache = new Map<string, { at: number; value: MarketSummary }>();
+  private readonly dirtyMarketIds = new Map<number, number>();
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly oddsCursors = new Map<bigint, OddsCursor>();
   private readonly oddsLocks = new Map<bigint, Promise<void>>();
@@ -231,18 +232,45 @@ export class ChainCache {
 
 
 
-  async getMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string }> {
+  markMarketDirty(id: bigint): void {
+    const marketId = Number(id);
+    if (!Number.isSafeInteger(marketId) || marketId < 0) return;
+    this.dirtyMarketIds.set(marketId, (this.dirtyMarketIds.get(marketId) ?? 0) + 1);
+    meter.count("chaincache_market_events");
+    this.marketCache.delete(`market:${marketId}`);
+  }
+
+  async getMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string; refreshedAt: string }> {
     return this.coalesce("markets", async () => {
       const now = Date.now();
       if (this.marketsCache && now - this.marketsCache.at < MARKETS_TTL_MS) {
-        return this.marketsCache.value;
+        if (this.dirtyMarketIds.size === 0) return this.marketsCache.value;
+        const pending = [...this.dirtyMarketIds];
+        const updates = await Promise.all(pending.map(async ([id]) =>
+          this.fetchMarket(BigInt(id))
+        ));
+        const markets = [...this.marketsCache.value.markets];
+        for (let i = 0; i < pending.length; i++) {
+          const [id, version] = pending[i];
+          markets[id] = updates[i];
+          this.marketCache.set(`market:${id}`, { at: now, value: updates[i] });
+          if (this.dirtyMarketIds.get(id) === version) this.dirtyMarketIds.delete(id);
+        }
+        meter.count("chaincache_markets_targeted_refresh", pending.length);
+        const value = { ...this.marketsCache.value, markets };
+        this.marketsCache = { at: this.marketsCache.at, value };
+        return value;
       }
+      const pending = [...this.dirtyMarketIds];
       const value = await this.fetchMarkets().catch((err) => {
         throw new ChainApiError("RPC_UNAVAILABLE", rpcUnavailableMessage(err));
       });
       this.marketsCache = { at: now, value };
+      for (const [id, version] of pending) {
+        if (this.dirtyMarketIds.get(id) === version) this.dirtyMarketIds.delete(id);
+      }
       return value;
-    }) as Promise<{ markets: MarketSummary[]; asOfBlock: string }>;
+    }) as Promise<{ markets: MarketSummary[]; asOfBlock: string; refreshedAt: string }>;
   }
 
   async getMarket(id: number): Promise<MarketSummary> {
@@ -328,7 +356,7 @@ export class ChainCache {
 
 
 
-  private async fetchMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string }> {
+  private async fetchMarkets(): Promise<{ markets: MarketSummary[]; asOfBlock: string; refreshedAt: string }> {
     const [count, asOfBlock] = await Promise.all([
       withRpcRetry("chaincache:marketCount", () =>
         publicClient.readContract({
@@ -340,7 +368,7 @@ export class ChainCache {
       withRpcRetry("chaincache:blockNumber", () => publicClient.getBlockNumber()),
     ]);
     const n = Number(count);
-    if (n === 0) return { markets: [], asOfBlock: asOfBlock.toString() };
+    if (n === 0) return { markets: [], asOfBlock: asOfBlock.toString(), refreshedAt: new Date().toISOString() };
     if (n > 10_000) throw new Error(`marketCount absurdly large: ${n}`);
 
     const ids = Array.from({ length: n }, (_, i) => BigInt(i));
@@ -418,7 +446,7 @@ export class ChainCache {
     });
 
     meter.count("chaincache_markets_refresh", 1);
-    return { markets, asOfBlock: asOfBlock.toString() };
+    return { markets, asOfBlock: asOfBlock.toString(), refreshedAt: new Date().toISOString() };
   }
 
   private async fetchMarket(id: bigint): Promise<MarketSummary> {

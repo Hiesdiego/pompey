@@ -197,6 +197,7 @@ function toStatsRow(data: Record<string, unknown>, wallet: string, season: numbe
 
 export class SocialIndexer {
   private db: Db | null;
+  private readonly onMarketChanged?: (marketId: bigint) => void;
   private client: PublicClient;
   private chainId: number;
   private factory: `0x${string}`;
@@ -206,8 +207,9 @@ export class SocialIndexer {
   private started = false;
   private nextBlock: bigint | null = null;
 
-  constructor(db: Db | null) {
+  constructor(db: Db | null, onMarketChanged?: (marketId: bigint) => void) {
     this.db = db;
+    this.onMarketChanged = onMarketChanged;
     this.client = publicClient;
     this.chainId = getSocialChainId();
     this.factory = config.contracts.marketFactory;
@@ -373,6 +375,8 @@ export class SocialIndexer {
           await this.onMarketResolved(p.args as Parameters<SocialIndexer["onMarketResolved"]>[0], log.blockNumber, ts);
         else if (p.eventName === "MarketVoided")
           await this.onMarketVoided(p.args as Parameters<SocialIndexer["onMarketVoided"]>[0], log.blockNumber);
+        else continue;
+        if (p.args.marketId !== undefined) this.onMarketChanged?.(p.args.marketId);
       } catch (err) {
 
 
