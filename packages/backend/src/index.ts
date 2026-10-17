@@ -35,6 +35,9 @@ import { CoingeckoPoller } from "./services/coingecko.js";
 import { PriceFeed, type TeamPriceMap } from "./services/priceFeed.js";
 import { SnapshotSubmitter } from "./services/snapshotSubmitter.js";
 import { MatchLifecycle } from "./services/matchLifecycle.js";
+import { CUP_TEAM_PRICE_MAP } from "./services/cupTeams.js";
+import { CupSubmitter } from "./services/cupSubmitter.js";
+import { CupLifecycle } from "./services/cupLifecycle.js";
 import { CheckpointSubmitter } from "./services/checkpointSubmitter.js";
 import { FactoryKeeper } from "./services/factoryKeeper.js";
 import { ChainCache } from "./services/chainCache.js";
@@ -63,6 +66,15 @@ async function main(): Promise<void> {
     coingeckoId: t.coingeckoId,
   }));
 
+  const cupConfigured = config.cup.enabled && Boolean(config.cup.registry);
+  if (cupConfigured && (!config.cup.engine || !config.cup.ballot)) {
+    throw new Error("[config] CUP_ENGINE_ADDRESS and CUP_BALLOT_ADDRESS are required when the cup is enabled");
+  }
+  const cupTeamMaps: TeamPriceMap[] = cupConfigured ? CUP_TEAM_PRICE_MAP : [];
+  const allTeamMaps = [...teamMaps, ...cupTeamMaps];
+  const binanceSymbols = [...new Set(allTeamMaps.map((t) => t.binanceSymbol).filter(Boolean))];
+  const coingeckoIds = [...new Set(allTeamMaps.map((t) => t.coingeckoId).filter(Boolean))];
+
 
 
 
@@ -71,16 +83,21 @@ async function main(): Promise<void> {
 
   let lifecycle!: MatchLifecycle;
   const priceHeartbeat = new PriceHeartbeat(
-    teamMaps.map((t) => t.binanceSymbol),
+    binanceSymbols,
     config.binance.restBaseUrl,
     () => lifecycle.isHotWindow()
   );
   const coingecko = new CoingeckoPoller(
-    teamMaps.map((t) => t.coingeckoId),
+    coingeckoIds,
     config.coingecko.baseUrl,
     config.coingecko.apiKey
   );
   const priceFeed = new PriceFeed([priceHeartbeat], coingecko, teamMaps, {
+    maxDeviationBps: config.priceValidation.maxDeviationBps,
+    binanceStaleAfterMs: config.priceValidation.binanceStaleAfterMs,
+    coingeckoStaleAfterMs: config.priceValidation.coingeckoStaleAfterMs,
+  });
+  const cupPriceFeed = new PriceFeed([priceHeartbeat], coingecko, cupTeamMaps, {
     maxDeviationBps: config.priceValidation.maxDeviationBps,
     binanceStaleAfterMs: config.priceValidation.binanceStaleAfterMs,
     coingeckoStaleAfterMs: config.priceValidation.coingeckoStaleAfterMs,
@@ -96,6 +113,7 @@ async function main(): Promise<void> {
 
   const submitter = new SnapshotSubmitter();
   lifecycle = new MatchLifecycle(priceFeed, submitter);
+  const cupLifecycle = cupConfigured ? new CupLifecycle(cupPriceFeed, new CupSubmitter()) : null;
   const checkpointSubmitter = new CheckpointSubmitter(priceFeed);
   const db = createSocialDb();
   const factoryKeeper = new FactoryKeeper(db);
@@ -219,6 +237,13 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error("[backend] lifecycle failed to start", { error: String(err) });
     }
+    if (cupLifecycle) {
+      try {
+        await cupLifecycle.start();
+      } catch (err) {
+        logger.error("[backend] cup lifecycle failed to start", { error: String(err) });
+      }
+    }
     try {
       checkpointSubmitter.start();
     } catch (err) {
@@ -241,6 +266,7 @@ async function main(): Promise<void> {
     logger.info("[backend] shutting down", { signal });
     liveWs.stop();
     lifecycle.stop();
+    cupLifecycle?.stop();
     checkpointSubmitter.stop();
     factoryKeeper.stop();
     socialIndexer.stop();

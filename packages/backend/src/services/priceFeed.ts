@@ -3,9 +3,7 @@
  * goes through before it touches the chain (spec P2.3).
  *
  * Source priority:
- *   1. Binance (primary) — WebSocket ticks AND REST polls are treated as ONE
- *      logical source; the freshest tick across both wins. The REST poller
- *      only runs while the WS is down, so normally there's a single feed.
+ *   1. Binance (primary) — the freshest tick from the configured sources wins.
  *   2. CoinGecko REST poll (fallback) — 5-minute cadence.
  *
  * Validation rules:
@@ -28,7 +26,7 @@ import type { CoingeckoPoller } from "./coingecko.js";
 import { priceToScaled, deviationBps, scaledToPrice } from "../lib/priceMath.js";
 import { logger } from "../lib/logger.js";
 
-/** Anything that can serve a latest Binance tick (WS feed, REST poller). */
+/** Anything that can serve a latest Binance tick. */
 export interface PrimaryPriceSource {
   getLatest(symbol: string): { price: string; receivedAtMs: number } | undefined;
 }
@@ -37,6 +35,8 @@ export interface TeamPriceMap {
   teamId: number;
   binanceSymbol: string; // e.g. "BTCUSDT"
   coingeckoId: string; // e.g. "bitcoin"
+  /** A team whose only verified price source is CoinGecko. */
+  coingeckoOnly?: boolean;
 }
 
 export type PriceSource = "binance" | "coingecko-fallback";
@@ -166,9 +166,11 @@ export class PriceFeed {
       };
     }
 
-    // Degraded: Binance down, CoinGecko carrying.
+    // CoinGecko carries the price when Binance is unavailable or unlisted.
     if (coingeckoPrice !== null) {
-      this.warnBinanceStaleThrottled(teamId, def.binanceSymbol, coingeckoPrice);
+      if (!def.coingeckoOnly) {
+        this.warnBinanceStaleThrottled(teamId, def.binanceSymbol, coingeckoPrice);
+      }
       return {
         teamId,
         scaled: priceToScaled(coingeckoPrice),
@@ -179,9 +181,7 @@ export class PriceFeed {
       };
     }
 
-    // Primary healthy, fallback stale/missing — trust Binance alone
-    // (e.g. during the first minutes after boot before CoinGecko's first
-    // poll, or during a CoinGecko outage).
+    // Use Binance when CoinGecko has no fresh price.
     if (binancePrice !== null) {
       logger.debug("[PriceFeed] CoinGecko stale/missing — using Binance alone", {
         teamId,
@@ -246,7 +246,10 @@ export class PriceFeed {
   private binanceHealth(): { fresh: number; total: number } {
     const now = Date.now();
     let fresh = 0;
+    let total = 0;
     for (const t of this.teams) {
+      if (!t.binanceSymbol) continue;
+      total++;
       for (const feed of this.primaries) {
         const tick = feed.getLatest(t.binanceSymbol);
         if (tick && now - tick.receivedAtMs <= this.binanceStaleAfterMs) {
@@ -255,7 +258,7 @@ export class PriceFeed {
         }
       }
     }
-    return { fresh, total: this.teams.length };
+    return { fresh, total };
   }
 
   /**
@@ -271,6 +274,7 @@ export class PriceFeed {
     const now = Date.now();
     const gaps: string[] = [];
     for (const t of this.teams) {
+      if (!t.binanceSymbol) continue;
       let fresh = false;
       for (const feed of this.primaries) {
         const tick = feed.getLatest(t.binanceSymbol);

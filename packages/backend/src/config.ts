@@ -158,6 +158,18 @@ export const config = {
     tickIntervalMs: 30_000,
   },
 
+  /** Optional cup tournament, using the same backend signer and price sources. */
+  cup: {
+    enabled: optional("CUP_ENABLED", "true") === "true",
+    registry: optional("CUP_REGISTRY_ADDRESS", "") as `0x${string}`,
+    engine: optional("CUP_ENGINE_ADDRESS", "") as `0x${string}`,
+    pool: optional("CUP_POOL_ADDRESS", "") as `0x${string}`,
+    ballot: optional("CUP_BALLOT_ADDRESS", "") as `0x${string}`,
+    tickIntervalMs: 30_000,
+    r64StartDate: optional("CUP_R64_START_DATE", "2026-11-01"),
+    laterRoundLeadHours: optionalInt("CUP_LATER_ROUND_LEAD_HOURS", 6),
+  },
+
   /**
    * v0.2 — hourly oracle checkpoint submitter. Submits PriceOracle
    * checkpoints (one price per team per hour) that power MarketFactory
@@ -189,7 +201,7 @@ export const config = {
   priceValidation: {
     /** Max allowed |binance − coingecko| / coingecko deviation, in basis points (200 = 2%). */
     maxDeviationBps: optionalInt("PRICE_DEVIATION_MAX_BPS", 200),
-    /** A Binance price older than this is treated as stale (miniTicker ticks every 1s). */
+    /** A Binance price older than this is treated as stale. */
     binanceStaleAfterMs: 65_000,
     /** A CoinGecko price older than this is treated as stale. */
     coingeckoStaleAfterMs: 10 * 60 * 1000,
