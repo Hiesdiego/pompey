@@ -23,6 +23,7 @@ import { cn } from "../lib/cn";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { useContractWrite } from "../hooks/useContractWrite";
 import { StakeDialog } from "./StakeDialog";
+import { CONFIRM_THRESHOLD_WEI, LargeStakeConfirm } from "./LargeStakeConfirm";
 
 const OUTCOME_ACTIVE = [
   "border-[#2E7CF6] bg-[#2E7CF6]/12 text-[#1D4ED8] shadow-[0_0_18px_rgba(46,124,246,.25)] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]",
@@ -58,6 +59,7 @@ export function StakePanel({
   const [amountStr, setAmountStr] = useState("10");
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [feeBps, setFeeBps] = useState<number | null>(null);
   const { write, writeBatch } = useContractWrite();
@@ -147,6 +149,10 @@ export function StakePanel({
       setError("Insufficient TICK balance — use the faucet in the header.");
       return;
     }
+    if (amount >= CONFIRM_THRESHOLD_WEI && !confirming) {
+      setConfirming(true);
+      return;
+    }
     setStep("staking");
     try {
 
@@ -202,10 +208,12 @@ export function StakePanel({
         });
       }
       setStep("done");
+      setConfirming(false);
       onStaked();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStep("idle");
+      setConfirming(false);
       toast.error("Stake failed", err instanceof Error ? err.message : String(err));
     }
   };
@@ -233,6 +241,18 @@ export function StakePanel({
           Sign in
         </button>
       </div>
+    );
+  }
+
+  if (confirming) {
+    return (
+      <LargeStakeConfirm
+        amount={formatTick(amount ?? 0n)}
+        outcome={OUTCOME_LABELS[outcome]}
+        busy={busy}
+        onBack={() => setConfirming(false)}
+        onConfirm={handleStake}
+      />
     );
   }
 

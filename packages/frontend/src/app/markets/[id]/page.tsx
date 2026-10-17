@@ -40,6 +40,7 @@ import {
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { ShareButtons } from "../../../components/ShareButtons";
 import { StakeDialog } from "../../../components/StakeDialog";
+import { CONFIRM_THRESHOLD_TICK, LargeStakeConfirm } from "../../../components/LargeStakeConfirm";
 import { getPublicClient } from "../../../hooks/usePublicClient";
 import { useTickr } from "../../../hooks/useTickr";
 import { useTeams } from "../../../hooks/useTeams";
@@ -1123,6 +1124,7 @@ function StakeModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   if (outcome === null) return null;
 
   const amountNum = Number(amount) || 0;
@@ -1143,6 +1145,17 @@ function StakeModal({
         >
           <X className="h-5 w-5" />
         </button>
+
+        {confirming ? (
+          <LargeStakeConfirm
+            amount={amountNum.toLocaleString()}
+            outcome={label}
+            busy={busy}
+            onBack={() => setConfirming(false)}
+            onConfirm={() => { if (valid && bettingOpen && address && !busy) onConfirm(); }}
+          />
+        ) : (
+          <>
 
         <div className="pr-8">
           <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">You're predicting</div>
@@ -1229,7 +1242,10 @@ function StakeModal({
             </div>
 
               <button
-              onClick={onConfirm}
+              onClick={() => {
+                if (amountNum >= CONFIRM_THRESHOLD_TICK) setConfirming(true);
+                else onConfirm();
+              }}
               disabled={busy || !valid || amountNum <= 0}
               className="gradient-cta mt-3 w-full rounded-xl py-3 font-display text-base font-extrabold text-white shadow-[0_0_20px_rgba(46,124,246,0.35)] transition-all hover:shadow-[0_0_30px_rgba(46,124,246,0.5)] active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
             >
@@ -1240,6 +1256,8 @@ function StakeModal({
                 Minimum stake is {FACTORY_MIN_STAKE_TICK} TICK.
               </p>
             )}
+          </>
+        )}
           </>
         )}
     </StakeDialog>
