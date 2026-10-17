@@ -15,3 +15,4 @@ ignition/deployments/
 typechain-types/
 *supabase
 /plan/
+supabase/
