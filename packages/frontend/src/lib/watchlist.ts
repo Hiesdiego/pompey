@@ -34,24 +34,32 @@ function read<T>(key: string): T[] {
 export function readWatchlist(wallet: string): WatchEntry[] {
   const entries = read<WatchEntry>(keyFor(wallet));
   const now = Date.now();
-  const active = entries.filter((entry) => !entry.expiresAt || entry.expiresAt > now)
-    .map((entry) => entry.expiresAt ? entry : { ...entry, expiresAt: now + WATCH_LIFETIME_MS });
-  if (typeof window !== "undefined" && (active.length !== entries.length || entries.some((entry) => !entry.expiresAt))) {
-    localStorage.setItem(keyFor(wallet), JSON.stringify(active));
+  const active = entries.filter((entry): entry is WatchEntry =>
+    !!entry && typeof entry === "object" && typeof entry.marketId === "string" &&
+    /^\d+$/.test(entry.marketId) && (!entry.expiresAt || (Number.isFinite(entry.expiresAt) && entry.expiresAt > now)))
+    .map((entry) => ({
+      marketId: entry.marketId,
+      expiresAt: entry.expiresAt || now + WATCH_LIFETIME_MS,
+      nearTarget: entry.nearTarget === true,
+      closing: entry.closing === true,
+      settled: entry.settled === true,
+    }));
+  if (typeof window !== "undefined" && (active.length !== entries.length || entries.some((entry) => !entry?.expiresAt))) {
+    try { localStorage.setItem(keyFor(wallet), JSON.stringify(active)); } catch { /* Storage may be unavailable. */ }
   }
   return active;
 }
 export function readWatchNotices(wallet: string): WatchNotice[] { return read<WatchNotice>(noticeKeyFor(wallet)); }
 
 export function saveWatchlist(wallet: string, entries: WatchEntry[]) {
-  localStorage.setItem(keyFor(wallet), JSON.stringify(entries));
+  try { localStorage.setItem(keyFor(wallet), JSON.stringify(entries)); } catch { return; }
   window.dispatchEvent(new Event(eventName));
 }
 
 export function saveWatchNotice(wallet: string, notice: WatchNotice) {
   const existing = readWatchNotices(wallet);
   if (existing.some((n) => n.key === notice.key)) return false;
-  localStorage.setItem(noticeKeyFor(wallet), JSON.stringify([notice, ...existing].slice(0, 50)));
+  try { localStorage.setItem(noticeKeyFor(wallet), JSON.stringify([notice, ...existing].slice(0, 50))); } catch { return false; }
   window.dispatchEvent(new Event(eventName));
   return true;
 }

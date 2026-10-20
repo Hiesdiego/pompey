@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Loader2, Wallet } from "lucide-react";
 import type { Address } from "viem";
@@ -109,19 +109,22 @@ export default function ClaimsPage() {
   const [done, setDone] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [playerStats, setPlayerStats] = useState<{ totalStakedTick: string; totalWonTick: string } | null>(null);
+  const scanInFlight = useRef(false);
+  const claimingRef = useRef(false);
 
-  const runScan = useCallback(async () => {
-    if (!playerAddress) return;
-    setScanning(true);
+  const runScan = useCallback(async (showLoading = false) => {
+    if (!playerAddress || scanInFlight.current || claimingRef.current) return;
+    scanInFlight.current = true;
+    if (showLoading) setScanning(true);
     setError(null);
-    setDone(false);
+    if (showLoading) setDone(false);
     try {
       const [matches, markets, stats] = await Promise.all([
         scanClaimable(playerAddress),
         scanMarketClaims(playerAddress),
         api.player(playerAddress).catch(() => null),
       ]);
-      setItems([...matches, ...markets]);
+      if (!claimingRef.current) setItems([...matches, ...markets]);
       setPlayerStats(stats ? {
         totalStakedTick: stats.totalStakedTick,
         totalWonTick: stats.totalWonTick,
@@ -130,17 +133,18 @@ export default function ClaimsPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setScanning(false);
+      scanInFlight.current = false;
     }
   }, [playerAddress]);
 
   useEffect(() => {
-    if (authenticated && playerAddress) runScan();
+    if (authenticated && playerAddress) void runScan(true);
   }, [authenticated, playerAddress, runScan]);
 
   useEffect(() => {
     if (!authenticated || !playerAddress) return;
-    const timer = window.setInterval(runScan, 15_000);
-    const onFocus = () => runScan();
+    const timer = window.setInterval(() => void runScan(), 60_000);
+    const onFocus = () => void runScan();
     window.addEventListener("focus", onFocus);
     return () => {
       window.clearInterval(timer);
@@ -150,7 +154,9 @@ export default function ClaimsPage() {
 
   const claimAll = async () => {
     if (!items || items.length === 0) return;
+    let completed = false;
     setClaiming(true);
+    claimingRef.current = true;
     setClaimError(null);
     setProgress({ done: 0, total: items.length });
     try {
@@ -179,14 +185,17 @@ export default function ClaimsPage() {
         setProgress({ done: i + 1, total: items.length });
       }
       setDone(true);
+      completed = true;
       setItems([]);
       refreshBalance();
     } catch (e) {
       setClaimError(e instanceof Error ? e.message : String(e));
 
-      runScan();
+      // Recheck after claiming finishes so the list never flashes mid-transaction.
     } finally {
       setClaiming(false);
+      claimingRef.current = false;
+      if (!completed) void runScan();
     }
   };
 
@@ -214,7 +223,7 @@ export default function ClaimsPage() {
         title="Your claims"
         action={
           <button
-            onClick={runScan}
+            onClick={() => void runScan(true)}
             disabled={scanning}
             className="text-sm font-semibold text-[#1D4ED8] transition-colors hover:text-[#2E7CF6] disabled:opacity-50 dark:text-[#7db3ff] dark:hover:text-[#4B93FF]"
           >
