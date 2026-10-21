@@ -27,6 +27,7 @@ const NAV = [
   { href: "/", label: "Home" },
   { href: "/fixtures", label: "Fixtures" },
   { href: "/markets", label: "Markets" },
+  { href: "/cup", label: "World Cup" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/claims", label: "Claims" },
 ];
@@ -275,9 +276,13 @@ export function Header() {
                 href={n.href}
                 className={cn(
                   "rounded-xl px-3 py-1.5 text-sm font-medium transition-all",
-                  pathname === n.href
-                    ? "bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
-                    : "text-zinc-500 hover:bg-black/5 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-100"
+                  n.href === "/cup"
+                    ? pathname === n.href
+                      ? "bg-amber-400/20 text-amber-700 dark:text-amber-300"
+                      : "text-amber-600 hover:bg-amber-400/10 dark:text-amber-300"
+                    : pathname === n.href
+                      ? "bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
+                      : "text-zinc-500 hover:bg-black/5 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-100"
                 )}
               >
                 {n.label}
@@ -326,9 +331,13 @@ export function Header() {
             href={n.href}
             className={cn(
               "shrink-0 whitespace-nowrap rounded-lg px-3 py-1 text-sm font-medium transition-colors",
-              pathname === n.href
-                ? "bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
-                : "text-zinc-500 dark:text-zinc-400"
+              n.href === "/cup"
+                ? pathname === n.href
+                  ? "bg-amber-400/20 text-amber-700 dark:text-amber-300"
+                  : "text-amber-600 dark:text-amber-300"
+                : pathname === n.href
+                  ? "bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
+                  : "text-zinc-500 dark:text-zinc-400"
               )}
             >
               {n.label}

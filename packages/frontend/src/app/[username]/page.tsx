@@ -15,6 +15,7 @@ import { api, type ApiFixture } from "../../lib/api";
 import { marketQuestion, pickLabel, type TeamRef } from "../../lib/marketQuestion";
 import { TEMPLATE_NAMES } from "../../lib/marketFactory";
 import { TeamBadge } from "../../components/TeamBadge";
+import { CupFavoriteBadge } from "../../components/CupFavoriteBadge";
 import { ProfileInsights } from "../../components/ProfileInsights";
 import { formatTick, OUTCOME_SHORT, truncateAddress } from "../../lib/format";
 import { integerBigInt } from "../../lib/integerString";
@@ -243,7 +244,7 @@ export default function ProfilePage() {
       <div className="relative px-4 pb-5 sm:px-5"><div className="flex items-start justify-between"><div className="-mt-12 grid h-24 w-24 shrink-0 place-items-center rounded-full border-4 border-white bg-[#173e80] font-display text-4xl font-black uppercase text-white shadow-sm dark:border-[#101821] sm:-mt-16 sm:h-32 sm:w-32 sm:text-5xl">{profile.username[0]}</div></div>
         <h2 className="mt-3 font-display text-xl font-black leading-tight [overflow-wrap:anywhere] sm:text-2xl">{profile.username}</h2><p className="text-sm text-zinc-500 [overflow-wrap:anywhere]">@{profile.username}</p>
         <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{profile.bio || (owner ? "Add a bio to tell other players about yourself." : "No bio yet.")}</p>
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-500"><span className="font-mono text-xs">{truncateAddress(profile.walletAddress)}</span>{displayTeam && <span className="inline-flex items-center gap-1.5"><TeamBadge teamId={displayTeam.teamId} size={18} showName={false} />{displayTeam.name}</span>}<span>{SEASON_DISPLAY_NAME}</span></div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-500"><span className="font-mono text-xs">{truncateAddress(profile.walletAddress)}</span>{displayTeam && <span className="inline-flex items-center gap-1.5"><TeamBadge teamId={displayTeam.teamId} size={18} showName={false} />{displayTeam.name}</span>}{profile.cupFavouriteTeamId != null && <CupFavoriteBadge teamId={profile.cupFavouriteTeamId} />}<span>{SEASON_DISPLAY_NAME}</span></div>
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">{stats.map((stat) => <span key={stat.label} title={stat.help}><strong className="font-black tabular-nums">{stat.value.toLocaleString()}</strong> <span className="text-zinc-500">{stat.label.toLowerCase()}</span></span>)}</div>
         {owner && <div className="mt-5 min-w-0 rounded-2xl bg-blue-500/[.07] p-4 text-sm dark:bg-blue-500/[.12]"><p className="text-xs font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">Your private predictor rank</p><p className="mt-1 font-display text-2xl font-black [overflow-wrap:anywhere]">{rankError ? "Unavailable" : rank ? rank.rank ? `Ranked no.${rank.rank}` : "Unranked" : "Checking…"}</p><p className="mt-1 text-xs text-zinc-500 [overflow-wrap:anywhere]">{rankError ? "Your rank could not be loaded. Try refreshing this page." : rank ? `${rank.points} points · ${rank.correct} correct of ${rank.settled} settled markets` : "One market counts once; a correct pick earns 3 points."}</p></div>}
       </div>

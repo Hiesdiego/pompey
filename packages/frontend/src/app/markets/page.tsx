@@ -38,6 +38,8 @@ import { ShareButtons } from "../../components/ShareButtons";
 import { formatTick } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { TeamBadge } from "../../components/TeamBadge";
+import { CupOutrightMarketCard } from "../../components/CupOutrightMarketCard";
+import { cupConfigured } from "../../lib/cup";
 import { SpreadFixtureBadges } from "../../components/SpreadFixtureBadges";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../../components/QuickStake";
 import { api, type ApiFixture, type ApiFixtureTeam } from "../../lib/api";
@@ -459,6 +461,7 @@ export default function MarketsPage() {
   if (!MARKET_FACTORY_ADDRESS) {
     return (
       <div className="py-10">
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div>
         <EmptyState
           title="Markets not deployed yet"
           message="The MarketFactory contract hasn't been deployed on this network. Community markets go live with the v0.2 redeploy."
@@ -470,6 +473,7 @@ export default function MarketsPage() {
   if (error) {
     return (
       <div className="py-10">
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div>
         <ErrorState message={error} onRetry={() => window.location.reload()} />
       </div>
     );
@@ -523,11 +527,13 @@ export default function MarketsPage() {
       {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">These markets have passed their end time and have stakes. Anyone can resolve one to earn the resolver fee once its outcome data is available.</p>}
       {tab === "winnings" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolved markets with your unclaimed winnings.</p>}
 
+      {cupConfigured && (tab === "all" || tab === "featured") && <section className="mb-10"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold"><Trophy className="h-5 w-5 text-amber-500" /> World Cup outright</h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div></section>}
+
       {!markets || (tab === "winnings" && winningsLoading) ? (
         <SkeletonCards cards={6} />
       ) : tab === "winnings" && claimQuery.isError ? (
         <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />
-      ) : visible.length === 0 ? (
+      ) : visible.length === 0 && tab === "featured" && cupConfigured ? null : visible.length === 0 ? (
         <EmptyState
           title={tab === "winnings" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "bounty" ? "No resolver bounties right now" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
           message={tab === "winnings" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : tab === "bounty" ? "Markets with stakes will appear here after their end time until they resolve." : "New markets will appear here when they are created."}

@@ -29,6 +29,7 @@ export interface SocialProfile {
   walletAddress: string;
   username: string;
   favouriteTeamId: number;
+  cupFavouriteTeamId: number | null;
   bio: string;
   stats: SocialProfileStats;
   seasonId: number;
@@ -165,6 +166,8 @@ export interface ClaimProfileInput {
 }
 
 export const social = {
+  pickCupFavorite: (walletAddress: string, teamId: number, getToken: TokenGetter) =>
+    request<{ cupFavouriteTeamId: number }>("/api/social/cup-favorite", { method: "PUT", body: JSON.stringify({ walletAddress, teamId }) }, getToken),
   /** Public profile by username (case-insensitive). Throws 404-coded error when unknown. */
   profile: (username: string) =>
     get<SocialProfile>(`/api/social/profiles/${encodeURIComponent(username)}`),

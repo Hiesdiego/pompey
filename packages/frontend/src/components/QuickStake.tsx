@@ -16,7 +16,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, X, Zap } from "lucide-react";
+import { Loader2, ShieldCheck, X, Zap } from "lucide-react";
 import type { Address } from "viem";
 import { marketOdds, formatMarketOdds } from "../lib/marketOdds";
 import { PLATFORM_FEE_BPS } from "@tickr/shared/constants";

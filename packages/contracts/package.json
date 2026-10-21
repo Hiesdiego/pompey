@@ -20,6 +20,8 @@
     "deploy:season2:testnet": "hardhat run scripts/deploy-season2.ts --network baseSepolia",
     "deploy:cup:testnet": "hardhat run scripts/deploy-cup.ts --network baseSepolia",
     "draw:cup:testnet": "hardhat run scripts/cup-draw.ts --network baseSepolia",
+    "seed:cup:testnet": "hardhat run scripts/cup-seed.ts --network baseSepolia",
+
 
     "node": "hardhat node",
     "clean": "hardhat clean"

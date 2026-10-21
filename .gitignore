@@ -16,3 +16,9 @@ typechain-types/
 *supabase
 /plan/
 supabase/
+/new/
+*scripts
+/scripts/
+scripts/
+frontend/db
+*migrations

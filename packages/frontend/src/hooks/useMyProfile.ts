@@ -14,6 +14,7 @@ import { useTickr } from "./useTickr";
 import { social, type MyProfile } from "../lib/social";
 
 let cache: MyProfile | null | undefined; // undefined = not loaded yet
+let cacheAddress: string | null = null;
 
 export function useMyProfile() {
   const { authenticated, playerAddress } = useTickr();
@@ -25,6 +26,7 @@ export function useMyProfile() {
   const refetch = useCallback(async () => {
     if (!authenticated || !playerAddress) {
       cache = undefined;
+      cacheAddress = null;
       setProfile(null);
       setLoading(false);
       return;
@@ -34,6 +36,7 @@ export function useMyProfile() {
     try {
       const p = await social.me(playerAddress, getAccessToken);
       cache = p;
+      cacheAddress = playerAddress.toLowerCase();
       setProfile(p);
     } catch (e) {
       setProfile(null);
@@ -46,12 +49,13 @@ export function useMyProfile() {
   useEffect(() => {
     if (!authenticated || !playerAddress) {
       cache = undefined;
+      cacheAddress = null;
       setProfile(null);
       setLoading(false);
       setError(null);
       return;
     }
-    if (cache !== undefined) {
+    if (cache !== undefined && cacheAddress === playerAddress.toLowerCase()) {
       setProfile(cache);
       setLoading(false);
       return;
