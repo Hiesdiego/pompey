@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 const swBuildId = randomBytes(8).toString("hex");
 
-const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-3aca.onrender.com").replace(/\/$/, "");
+const backendApiUrl = (process.env.BACKEND_API_URL || "https://tickr-backend-ke9k.onrender.com").replace(/\/$/, "");
 
 const nextConfig = {
   reactStrictMode: true,

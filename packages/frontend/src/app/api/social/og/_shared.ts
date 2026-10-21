@@ -42,7 +42,7 @@ export function isNumericId(id: string): boolean {
 
 
 export function backendUrl(): string {
-  return (process.env.BACKEND_API_URL || "https://tickr-backend-3aca.onrender.com").replace(/\/$/, "");
+  return (process.env.BACKEND_API_URL || "https://tickr-backend-ke9k.onrender.com").replace(/\/$/, "");
 }
 
 
