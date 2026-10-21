@@ -17,6 +17,7 @@
 import { getPublicClient } from "../hooks/usePublicClient";
 import { parseAbiItem } from "viem";
 import { BACKEND_API_URL } from "./contracts";
+import { integerString } from "./integerString";
 import {
   MARKET_FACTORY_ABI,
   MARKET_FACTORY_ADDRESS,
@@ -86,6 +87,24 @@ export class ChainProxyError extends Error {
   }
 }
 
+function integerField(value: unknown): string {
+  const normalized = typeof value === "string" || typeof value === "number"
+    ? integerString(value) : null;
+  if (normalized === null) throw new ChainProxyError("PROXY_BAD_RESPONSE", "Invalid chain integer");
+  return normalized;
+}
+
+function normalizeMarketSummary(market: MarketSummary): MarketSummary {
+  return {
+    ...market,
+    winnerBitmap: integerField(market.winnerBitmap),
+    payoutPerShare: integerField(market.payoutPerShare),
+    seedAmount: integerField(market.seedAmount),
+    totalStaked: integerField(market.totalStaked),
+    outcomeTotals: market.outcomeTotals.map(integerField),
+  };
+}
+
 /**
  * GET against the backend chain-cache proxy. Throws ChainProxyError when the
  * backend is unreachable or reports { ok:false } — callers fall back to the
@@ -116,7 +135,16 @@ export async function proxyGet<T>(path: string): Promise<T> {
       body.message ?? res.statusText
     );
   }
-  return body.data as T;
+  const data = body.data as T;
+  if (path === "/api/chain/markets") {
+    const markets = data as { markets: MarketSummary[] };
+    return { ...markets, markets: markets.markets.map(normalizeMarketSummary) } as T;
+  }
+  if (/^\/api\/chain\/markets\/\d+$/.test(path)) {
+    const result = data as { market: MarketSummary };
+    return { ...result, market: normalizeMarketSummary(result.market) } as T;
+  }
+  return data;
 }
 
 type MulticallResult =

@@ -11,6 +11,15 @@ let singleton: PublicClient | null = null;
 export function getPublicClient(): PublicClient {
   if (singleton) return singleton;
   const env = getChainEnv();
+  // Browser reads go through our origin; public RPCs do not consistently
+  // permit cross-origin requests from the deployed site.
+  if (typeof window !== "undefined") {
+    singleton = createPublicClient({
+      chain: ACTIVE_CHAIN as unknown as Chain,
+      transport: http("/api/rpc", { timeout: 20_000, retryCount: 1 }),
+    }) as PublicClient;
+    return singleton;
+  }
   const rpcUrl =
     env === "mainnet"
       ? process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org"
@@ -19,7 +28,6 @@ export function getPublicClient(): PublicClient {
     ? ["https://base-rpc.publicnode.com"]
     : [
         "https://base-sepolia.rpc.sentio.xyz",
-        "https://base-sepolia.drpc.org",
         "https://base-sepolia-rpc.publicnode.com",
         "https://base-testnet.api.pocket.network",
         "https://lb.routeme.sh/rpc/evm/84532",

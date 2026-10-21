@@ -36,6 +36,7 @@ import {
   type OddsPoint,
 } from "../chainDirect";
 import { toAppError } from "../errors";
+import { integerBigInt } from "../integerString";
 
 interface BackendOddsPoint {
   block: number;
@@ -44,19 +45,17 @@ interface BackendOddsPoint {
 }
 
 function pctsFromTotals(totals: string[]): number[] {
-  const vals = totals.map((t) => BigInt(t));
+  const vals = totals.map(integerBigInt);
   const sum = vals.reduce((s, v) => s + v, 0n);
   if (sum === 0n) return vals.map(() => 0);
   return vals.map((v) => Number((v * 10_000n) / sum) / 100);
 }
 
 function fromBackendPoints(points: BackendOddsPoint[]): OddsPoint[] {
-  return points.map((p) => ({
-    block: p.block,
-    ts: p.ts,
-    totals: p.totals,
-    pcts: pctsFromTotals(p.totals),
-  }));
+  return points.map((p) => {
+    const totals = p.totals.map((total) => integerBigInt(total).toString());
+    return { block: p.block, ts: p.ts, totals, pcts: pctsFromTotals(totals) };
+  });
 }
 
 function oddsHistoryQueryOptions(
