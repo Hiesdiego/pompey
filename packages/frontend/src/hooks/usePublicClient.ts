@@ -11,12 +11,19 @@ let singleton: PublicClient | null = null;
 export function getPublicClient(): PublicClient {
   if (singleton) return singleton;
   const env = getChainEnv();
-  // Browser reads go through our origin; public RPCs do not consistently
-  // permit cross-origin requests from the deployed site.
+  // Only browser-compatible public endpoints belong here. Avoid ranking:
+  // ranking probes every fallback and surfaces CORS failures even when the
+  // first endpoint succeeds.
   if (typeof window !== "undefined") {
     singleton = createPublicClient({
       chain: ACTIVE_CHAIN as unknown as Chain,
-      transport: http("/api/rpc", { timeout: 20_000, retryCount: 1 }),
+      transport: fallback((env === "mainnet"
+        ? ["https://base-rpc.publicnode.com"]
+        : [
+            "https://base-sepolia-rpc.publicnode.com",
+            "https://base-sepolia.rpc.sentio.xyz",
+            "https://base-testnet.api.pocket.network",
+          ]).map((url) => http(url, { timeout: 12_000, retryCount: 0 }))),
     }) as PublicClient;
     return singleton;
   }
