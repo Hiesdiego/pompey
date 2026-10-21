@@ -10,7 +10,9 @@ import { useTeams } from "../hooks/useTeams";
 import { useTickr } from "../hooks/useTickr";
 import { TeamBadge } from "../components/TeamBadge";
 import { CupOutrightMarketCard } from "../components/CupOutrightMarketCard";
-import { cupConfigured } from "../lib/cup";
+import { cupConfigured, cupOutrightOpen } from "../lib/cup";
+import { useCupBracket } from "../hooks/useCupBracket";
+import { useCupOutrightTotals } from "../hooks/useCupPool";
 import { SpreadFixtureBadges } from "../components/SpreadFixtureBadges";
 import { LeagueTable, LeagueTableSkeleton } from "../components/LeagueTable";
 import { FixtureCard, fixtureStatus } from "../components/FixtureCard";
@@ -34,7 +36,6 @@ import { useFactoryEvents } from "../lib/query/useFactoryEvents";
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
 const pool = (m: MarketSummary) => BigInt(m.totalStaked || "0") + BigInt(m.seedAmount || "0");
-const duration = (m: MarketSummary) => Math.max(0, m.bettingCloseTime * 1000 - Date.now());
 
 function PriceTicker({ prices }: { prices: Record<string, number> }) {
   const items = useMemo(() => TICKR_TEAMS
@@ -272,6 +273,8 @@ function LiveFixtureCard({ fixture, prices }: { fixture: ApiFixture; prices: Rec
 export default function HomePage() {
   useFactoryEvents();
   const { markets, isLoading } = useMarkets();
+  const { matches: cupMatches, status: cupStatus } = useCupBracket(cupConfigured);
+  const { totals: cupTotals } = useCupOutrightTotals(cupConfigured);
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
@@ -288,10 +291,16 @@ export default function HomePage() {
     return () => { live = false; window.clearInterval(fixtureTimer); window.clearInterval(dataTimer); };
   }, [table?.length]);
   const sorted = useMemo(() => [...(markets ?? [])].filter(open).sort((a, b) => Number(pool(b) - pool(a))), [markets]);
+  const cupOpen = cupConfigured && cupOutrightOpen(cupMatches, cupStatus?.tournamentComplete ?? false);
+  const cupPool = Object.values(cupTotals ?? {}).reduce((sum, amount) => sum + amount, 0n);
+  const finalKickoff = cupMatches?.[62]?.kickoffMs ?? 0;
+  const trendingMarkets = [...sorted.map((market) => ({ market, amount: pool(market) })), ...(cupOpen ? [{ market: null, amount: cupPool }] : [])]
+    .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0).slice(0, 6);
   const featured = useMemo(() => (markets ?? []).filter((m) => (m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION) && m.state === 0), [markets]);
   const liveMatches = fixtures.filter((f) => fixtureStatus(f) === "live");
   const upcoming = fixtures.filter((f) => { const s = fixtureStatus(f); return s === "upcoming" || s === "scheduled"; }).sort((a, b) => Date.parse(a.kickoff ?? a.scheduledKickoff ?? "") - Date.parse(b.kickoff ?? b.scheduledKickoff ?? "")).slice(0, 6);
-  const closing = useMemo(() => [...sorted].sort((a, b) => duration(a) - duration(b)).slice(0, 12), [sorted]);
+  const closing = [...sorted.map((market) => ({ market, closesAt: market.bettingCloseTime * 1000 })), ...(cupOpen && finalKickoff > 0 ? [{ market: null, closesAt: finalKickoff }] : [])]
+    .sort((a, b) => a.closesAt - b.closesAt).slice(0, 12);
   const names = teams.map((t) => ({ symbol: t.symbol }));
 
   return <div className="space-y-10 pb-14">
@@ -313,8 +322,8 @@ export default function HomePage() {
 
     {upcoming.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming matches" subtitle="The next fixtures on the schedule" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcoming.map((f) => <FixtureCard key={f.fixtureId} fixture={f} />)}</div></section>}
 
-    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : sorted.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sorted.slice(0, 6).map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
+    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 
-    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map((m) => <MarketCard key={m.id} market={m} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div></section>}
+    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => market ? <MarketCard key={market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div></section>}
   </div>;
 }

@@ -501,8 +501,8 @@ export default function MarketsPage() {
 
       <div role="tablist" aria-label="Market filters" className="mb-6 flex flex-wrap gap-2">
         {([
-          ["all", "All markets", unresolved.length],
-          ["featured", "Featured", featured.length],
+          ["all", "All markets", unresolved.length + (cupConfigured ? 1 : 0)],
+          ["featured", "Featured", featured.length + (cupConfigured ? 1 : 0)],
           ["bounty", "Bounty", bounty.length],
           ["winnings", "Winnings", winningsLoading ? "…" : winnings.length],
         ] as const).map(([key, label, count]) => (
@@ -527,13 +527,11 @@ export default function MarketsPage() {
       {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">These markets have passed their end time and have stakes. Anyone can resolve one to earn the resolver fee once its outcome data is available.</p>}
       {tab === "winnings" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolved markets with your unclaimed winnings.</p>}
 
-      {cupConfigured && (tab === "all" || tab === "featured") && <section className="mb-10"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold"><Trophy className="h-5 w-5 text-amber-500" /> World Cup outright</h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div></section>}
-
       {!markets || (tab === "winnings" && winningsLoading) ? (
         <SkeletonCards cards={6} />
       ) : tab === "winnings" && claimQuery.isError ? (
         <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />
-      ) : visible.length === 0 && tab === "featured" && cupConfigured ? null : visible.length === 0 ? (
+      ) : visible.length === 0 && !((tab === "all" || tab === "featured") && cupConfigured) ? (
         <EmptyState
           title={tab === "winnings" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "bounty" ? "No resolver bounties right now" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
           message={tab === "winnings" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : tab === "bounty" ? "Markets with stakes will appear here after their end time until they resolve." : "New markets will appear here when they are created."}
@@ -544,13 +542,14 @@ export default function MarketsPage() {
         </div>
       ) : (
         <div role="tabpanel">
-          {featured.length > 0 && (
+          {(featured.length > 0 || cupConfigured) && (
             <section className="mb-10">
               <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
                 <Trophy className="h-5 w-5 text-amber-500" />
                 Featured
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {cupConfigured && <CupOutrightMarketCard />}
                 {featured.map((m) => (
                   <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}
