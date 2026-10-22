@@ -2,11 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { getTeamById } from "@tickr/shared/teams";
+import { cupChartSymbol, cupTeamName } from "../lib/cup";
 
-export function TradingViewChart({ teamId, height = 220 }: { teamId: number; height?: number }) {
+export function TradingViewChart({ teamId, height = 220, cup = false }: { teamId: number; height?: number; cup?: boolean }) {
   const container = useRef<HTMLDivElement>(null);
   const team = getTeamById(teamId);
-  const symbol = team ? `BINANCE:${team.binanceSymbol}` : null;
+  const symbol = cup ? cupChartSymbol(teamId) : team ? `BINANCE:${team.binanceSymbol}` : null;
+  const name = cup ? cupTeamName(teamId) : team?.name;
 
   useEffect(() => {
     const root = container.current;
@@ -36,9 +38,9 @@ export function TradingViewChart({ teamId, height = 220 }: { teamId: number; hei
     return () => root.replaceChildren();
   }, [symbol]);
 
-  if (!team || !symbol) return null;
+  if (!name || !symbol) return null;
   return <div>
-    <div className="overflow-hidden rounded-xl" style={{ height }} aria-label={`${team.name} TradingView price chart`}>
+    <div className="overflow-hidden rounded-xl" style={{ height }} aria-label={`${name} TradingView price chart`}>
       <div ref={container} className="h-full w-full" />
     </div>
     <a className="mt-1 inline-block text-[11px] text-[#2E7CF6] hover:underline" href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer">Open chart in TradingView</a>

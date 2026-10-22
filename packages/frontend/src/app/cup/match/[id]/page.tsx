@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Trophy, X } from "lucide-react";
+import { Activity, ArrowLeft, Trophy, X } from "lucide-react";
 import { useCupBracket } from "../../../../hooks/useCupBracket";
 import { useTickr } from "../../../../hooks/useTickr";
 import { useTickBalance } from "../../../../hooks/useTickBalance";
 import { CupMatchStakePanel } from "../../../../components/CupStakePanel";
 import { CupTeamBadge } from "../../../../components/CupTeamBadge";
+import { TradingViewChart } from "../../../../components/TradingViewChart";
 import { Countdown } from "../../../../components/Countdown";
 import { StakeDialog } from "../../../../components/StakeDialog";
 import { cupMatchStatus } from "../../../../components/CupMatchCard";
@@ -23,6 +24,7 @@ export default function CupMatchPage() {
   const { balance, refresh } = useTickBalance(playerAddress);
   const [now, setNow] = useState(() => Date.now());
   const [stakeOpen, setStakeOpen] = useState(false);
+  const [chartsOpen, setChartsOpen] = useState(false);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   if (!Number.isInteger(matchId) || matchId < 0 || matchId > 62) return <EmptyState title="Match not found" message="Choose a World Cup match from the bracket." />;
   if (error) return <ErrorState message={error} onRetry={() => void reload()} />;
@@ -47,6 +49,13 @@ export default function CupMatchPage() {
       </div>
       <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10"><span>Real price performance</span><span>Crypto Price World Cup</span></div>
     </div>
+    {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <details className="glass group mb-6 rounded-2xl p-5" onToggle={(event) => setChartsOpen(event.currentTarget.open)}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span className="flex items-center gap-2"><Activity className="h-4 w-4 text-amber-600" /> Recent price movements</span><span className="text-xs font-semibold text-amber-700 group-open:hidden dark:text-amber-300">Show charts</span><span className="hidden text-xs font-semibold text-amber-700 group-open:inline dark:text-amber-300">Hide charts</span></summary>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <div><p className="mb-2 text-xs font-bold">{cupTeamName(match.teamA)}</p>{chartsOpen && <TradingViewChart teamId={match.teamA} cup />}</div>
+        <div><p className="mb-2 text-xs font-bold">{cupTeamName(match.teamB)}</p>{chartsOpen && <TradingViewChart teamId={match.teamB} cup />}</div>
+      </div>
+    </details>}
     {stakable && <button onClick={() => setStakeOpen(true)} className="mb-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-3.5 font-display text-base font-extrabold text-black shadow-[0_0_28px_rgba(251,191,36,.4)]">Stake on this match</button>}
     {status === "settled" && <div className="glass mb-6 rounded-2xl border-amber-400/25 p-5 text-center"><Trophy className="mx-auto mb-2 h-5 w-5 text-amber-500" /><p className="font-bold">{cupTeamName(match.winner)} wins</p><button onClick={() => setStakeOpen(true)} className="mt-3 text-sm font-semibold text-amber-700 dark:text-amber-300">View your stake and claim</button></div>}
     {status === "disputed" && <p className="glass rounded-2xl p-5 text-sm">This match is under DAO review. Settlement is paused until the ballot resolves.</p>}

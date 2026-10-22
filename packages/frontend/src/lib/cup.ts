@@ -157,6 +157,16 @@ export function cupTeamName(teamId: number): string {
   return CUP_TEAM_NAMES[teamId] ?? "TBA";
 }
 
+/** TradingView spot pairs. Exceptions follow the Cup oracle's actual asset mapping. */
+export function cupChartSymbol(teamId: number): string | null {
+  const symbol = CUP_TEAM_SYMBOLS[teamId];
+  if (!symbol) return null;
+  if (teamId === 38) return "WEEX:OREUSDT";
+  if (teamId === 49) return "COINBASE:TOSHIUSD";
+  const base = { TRON: "TRX", PENGUIN: "PENGU" }[symbol] ?? symbol;
+  return `BINANCE:${base}USDT`;
+}
+
 export function cupOutrightOpen(matches: { kickoffMs: number }[] | null, tournamentComplete: boolean): boolean {
   if (!matches || tournamentComplete) return false;
   const kickoff = matches[62]?.kickoffMs ?? 0;

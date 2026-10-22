@@ -10,9 +10,10 @@ import { useTeams } from "../hooks/useTeams";
 import { useTickr } from "../hooks/useTickr";
 import { TeamBadge } from "../components/TeamBadge";
 import { CupOutrightMarketCard } from "../components/CupOutrightMarketCard";
-import { cupConfigured, cupOutrightOpen } from "../lib/cup";
+import { CUP_TBD, cupConfigured, cupOutrightOpen, cupScheduledKickoff } from "../lib/cup";
 import { useCupBracket } from "../hooks/useCupBracket";
 import { useCupOutrightTotals } from "../hooks/useCupPool";
+import { CupMatchCard, cupMatchStatus } from "../components/CupMatchCard";
 import { SpreadFixtureBadges } from "../components/SpreadFixtureBadges";
 import { LeagueTable, LeagueTableSkeleton } from "../components/LeagueTable";
 import { FixtureCard, fixtureStatus } from "../components/FixtureCard";
@@ -273,11 +274,13 @@ function LiveFixtureCard({ fixture, prices }: { fixture: ApiFixture; prices: Rec
 export default function HomePage() {
   useFactoryEvents();
   const { markets, isLoading } = useMarkets();
-  const { matches: cupMatches, status: cupStatus } = useCupBracket(cupConfigured);
+  const { matches: cupMatches, status: cupStatus, error: cupError, reload: reloadCup } = useCupBracket(cupConfigured);
   const { totals: cupTotals } = useCupOutrightTotals(cupConfigured);
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
+  const [cupNow, setCupNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setCupNow(Date.now()), 15_000); return () => window.clearInterval(timer); }, []);
   const teams = teamData ?? [];
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
   const [table, setTable] = useState<ApiTableRow[] | null>(null);
@@ -294,6 +297,20 @@ export default function HomePage() {
   const cupOpen = cupConfigured && cupOutrightOpen(cupMatches, cupStatus?.tournamentComplete ?? false);
   const cupPool = Object.values(cupTotals ?? {}).reduce((sum, amount) => sum + amount, 0n);
   const finalKickoff = cupMatches?.[62]?.kickoffMs ?? 0;
+  const homeCupMatches = useMemo(() => {
+    if (!cupMatches) return [];
+    const eligible = cupStatus?.drawExecuted
+      ? cupMatches.filter((match) => match.teamA !== CUP_TBD && match.teamB !== CUP_TBD)
+      : cupMatches.slice(0, 32);
+    const priority = { live: 0, upcoming: 1, awaiting: 2, disputed: 3, settled: 4 };
+    return [...eligible].sort((a, b) => {
+      const byStatus = priority[cupMatchStatus(a, cupNow)] - priority[cupMatchStatus(b, cupNow)];
+      if (byStatus) return byStatus;
+      const aKickoff = a.kickoffMs || cupScheduledKickoff(a.matchId) || Number.MAX_SAFE_INTEGER;
+      const bKickoff = b.kickoffMs || cupScheduledKickoff(b.matchId) || Number.MAX_SAFE_INTEGER;
+      return cupMatchStatus(a, cupNow) === "settled" ? bKickoff - aKickoff : aKickoff - bKickoff;
+    }).slice(0, 6);
+  }, [cupMatches, cupStatus?.drawExecuted, cupNow]);
   const trendingMarkets = [...sorted.map((market) => ({ market, amount: pool(market) })), ...(cupOpen ? [{ market: null, amount: cupPool }] : [])]
     .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0).slice(0, 6);
   const featured = useMemo(() => (markets ?? []).filter((m) => (m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION) && m.state === 0), [markets]);
@@ -321,6 +338,8 @@ export default function HomePage() {
     {liveMatches.length > 0 && <section><SectionHeading icon={Flame} title="Matches in play" subtitle="Live crypto performance score · tap a match to stake" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{liveMatches.map((f) => <LiveFixtureCard key={f.fixtureId} fixture={f} prices={prices} />)}</div></section>}
 
     {upcoming.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming matches" subtitle="The next fixtures on the schedule" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcoming.map((f) => <FixtureCard key={f.fixtureId} fixture={f} />)}</div></section>}
+
+    {cupConfigured && <section className="rounded-3xl border border-amber-400/25 bg-gradient-to-br from-amber-500/[.12] via-yellow-500/[.04] to-transparent p-4 dark:border-amber-400/20 sm:p-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[.2em] text-amber-700 dark:text-amber-300"><Trophy className="h-4 w-4" /> Crypto Price World Cup</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white">World Cup matches</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Follow the knockout ties and pick a winner.</p></div><Link href="/cup" className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 hover:underline dark:text-amber-300">View all matches <ArrowRight className="h-4 w-4" /></Link></div>{homeCupMatches.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{homeCupMatches.map((match) => <CupMatchCard key={match.matchId} match={match} now={cupNow} />)}</div> : <div className="rounded-2xl border border-amber-400/15 bg-white/60 p-6 text-center text-sm text-zinc-500 dark:bg-white/[.03]">{cupError ? <>Could not load World Cup matches. <button onClick={() => void reloadCup()} className="font-bold text-amber-700 underline dark:text-amber-300">Retry</button></> : "Loading World Cup matches…"}</div>}</section>}
 
     <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 
