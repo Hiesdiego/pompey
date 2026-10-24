@@ -40,7 +40,7 @@ export default function CupOutrightPage() {
   const visible = query || showAll ? matching : matching.slice(0, 8);
   const featured = ranked[0];
   const featuredShare = totalStaked > 0n ? Number((totals?.[featured.teamId] ?? 0n) * 10_000n / totalStaked) / 100 : 0;
-  const onStaked = () => { void reload(); void reloadTotals(); void refresh(); };
+  const onStaked = () => { void reload(); void reloadTotals(); void refresh(); setSelectedTeamId(null); };
 
   if (!cupConfigured) return <div className="mx-auto max-w-5xl py-10"><h1 className="font-display text-2xl font-black">World Cup market unavailable</h1><p className="mt-2 text-sm text-zinc-500">The Cup contracts are not configured on this network.</p></div>;
 
@@ -91,7 +91,7 @@ export default function CupOutrightPage() {
       </aside>
     </div>
 
-    {selectedTeamId !== null && <StakeDialog title={`Stake on ${cupTeamName(selectedTeamId)}`} size="lg" onClose={() => setSelectedTeamId(null)}><button onClick={() => setSelectedTeamId(null)} aria-label="Close stake form" className="mb-2 ml-auto grid h-8 w-8 place-items-center rounded-full bg-black/5 dark:bg-white/10"><X className="h-4 w-4" /></button><CupOutrightPanel key={selectedTeamId} outrightOpen={bettingOpen} tournamentComplete={settled} initialTeamId={selectedTeamId} lockedTeam embedded playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={login} onStaked={onStaked} /></StakeDialog>}
+    {selectedTeamId !== null && <StakeDialog title={`Stake on ${cupTeamName(selectedTeamId)}`} size="lg" onClose={() => setSelectedTeamId(null)}><button onClick={() => setSelectedTeamId(null)} aria-label="Close stake form" className="mb-2 ml-auto grid h-8 w-8 place-items-center rounded-full bg-black/5 dark:bg-white/10"><X className="h-4 w-4" /></button><CupOutrightPanel key={selectedTeamId} outrightOpen={bettingOpen} tournamentComplete={settled} initialTeamId={selectedTeamId} lockedTeam embedded playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={() => { setSelectedTeamId(null); login(); }} onStaked={onStaked} /></StakeDialog>}
     {bettingOpen && selectedTeamId === null && <div className="fixed inset-x-0 bottom-0 z-40 lg:hidden"><div className="border-t border-black/10 bg-white/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur dark:border-white/10 dark:bg-[#101722]/95"><div className="mx-auto flex max-w-5xl items-center gap-3 px-4"><div className="min-w-0 flex-1"><div className="text-[10px] font-bold uppercase tracking-[.16em] text-zinc-500">Most backed</div><div className="truncate font-display text-sm font-extrabold">{cupTeamName(featured.teamId)} · {featuredShare.toFixed(1)}% share</div></div><button onClick={() => setSelectedTeamId(featured.teamId)} className="shrink-0 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 py-2.5 font-display text-sm font-extrabold text-black">Stake</button></div></div></div>}
   </div>;
 }

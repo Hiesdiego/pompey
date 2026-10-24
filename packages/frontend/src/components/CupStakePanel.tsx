@@ -52,6 +52,13 @@ function SignInPrompt({ onLogin, label }: { onLogin: () => void; label: string }
   );
 }
 
+function QuickAmounts({ balance, busy, onSelect }: { balance: bigint | null; busy: boolean; onSelect: (value: string) => void }) {
+  return <div className="mb-3 flex flex-wrap gap-2">
+    {["10", "50", "100", "500"].map((value) => <button key={value} type="button" onClick={() => onSelect(value)} disabled={busy} className="rounded-xl border border-black/10 px-3 py-1.5 text-sm font-semibold text-zinc-600 transition-all hover:border-amber-400/60 hover:text-amber-700 active:scale-95 dark:border-white/10 dark:text-zinc-300 dark:hover:text-amber-300">{value}</button>)}
+    <button type="button" onClick={() => onSelect(balance === null ? "0" : String(balance / 10n ** 18n))} disabled={busy} className="rounded-xl border border-black/10 px-3 py-1.5 text-sm font-semibold text-zinc-600 transition-all hover:border-amber-400/60 hover:text-amber-700 active:scale-95 dark:border-white/10 dark:text-zinc-300 dark:hover:text-amber-300">MAX</button>
+  </div>;
+}
+
 function useTickAllowance(
   playerAddress: Address | null,
   spender: Address | "",
@@ -100,6 +107,7 @@ export function CupMatchStakePanel({
   authenticated,
   onLogin,
   onStaked,
+  bare = false,
 }: {
   match: CupMatch;
   initialSide?: 0 | 1;
@@ -108,6 +116,7 @@ export function CupMatchStakePanel({
   authenticated: boolean;
   onLogin: () => void;
   onStaked: () => void;
+  bare?: boolean;
 }) {
   const [side, setSide] = useState<0 | 1>(initialSide);
   const [amountStr, setAmountStr] = useState("10");
@@ -207,7 +216,7 @@ export function CupMatchStakePanel({
   const labelB = CUP_TEAM_SYMBOLS[match.teamB] ?? "TBA";
 
   return (
-    <div className="glass rounded-2xl p-5">
+    <div className={bare ? "" : "glass rounded-2xl p-5"}>
       <h3 className="mb-1 font-display text-base font-bold text-zinc-900 dark:text-white">
         Back a winner
       </h3>
@@ -245,12 +254,15 @@ export function CupMatchStakePanel({
             Amount (TICK) — min {CUP_MIN_STAKE_TICK}
           </label>
           <input
+            aria-label="Stake amount in TICK"
             value={amountStr}
             onChange={(e) => setAmountStr(e.target.value)}
             inputMode="decimal"
             disabled={busy}
-            className="mb-3 w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 font-display text-lg font-bold tabular-nums text-zinc-900 outline-none focus:border-amber-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="mb-2 w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 font-display text-lg font-bold tabular-nums text-zinc-900 outline-none focus:border-amber-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
+          <QuickAmounts balance={balance} busy={busy} onSelect={setAmountStr} />
+          <p className="mb-3 text-xs tabular-nums text-zinc-500">Balance: {balance === null ? "—" : `${formatTick(balance)} TICK`}</p>
           {amount !== null && totalPool > 0n && (
             <p className="mb-3 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
               Est. payout if {side === 0 ? labelA : labelB} wins:{" "}
@@ -262,7 +274,7 @@ export function CupMatchStakePanel({
 
           <button
             onClick={handleStake}
-            disabled={busy || !amount}
+            disabled={busy || !amount || !balanceOk}
             className="w-full rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 py-3 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(251,191,36,.4)] transition-all hover:shadow-[0_0_28px_rgba(251,191,36,.55)] active:scale-[.97] disabled:opacity-40"
           >
             {step === "approving" ? (
@@ -506,15 +518,18 @@ export function CupOutrightPanel({
             Back {teamId === null ? "TBA" : CUP_TEAM_SYMBOLS[teamId]} — amount (TICK), min {CUP_MIN_STAKE_TICK}
           </label>
           <input
+            aria-label="Stake amount in TICK"
             value={amountStr}
             onChange={(e) => setAmountStr(e.target.value)}
             inputMode="decimal"
             disabled={busy}
-            className="mb-3 w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 font-display text-lg font-bold tabular-nums text-zinc-900 outline-none focus:border-amber-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="mb-2 w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 font-display text-lg font-bold tabular-nums text-zinc-900 outline-none focus:border-amber-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
+          <QuickAmounts balance={balance} busy={busy} onSelect={setAmountStr} />
+          <p className="mb-3 text-xs tabular-nums text-zinc-500">Balance: {balance === null ? "—" : `${formatTick(balance)} TICK`}</p>
           <button
             onClick={handleStake}
-            disabled={busy || !amount || teamId === null}
+            disabled={busy || !amount || !balanceOk || teamId === null}
             className="w-full rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 py-3 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(251,191,36,.4)] transition-all hover:shadow-[0_0_28px_rgba(251,191,36,.55)] active:scale-[.97] disabled:opacity-40"
           >
             {step === "approving" ? (

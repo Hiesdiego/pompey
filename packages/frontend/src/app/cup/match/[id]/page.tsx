@@ -7,14 +7,16 @@ import { Activity, ArrowLeft, Trophy, X } from "lucide-react";
 import { useCupBracket } from "../../../../hooks/useCupBracket";
 import { useTickr } from "../../../../hooks/useTickr";
 import { useTickBalance } from "../../../../hooks/useTickBalance";
+import { useCupMatchPool } from "../../../../hooks/useCupPool";
 import { CupMatchStakePanel } from "../../../../components/CupStakePanel";
 import { CupTeamBadge } from "../../../../components/CupTeamBadge";
 import { TradingViewChart } from "../../../../components/TradingViewChart";
 import { Countdown } from "../../../../components/Countdown";
 import { StakeDialog } from "../../../../components/StakeDialog";
 import { cupMatchStatus } from "../../../../components/CupMatchCard";
-import { CUP_ROUNDS, CUP_TBD, cupRoundOf, cupTeamName } from "../../../../lib/cup";
+import { CUP_FEE_BPS, CUP_ROUNDS, CUP_TBD, cupRoundOf, cupTeamName } from "../../../../lib/cup";
 import { EmptyState, ErrorState } from "../../../../components/States";
+import { formatTick } from "../../../../lib/format";
 
 export default function CupMatchPage() {
   const params = useParams<{ id: string }>();
@@ -22,6 +24,7 @@ export default function CupMatchPage() {
   const { matches, error, reload } = useCupBracket(true);
   const { playerAddress, authenticated, login } = useTickr();
   const { balance, refresh } = useTickBalance(playerAddress);
+  const { pool, myStakeA, myStakeB, reload: reloadPool } = useCupMatchPool(Number.isInteger(matchId) && matchId >= 0 && matchId <= 62 ? matchId : null, playerAddress);
   const [now, setNow] = useState(() => Date.now());
   const [stakeOpen, setStakeOpen] = useState(false);
   const [chartsOpen, setChartsOpen] = useState(false);
@@ -32,7 +35,13 @@ export default function CupMatchPage() {
   if (!match) return <div className="glass h-64 animate-pulse rounded-3xl" />;
   const status = cupMatchStatus(match, now);
   const stakable = status === "upcoming" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD;
-  const onStaked = () => { void reload(); void refresh(); };
+  const onStaked = () => { void reload(); void reloadPool(); void refresh(); setStakeOpen(false); };
+  const stakeA = myStakeA ?? 0n;
+  const stakeB = myStakeB ?? 0n;
+  const myTotal = stakeA + stakeB;
+  const poolTotal = pool ? pool.totalA + pool.totalB + pool.seed : 0n;
+  const projected = (stake: bigint, sideTotal: bigint) => stake > 0n && sideTotal > 0n && poolTotal > 0n
+    ? stake * (poolTotal * BigInt(10_000 - CUP_FEE_BPS) / 10_000n) / sideTotal : 0n;
   return <div>
     <Link href="/cup" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-amber-600"><ArrowLeft className="h-4 w-4" /> World Cup</Link>
     <h1 className="mb-4 font-display text-xl font-extrabold">{CUP_ROUNDS[cupRoundOf(matchId)].name} · Match {matchId + 1}</h1>
@@ -57,8 +66,19 @@ export default function CupMatchPage() {
       </div>
     </details>}
     {stakable && <button onClick={() => setStakeOpen(true)} className="mb-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-3.5 font-display text-base font-extrabold text-black shadow-[0_0_28px_rgba(251,191,36,.4)]">Stake on this match</button>}
+    {playerAddress && myTotal > 0n && <section className="glass mb-6 rounded-2xl p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-amber-700 dark:text-amber-300">Stake tracker</p><h2 className="mt-1 font-display text-lg font-extrabold">Your position</h2></div><div className="text-right"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Total staked</p><p className="font-display text-lg font-extrabold tabular-nums">{formatTick(myTotal)} TICK</p></div></div>
+      <div className="grid gap-3 sm:grid-cols-2">{([0, 1] as const).map((side) => {
+        const stake = side === 0 ? stakeA : stakeB;
+        if (stake === 0n) return null;
+        const teamId = side === 0 ? match.teamA : match.teamB;
+        const winning = status === "settled" && match.winner === teamId;
+        return <div key={side} className="rounded-xl border border-amber-400/20 bg-amber-500/[.05] p-4"><div className="flex items-center gap-2"><CupTeamBadge teamId={teamId} size={28} showName={false} /><span className="font-display text-sm font-extrabold">{cupTeamName(teamId)}</span>{status === "settled" && <span className="ml-auto text-xs font-bold text-amber-700 dark:text-amber-300">{winning ? "Won" : "Lost"}</span>}</div><p className="mt-3 text-sm tabular-nums">{formatTick(stake)} TICK staked</p><p className="mt-1 text-xs text-zinc-500">{status === "settled" ? winning ? "Estimated payout" : "Final payout" : "Projected payout"}: <span className="font-bold tabular-nums text-zinc-800 dark:text-zinc-200">{formatTick(status === "settled" && !winning ? 0n : projected(stake, side === 0 ? pool?.totalA ?? 0n : pool?.totalB ?? 0n))} TICK</span></p></div>;
+      })}</div>
+      <p className="mt-3 text-xs text-zinc-500">{status === "settled" ? "Payout estimate uses the settled pool; claim from the match result below." : "Projection uses the current pool after fees. Final payout can change as others stake."}</p>
+    </section>}
     {status === "settled" && <div className="glass mb-6 rounded-2xl border-amber-400/25 p-5 text-center"><Trophy className="mx-auto mb-2 h-5 w-5 text-amber-500" /><p className="font-bold">{cupTeamName(match.winner)} wins</p><button onClick={() => setStakeOpen(true)} className="mt-3 text-sm font-semibold text-amber-700 dark:text-amber-300">View your stake and claim</button></div>}
     {status === "disputed" && <p className="glass rounded-2xl p-5 text-sm">This match is under DAO review. Settlement is paused until the ballot resolves.</p>}
-    {stakeOpen && <StakeDialog title={`Stake on ${cupTeamName(match.teamA)} vs ${cupTeamName(match.teamB)}`} onClose={() => setStakeOpen(false)}><button onClick={() => setStakeOpen(false)} aria-label="Close stake form" className="mb-2 ml-auto grid h-8 w-8 place-items-center rounded-full bg-black/5 dark:bg-white/10"><X className="h-4 w-4" /></button><CupMatchStakePanel match={match} playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={login} onStaked={onStaked} /></StakeDialog>}
+    {stakeOpen && <StakeDialog title={`${cupTeamName(match.teamA)} vs ${cupTeamName(match.teamB)}`} onClose={() => setStakeOpen(false)}><div className="mb-4 flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-amber-700 dark:text-amber-300">Your prediction</p><h3 className="mt-1 truncate font-display text-lg font-extrabold">{cupTeamName(match.teamA)} vs {cupTeamName(match.teamB)}</h3></div><button onClick={() => setStakeOpen(false)} aria-label="Close" className="shrink-0 rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-black/5 dark:hover:bg-white/10"><X className="h-5 w-5" /></button></div><CupMatchStakePanel match={match} bare playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={() => { setStakeOpen(false); login(); }} onStaked={onStaked} /></StakeDialog>}
   </div>;
 }
