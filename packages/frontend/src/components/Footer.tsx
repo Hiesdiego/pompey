@@ -2,11 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { backendUrl } from "../app/api/social/og/_shared";
 
-/**
- * Footer — carries the mandatory "Powered by CoinGecko" attribution
- * (CoinGecko free-tier requirement) plus testnet disclaimer.
- */
-
 type FooterLink = { href: string; label: string; sortAt: number };
 
 async function getDynamicLinks(): Promise<FooterLink[]> {
@@ -97,19 +92,7 @@ export async function Footer() {
         )}
         <p className="max-w-xl text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
           Testnet build. TICK has no monetary value. Match outcomes are derived from
-          real cryptocurrency price performance over fixed windows. Price data and
-          token logos by CoinGecko.
-        </p>
-        <p className="text-xs text-zinc-500 dark:text-zinc-500">
-          Price data by{" "}
-          <a
-            href="https://www.coingecko.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-zinc-700 underline decoration-zinc-300 underline-offset-2 transition-colors hover:text-[#2E7CF6] dark:text-zinc-300 dark:decoration-zinc-600 dark:hover:text-white"
-          >
-            CoinGecko
-          </a>
+          real cryptocurrency price performance over fixed windows. Token logos by CoinGecko.
         </p>
       </div>
     </footer>

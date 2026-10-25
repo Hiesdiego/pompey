@@ -47,7 +47,7 @@ import { config } from "../config.js";
 import { logger } from "../lib/logger.js";
 import { publicClient as sharedPublicClient, withRpcRetry } from "../lib/rpc.js";
 import { runLoop, type LoopHandle } from "../lib/loop.js";
-import type { PriceFeed } from "./priceFeed.js";
+import type { PriceFeed, PriceSource } from "./priceFeed.js";
 import { PriceUnavailableError, PriceValidationError } from "./priceFeed.js";
 import { SnapshotSubmitter } from "./snapshotSubmitter.js";
 
@@ -328,6 +328,7 @@ export class MatchLifecycle {
   private readonly leadMs: number;
   private readonly failures = new Map<bigint, FailureState>();
   private readonly startVerifiedAt = new Map<bigint, number>();
+  private readonly startSources = new Map<bigint, { home: PriceSource; away: PriceSource }>();
   private readonly endAttemptAt = new Map<bigint, number>();
   private readonly endConfirmed = new Set<bigint>();
   private readonly pendingRevealAt = new Map<bigint, number>();
@@ -689,14 +690,15 @@ export class MatchLifecycle {
   private async processFixture(f: FixtureView, now: number): Promise<boolean> {
     const matchEndMs = f.kickoffMs + this.durationMs;
     const wantEnd = now >= matchEndMs;
+    const preferred = wantEnd ? this.startSources.get(f.fixtureId) : undefined;
     if (wantEnd && this.endConfirmed.has(f.fixtureId)) return true;
     if (wantEnd && now - (this.endAttemptAt.get(f.fixtureId) ?? 0) < RETRY_POLL_MS) return true;
     if (!wantEnd && now - (this.startVerifiedAt.get(f.fixtureId) ?? 0) < RETRY_POLL_MS) return true;
 
     let home, away;
     try {
-      home = this.feed.getValidatedPrice(f.homeTeamId);
-      away = this.feed.getValidatedPrice(f.awayTeamId);
+      home = this.feed.getValidatedPrice(f.homeTeamId, preferred?.home);
+      away = this.feed.getValidatedPrice(f.awayTeamId, preferred?.away);
     } catch (err) {
       if (err instanceof PriceValidationError || err instanceof PriceUnavailableError) {
 
@@ -723,6 +725,7 @@ export class MatchLifecycle {
       );
       if (audit.skipped && audit.skipReason === "endPrice already submitted on-chain") {
         this.endConfirmed.add(f.fixtureId);
+        this.startSources.delete(f.fixtureId);
       } else {
         this.endAttemptAt.set(f.fixtureId, now);
       }
@@ -734,6 +737,7 @@ export class MatchLifecycle {
         this.startVerifiedAt.set(f.fixtureId, Number.MAX_SAFE_INTEGER);
       } else {
         this.startVerifiedAt.set(f.fixtureId, now);
+        if (!audit.skipped) this.startSources.set(f.fixtureId, { home: home.source, away: away.source });
       }
     }
     return true;

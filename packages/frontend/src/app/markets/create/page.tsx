@@ -27,7 +27,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet, Search } from "lucide-react";
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters } from "viem";
 import { useTickr } from "../../../hooks/useTickr";
 import { useMyProfile } from "../../../hooks/useMyProfile";
@@ -873,8 +873,8 @@ function TemplateParamsForm({
     return (
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className={labelCls}>Team</label>
-          <TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={teams} inputCls={inputCls} />
+          <label className={labelCls}>Coin</label>
+          <TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={teams} inputCls={inputCls} searchable />
         </div>
         <div>
           <label className={labelCls}>Direction</label>
@@ -982,22 +982,56 @@ function TeamSelect({
   onChange,
   teams,
   inputCls,
+  searchable = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   teams: { teamId: number; symbol: string; name: string; imageUrl?: string | null }[];
   inputCls: string;
+  searchable?: boolean;
 }) {
+  const [query, setQuery] = useState("");
+  const selected = teams.find((team) => String(team.teamId) === value);
+  const filtered = searchable
+    ? teams.filter((team) => `${team.name} ${team.symbol}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : teams;
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {teams.map((t) => (
-        <button key={t.teamId} type="button" onClick={() => onChange(String(t.teamId))}
-          className={cn("flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition-all", value === String(t.teamId) ? "border-[#2E7CF6] bg-[#2E7CF6]/10 text-[#1D4ED8] dark:text-[#7db3ff]" : "border-black/10 bg-white/40 hover:border-[#2E7CF6]/40 dark:border-white/10 dark:bg-black/20")}
-        >
-          <TeamBadge teamId={t.teamId} size={24} showName={false} />
-          <span className="min-w-0"><span className="block font-bold">{t.symbol}</span><span className="block truncate text-zinc-500">{t.name}</span></span>
-        </button>
-      ))}
+    <div className="space-y-3">
+      {searchable && (
+        <div className="rounded-2xl border border-[#2E7CF6]/20 bg-gradient-to-br from-[#2E7CF6]/[.08] to-white p-3 shadow-sm dark:to-[#101821]">
+          {selected && (
+            <div className="mb-3 flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 dark:bg-white/[.06]">
+              <TeamBadge teamId={selected.teamId} size={28} showName={false} />
+              <span className="min-w-0 text-sm font-semibold">{selected.name} <span className="text-zinc-500">{selected.symbol}</span></span>
+              <Check className="ml-auto h-4 w-4 text-[#2E7CF6]" />
+            </div>
+          )}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="search"
+              aria-label="Search available coins"
+              placeholder={`Search ${teams.length} available coins`}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className={cn(inputCls, "pl-9")}
+            />
+          </div>
+          <p className="mt-2 text-xs text-zinc-500" aria-live="polite">{filtered.length} {filtered.length === 1 ? "coin" : "coins"} available</p>
+        </div>
+      )}
+      <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-3", searchable && "max-h-56 overflow-y-auto pr-1")}>
+        {filtered.map((t) => (
+          <button key={t.teamId} type="button" onClick={() => onChange(String(t.teamId))}
+            aria-pressed={value === String(t.teamId)}
+            className={cn("flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition-all", value === String(t.teamId) ? "border-[#2E7CF6] bg-[#2E7CF6]/10 text-[#1D4ED8] dark:text-[#7db3ff]" : "border-black/10 bg-white/40 hover:border-[#2E7CF6]/40 dark:border-white/10 dark:bg-black/20")}
+          >
+            <TeamBadge teamId={t.teamId} size={24} showName={false} />
+            <span className="min-w-0"><span className="block font-bold">{t.symbol}</span><span className="block truncate text-zinc-500">{t.name}</span></span>
+          </button>
+        ))}
+        {filtered.length === 0 && <p className="col-span-full rounded-xl border border-dashed border-black/10 p-4 text-center text-sm text-zinc-500 dark:border-white/10">No matching coins</p>}
+      </div>
     </div>
   );
 }

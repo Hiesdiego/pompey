@@ -31,6 +31,7 @@ import { installProcessGuards, meter } from "./lib/net.js";
 import { installOutboundMeter } from "./lib/outboundMeter.js";
 import { getBlockNumberSafe } from "./lib/rpc.js";
 import { PriceHeartbeat } from "./services/priceHeartbeat.js";
+import { CoinbasePoller } from "./services/coinbase.js";
 import { CoingeckoPoller } from "./services/coingecko.js";
 import { PriceFeed, type TeamPriceMap } from "./services/priceFeed.js";
 import { SnapshotSubmitter } from "./services/snapshotSubmitter.js";
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
 
   const teamMaps: TeamPriceMap[] = TICKR_TEAMS.map((t) => ({
     teamId: t.teamId,
+    coinbasePair: t.coinbasePair ?? "",
     binanceSymbol: t.binanceSymbol,
     coingeckoId: t.coingeckoId,
   }));
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
   }
   const cupTeamMaps: TeamPriceMap[] = cupConfigured ? CUP_TEAM_PRICE_MAP : [];
   const allTeamMaps = [...teamMaps, ...cupTeamMaps];
+  const coinbasePairs = [...new Set(allTeamMaps.map((t) => t.coinbasePair).filter(Boolean))];
   const binanceSymbols = [...new Set(allTeamMaps.map((t) => t.binanceSymbol).filter(Boolean))];
   const coingeckoIds = [...new Set(allTeamMaps.map((t) => t.coingeckoId).filter(Boolean))];
 
@@ -82,6 +85,7 @@ async function main(): Promise<void> {
 
 
   let lifecycle!: MatchLifecycle;
+  const coinbase = new CoinbasePoller(coinbasePairs, config.coinbase.baseUrl, config.coinbase.pollMs);
   const priceHeartbeat = new PriceHeartbeat(
     binanceSymbols,
     config.binance.restBaseUrl,
@@ -92,13 +96,15 @@ async function main(): Promise<void> {
     config.coingecko.baseUrl,
     config.coingecko.apiKey
   );
-  const priceFeed = new PriceFeed([priceHeartbeat], coingecko, teamMaps, {
+  const priceFeed = new PriceFeed(coinbase, [priceHeartbeat], coingecko, teamMaps, {
     maxDeviationBps: config.priceValidation.maxDeviationBps,
+    coinbaseStaleAfterMs: config.priceValidation.coinbaseStaleAfterMs,
     binanceStaleAfterMs: config.priceValidation.binanceStaleAfterMs,
     coingeckoStaleAfterMs: config.priceValidation.coingeckoStaleAfterMs,
   });
-  const cupPriceFeed = new PriceFeed([priceHeartbeat], coingecko, cupTeamMaps, {
+  const cupPriceFeed = new PriceFeed(coinbase, [priceHeartbeat], coingecko, cupTeamMaps, {
     maxDeviationBps: config.priceValidation.maxDeviationBps,
+    coinbaseStaleAfterMs: config.priceValidation.coinbaseStaleAfterMs,
     binanceStaleAfterMs: config.priceValidation.binanceStaleAfterMs,
     coingeckoStaleAfterMs: config.priceValidation.coingeckoStaleAfterMs,
   });
@@ -107,6 +113,7 @@ async function main(): Promise<void> {
     logger.warn("[backend] coingecko poller error", { error: err.message })
   );
 
+  coinbase.start();
   priceHeartbeat.start();
   coingecko.start();
 
@@ -134,7 +141,8 @@ async function main(): Promise<void> {
         ? Math.max(0, Number(latestBlock - watermark))
         : null;
 
-    const stalenessSec = priceHeartbeat.stalenessSec();
+    const feedAges = [coinbase.stalenessSec(), priceHeartbeat.stalenessSec()].filter((age): age is number => age !== null);
+    const stalenessSec = feedAges.length > 0 ? Math.min(...feedAges) : null;
 
     let supabaseOk = false;
     if (db) {
@@ -271,6 +279,7 @@ async function main(): Promise<void> {
     factoryKeeper.stop();
     socialIndexer.stop();
     chainCache.stop();
+    coinbase.stop();
     priceHeartbeat.stop();
     coingecko.stop();
     httpServer.close(() => {

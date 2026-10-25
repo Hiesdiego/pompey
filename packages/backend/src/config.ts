@@ -116,6 +116,11 @@ export const config = {
     restPollMs: optionalInt("BINANCE_REST_POLL_MS", 10_000),
   },
 
+  coinbase: {
+    baseUrl: optional("COINBASE_BASE_URL", "https://api.coinbase.com"),
+    pollMs: optionalInt("COINBASE_POLL_MS", 60_000),
+  },
+
   coingecko: {
     apiKey: optional("COINGECKO_API_KEY", ""),
     baseUrl: optional("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3"),
@@ -201,6 +206,7 @@ export const config = {
   priceValidation: {
     /** Max allowed |binance − coingecko| / coingecko deviation, in basis points (200 = 2%). */
     maxDeviationBps: optionalInt("PRICE_DEVIATION_MAX_BPS", 200),
+    coinbaseStaleAfterMs: optionalInt("COINBASE_STALE_AFTER_MS", 180_000),
     /** A Binance price older than this is treated as stale. */
     binanceStaleAfterMs: 65_000,
     /** A CoinGecko price older than this is treated as stale. */

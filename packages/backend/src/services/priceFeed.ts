@@ -1,53 +1,34 @@
-/**
- * Price validator + aggregator — the single choke point every snapshot
- * goes through before it touches the chain (spec P2.3).
- *
- * Source priority:
- *   1. Binance (primary) — the freshest tick from the configured sources wins.
- *   2. CoinGecko REST poll (fallback) — 5-minute cadence.
- *
- * Validation rules:
- * - If BOTH sources are fresh and disagree by more than maxDeviationBps
- *   (default 2%), the price is REJECTED — no snapshot is submitted, and an
- *   alert is logged for manual review. A divergent feed must never decide
- *   a match on its own.
- * - If Binance is stale/missing but CoinGecko is fresh, CoinGecko is used
- *   (degraded mode, logged).
- * - If Binance is fresh but CoinGecko is stale/missing, Binance is used
- *   alone (e.g. first minutes after boot, CoinGecko outage).
- * - If both are stale/missing, the price is unavailable → the caller must
- *   NOT submit (the match simply waits; the contract has no deadline).
- *
- * Every returned quote carries its source + both raw values so the snapshot
- * submitter can log the full audit trail.
- */
+
 
 import type { CoingeckoPoller } from "./coingecko.js";
 import { priceToScaled, deviationBps, scaledToPrice } from "../lib/priceMath.js";
 import { logger } from "../lib/logger.js";
 
-/** Anything that can serve a latest Binance tick. */
 export interface PrimaryPriceSource {
   getLatest(symbol: string): { price: string; receivedAtMs: number } | undefined;
 }
 
 export interface TeamPriceMap {
   teamId: number;
-  binanceSymbol: string; // e.g. "BTCUSDT"
-  coingeckoId: string; // e.g. "bitcoin"
-  /** A team whose only verified price source is CoinGecko. */
-  coingeckoOnly?: boolean;
+
+  coinbasePair: string;
+
+  binanceSymbol: string;
+
+  coingeckoId: string;
 }
 
-export type PriceSource = "binance" | "coingecko-fallback";
+export type PriceSource = "coinbase" | "binance" | "coingecko-fallback";
 
 export interface ValidatedPrice {
   teamId: number;
-  /** Scaled by 10^8 — ready for PriceOracle submission. */
+
   scaled: bigint;
   source: PriceSource;
+  coinbasePrice: string | null;
   binancePrice: string | null;
   coingeckoPrice: string | null;
+
   deviationBps: number | null;
 }
 
@@ -62,49 +43,63 @@ export class PriceUnavailableError extends Error {
 
 export class PriceValidationError extends Error {
   readonly teamId: number;
-  readonly binancePrice: string;
-  readonly coingeckoPrice: string;
+  readonly coinbasePrice: string | null;
+  readonly binancePrice: string | null;
+  readonly coingeckoPrice: string | null;
   readonly deviationBps: number;
-  constructor(teamId: number, binancePrice: string, coingeckoPrice: string, deviationBps: number) {
+  constructor(
+    teamId: number,
+    coinbasePrice: string | null,
+    binancePrice: string | null,
+    coingeckoPrice: string | null,
+    deviationBps: number
+  ) {
     super(
-      `Price feeds disagree for team ${teamId}: binance=${binancePrice} ` +
-        `coingecko=${coingeckoPrice} (${(deviationBps / 100).toFixed(2)}% deviation)`
+      `Price feeds disagree for team ${teamId}: coinbase=${coinbasePrice ?? "n/a"} ` +
+        `binance=${binancePrice ?? "n/a"} coingecko=${coingeckoPrice ?? "n/a"} ` +
+        `(${(deviationBps / 100).toFixed(2)}% deviation)`
     );
     this.name = "PriceValidationError";
     this.teamId = teamId;
+    this.coinbasePrice = coinbasePrice;
     this.binancePrice = binancePrice;
     this.coingeckoPrice = coingeckoPrice;
     this.deviationBps = deviationBps;
   }
 }
 
-/**
- * How often the same team's "Binance stale" warning may repeat. Without this,
- * a single stale symbol spams the log on every price read (every few seconds
- * when the frontend is polling) and buries real signals.
- */
 const STALE_WARN_THROTTLE_MS = 5 * 60_000;
 
 export class PriceFeed {
-  private readonly primaries: PrimaryPriceSource[];
+  private readonly coinbase: PrimaryPriceSource;
+  private readonly binancePrimaries: PrimaryPriceSource[];
   private readonly coingecko: CoingeckoPoller;
   private readonly teams: TeamPriceMap[];
   private readonly maxDeviationBps: number;
+  private readonly coinbaseStaleAfterMs: number;
   private readonly binanceStaleAfterMs: number;
   private readonly coingeckoStaleAfterMs: number;
-  /** teamId → last time we logged a Binance-stale warning for it. */
-  private readonly lastStaleWarnAt = new Map<number, number>();
+
+  private readonly lastStaleWarnAt = new Map<string, number>();
 
   constructor(
-    primaries: PrimaryPriceSource[],
+    coinbase: PrimaryPriceSource,
+    binancePrimaries: PrimaryPriceSource[],
     coingecko: CoingeckoPoller,
     teams: TeamPriceMap[],
-    opts: { maxDeviationBps: number; binanceStaleAfterMs: number; coingeckoStaleAfterMs: number }
+    opts: {
+      maxDeviationBps: number;
+      coinbaseStaleAfterMs: number;
+      binanceStaleAfterMs: number;
+      coingeckoStaleAfterMs: number;
+    }
   ) {
-    this.primaries = primaries;
+    this.coinbase = coinbase;
+    this.binancePrimaries = binancePrimaries;
     this.coingecko = coingecko;
     this.teams = teams;
     this.maxDeviationBps = opts.maxDeviationBps;
+    this.coinbaseStaleAfterMs = opts.coinbaseStaleAfterMs;
     this.binanceStaleAfterMs = opts.binanceStaleAfterMs;
     this.coingeckoStaleAfterMs = opts.coingeckoStaleAfterMs;
   }
@@ -115,134 +110,154 @@ export class PriceFeed {
     return def;
   }
 
-  /**
-   * Get the validated, submission-ready price for one team.
-   * @throws PriceValidationError when feeds disagree (do NOT submit).
-   * @throws PriceUnavailableError when no fresh source exists (do NOT submit).
-   */
-  getValidatedPrice(teamId: number): ValidatedPrice {
+  getValidatedPrice(teamId: number, preferredSource?: PriceSource): ValidatedPrice {
     const def = this.teamDef(teamId);
     const now = Date.now();
 
-    // Freshest tick across all primary (Binance) sources wins.
-    let binancePrice: string | null = null;
-    let binanceAtMs = 0;
-    for (const feed of this.primaries) {
-      const tick = feed.getLatest(def.binanceSymbol);
-      if (tick && tick.receivedAtMs > binanceAtMs) {
-        binanceAtMs = tick.receivedAtMs;
-        binancePrice = tick.price;
+    let coinbasePrice: string | null = null;
+    if (def.coinbasePair) {
+      const tick = this.coinbase.getLatest(def.coinbasePair);
+      if (tick && now - tick.receivedAtMs <= this.coinbaseStaleAfterMs) {
+        coinbasePrice = tick.price;
       }
     }
-    const binanceFresh = binancePrice !== null && now - binanceAtMs <= this.binanceStaleAfterMs;
-    if (!binanceFresh) binancePrice = null;
 
-    const cg = this.coingecko.getPrice(def.coingeckoId);
-    const cgFresh =
-      cg != null && now - cg.receivedAtMs <= this.coingeckoStaleAfterMs;
-    const coingeckoPrice = cgFresh ? cg!.priceUsd : null;
+    let binancePrice: string | null = null;
+    if (def.binanceSymbol) {
+      let binanceAtMs = 0;
+      for (const feed of this.binancePrimaries) {
+        const tick = feed.getLatest(def.binanceSymbol);
+        if (tick && tick.receivedAtMs > binanceAtMs) {
+          binanceAtMs = tick.receivedAtMs;
+          binancePrice = tick.price;
+        }
+      }
+      if (!(binancePrice !== null && now - binanceAtMs <= this.binanceStaleAfterMs)) {
+        binancePrice = null;
+      }
+    }
 
-    // Both fresh → cross-validate.
-    if (binancePrice !== null && coingeckoPrice !== null) {
-      const bScaled = priceToScaled(binancePrice);
-      const cScaled = priceToScaled(coingeckoPrice);
-      const dev = deviationBps(bScaled, cScaled);
-      if (dev !== null && dev > this.maxDeviationBps) {
+    const cg = def.coingeckoId ? this.coingecko.getPrice(def.coingeckoId) : undefined;
+    const coingeckoPrice =
+      cg != null && now - cg.receivedAtMs <= this.coingeckoStaleAfterMs ? cg.priceUsd : null;
+
+    const candidates: Array<{ source: PriceSource; price: string | null }> = [
+      { source: "coinbase", price: coinbasePrice },
+      { source: "binance", price: binancePrice },
+      { source: "coingecko-fallback", price: coingeckoPrice },
+    ];
+    let chosen = candidates.find((c) => c.price !== null);
+    if (preferredSource) {
+      const pref = candidates.find((c) => c.source === preferredSource && c.price !== null);
+      if (pref) {
+        chosen = pref;
+      } else if (chosen) {
+        logger.debug("[PriceFeed] preferred source stale — falling back to priority order", {
+          teamId,
+          preferredSource,
+          source: chosen.source,
+        });
+      }
+    }
+    if (!chosen || chosen.price === null) {
+      throw new PriceUnavailableError(
+        teamId,
+        `No fresh price for team ${teamId} (coinbase: ${coinbasePrice ?? "stale/missing"}, ` +
+          `binance: ${binancePrice ?? "stale/missing"}, ` +
+          `coingecko: ${coingeckoPrice ?? "stale/missing"})`
+      );
+    }
+    const primaryPrice = chosen.price;
+
+    const primaryScaled = priceToScaled(primaryPrice);
+    let maxDev: number | null = null;
+    for (const c of candidates) {
+      if (c.source === chosen.source || c.price === null) continue;
+      const dev = deviationBps(priceToScaled(c.price), primaryScaled);
+      if (dev === null) continue;
+      if (maxDev === null || dev > maxDev) maxDev = dev;
+      if (dev > this.maxDeviationBps) {
         logger.error("[PriceFeed] VALIDATION FAILED — feeds disagree, blocking snapshot", {
           teamId,
+          source: chosen.source,
+          coinbasePrice,
           binancePrice,
           coingeckoPrice,
           deviationBps: dev,
         });
-        throw new PriceValidationError(teamId, binancePrice, coingeckoPrice, dev);
+        throw new PriceValidationError(
+          teamId,
+          coinbasePrice,
+          binancePrice,
+          coingeckoPrice,
+          dev
+        );
       }
-      return {
-        teamId,
-        scaled: bScaled,
-        source: "binance",
-        binancePrice,
-        coingeckoPrice,
-        deviationBps: dev,
-      };
     }
 
-    // CoinGecko carries the price when Binance is unavailable or unlisted.
-    if (coingeckoPrice !== null) {
-      if (!def.coingeckoOnly) {
-        this.warnBinanceStaleThrottled(teamId, def.binanceSymbol, coingeckoPrice);
-      }
-      return {
-        teamId,
-        scaled: priceToScaled(coingeckoPrice),
-        source: "coingecko-fallback",
-        binancePrice,
-        coingeckoPrice,
-        deviationBps: null,
-      };
+    if (chosen.source !== "coinbase" && def.coinbasePair && coinbasePrice === null) {
+      this.warnTierStaleThrottled(teamId, "coinbase", def.coinbasePair, chosen.source, primaryPrice);
+    }
+    if (chosen.source !== "binance" && def.binanceSymbol && binancePrice === null) {
+      this.warnTierStaleThrottled(teamId, "binance", def.binanceSymbol, chosen.source, primaryPrice);
     }
 
-    // Use Binance when CoinGecko has no fresh price.
-    if (binancePrice !== null) {
-      logger.debug("[PriceFeed] CoinGecko stale/missing — using Binance alone", {
-        teamId,
-        binancePrice,
-      });
-      return {
-        teamId,
-        scaled: priceToScaled(binancePrice),
-        source: "binance",
-        binancePrice,
-        coingeckoPrice,
-        deviationBps: null,
-      };
-    }
-
-    // Nothing usable.
-    throw new PriceUnavailableError(
+    return {
       teamId,
-      `No fresh price for team ${teamId} (binance: ${binancePrice ?? "stale/missing"}, ` +
-        `coingecko: ${coingeckoPrice ?? "stale/missing"})`
-    );
+      scaled: primaryScaled,
+      source: chosen.source,
+      coinbasePrice,
+      binancePrice,
+      coingeckoPrice,
+      deviationBps: maxDev,
+    };
   }
 
-  /**
-   * Throttled Binance-stale warning (max once per team per 5 min).
-   *
-   * Escalates to ERROR when the gap is symbol-specific — i.e. most other
-   * symbols are arriving fine on Binance but this one isn't. That pattern
-   * means the feed is healthy and the symbol itself is the problem
-   * (wrong stream name, delisted pair, mirror lag), which is actionable;
-   * a feed-wide outage is just degraded mode and stays a warning.
-   */
-  private warnBinanceStaleThrottled(
+  private warnTierStaleThrottled(
     teamId: number,
-    binanceSymbol: string,
-    coingeckoPrice: string
+    tier: "coinbase" | "binance",
+    symbol: string,
+    usedSource: PriceSource,
+    usedPrice: string
   ): void {
     const now = Date.now();
-    const last = this.lastStaleWarnAt.get(teamId) ?? 0;
+    const key = `${teamId}:${tier}`;
+    const last = this.lastStaleWarnAt.get(key) ?? 0;
     if (now - last < STALE_WARN_THROTTLE_MS) return;
-    this.lastStaleWarnAt.set(teamId, now);
+    this.lastStaleWarnAt.set(key, now);
 
-    const health = this.binanceHealth();
+    const health = tier === "coinbase" ? this.coinbaseHealth() : this.binanceHealth();
     if (health.fresh >= Math.ceil(health.total / 2) && health.total > 1) {
-      logger.error("[PriceFeed] SYMBOL FEED GAP — Binance healthy overall, no ticks for this symbol", {
+      logger.error(`[PriceFeed] SYMBOL FEED GAP — ${tier} healthy overall, no ticks for this symbol`, {
         teamId,
-        binanceSymbol,
+        symbol,
         healthySymbols: `${health.fresh}/${health.total}`,
-        coingeckoPrice,
-        hint: "Check the symbol is listed on Binance spot and the WS stream name matches (e.g. somiusdt@miniTicker).",
+        usedSource,
+        usedPrice,
+        hint: "Check the pair/symbol is listed and the poller/WS stream name matches.",
       });
       return;
     }
-    logger.warn("[PriceFeed] Binance stale/missing — using CoinGecko fallback", {
+    logger.warn(`[PriceFeed] ${tier} stale/missing — using ${usedSource} fallback`, {
       teamId,
-      binanceSymbol,
-      coingeckoPrice,
+      symbol,
+      usedPrice,
     });
   }
 
-  /** How many teams currently have a fresh Binance tick (feed-health check). */
+  private coinbaseHealth(): { fresh: number; total: number } {
+    const now = Date.now();
+    let fresh = 0;
+    let total = 0;
+    for (const t of this.teams) {
+      if (!t.coinbasePair) continue;
+      total++;
+      const tick = this.coinbase.getLatest(t.coinbasePair);
+      if (tick && now - tick.receivedAtMs <= this.coinbaseStaleAfterMs) fresh++;
+    }
+    return { fresh, total };
+  }
+
   private binanceHealth(): { fresh: number; total: number } {
     const now = Date.now();
     let fresh = 0;
@@ -250,7 +265,7 @@ export class PriceFeed {
     for (const t of this.teams) {
       if (!t.binanceSymbol) continue;
       total++;
-      for (const feed of this.primaries) {
+      for (const feed of this.binancePrimaries) {
         const tick = feed.getLatest(t.binanceSymbol);
         if (tick && now - tick.receivedAtMs <= this.binanceStaleAfterMs) {
           fresh++;
@@ -261,13 +276,21 @@ export class PriceFeed {
     return { fresh, total };
   }
 
-  /**
-   * Binance symbols with no fresh tick, returned only when the feed is
-   * healthy overall (majority of symbols fresh). A symbol-specific gap
-   * while the WS is healthy means the mirror silently dropped that
-   * stream (verified with SOMIUSDT on data-stream.binance.vision) — the
-   * caller should REST gap-fill exactly these symbols.
-   */
+  coinbaseGapPairs(): string[] {
+    const health = this.coinbaseHealth();
+    if (health.total <= 1 || health.fresh < Math.ceil(health.total / 2)) return [];
+    const now = Date.now();
+    const gaps: string[] = [];
+    for (const t of this.teams) {
+      if (!t.coinbasePair) continue;
+      const tick = this.coinbase.getLatest(t.coinbasePair);
+      if (!tick || now - tick.receivedAtMs > this.coinbaseStaleAfterMs) {
+        gaps.push(t.coinbasePair);
+      }
+    }
+    return gaps;
+  }
+
   binanceGapSymbols(): string[] {
     const health = this.binanceHealth();
     if (health.total <= 1 || health.fresh < Math.ceil(health.total / 2)) return [];
@@ -276,7 +299,7 @@ export class PriceFeed {
     for (const t of this.teams) {
       if (!t.binanceSymbol) continue;
       let fresh = false;
-      for (const feed of this.primaries) {
+      for (const feed of this.binancePrimaries) {
         const tick = feed.getLatest(t.binanceSymbol);
         if (tick && now - tick.receivedAtMs <= this.binanceStaleAfterMs) {
           fresh = true;
@@ -288,10 +311,12 @@ export class PriceFeed {
     return gaps;
   }
 
-  /** Human-readable one-liner for logs / the live API. */
   describeQuote(q: ValidatedPrice): string {
     return (
       `team=${q.teamId} price=${scaledToPrice(q.scaled)} source=${q.source}` +
+      (q.coinbasePrice !== null ? ` cb=${q.coinbasePrice}` : "") +
+      (q.binancePrice !== null ? ` bin=${q.binancePrice}` : "") +
+      (q.coingeckoPrice !== null ? ` cg=${q.coingeckoPrice}` : "") +
       (q.deviationBps !== null ? ` dev=${(q.deviationBps / 100).toFixed(3)}%` : " dev=n/a")
     );
   }
