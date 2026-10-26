@@ -71,6 +71,8 @@ services:
       # REQUIRED — boot fails without it (a stale fallback serves empty markets).
       - key: MARKET_FACTORY_ADDRESS
         value: "0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1"
+      - key: NEW_MARKET_FACTORY_ADDRESS
+        value: "0xac04f4ff8b2e71984cb25e75456915c81075acdc"
 
       # --- price feeds (defaults are fine) ------------------------------------
       - key: BINANCE_REST_BASE_URL

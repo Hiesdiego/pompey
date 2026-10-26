@@ -3,7 +3,9 @@
 import type { Metadata } from "next";
 import { parseAbi, decodeAbiParameters, parseAbiParameters } from "viem";
 import { getPublicClient } from "../../../hooks/usePublicClient";
-import { backendUrl, isNumericId, siteUrl } from "../../api/social/og/_shared";
+import { backendUrl, siteUrl } from "../../api/social/og/_shared";
+import { targetCoinById } from "../../../lib/targetCoins";
+import { marketFromRoute } from "../../../lib/marketFactory";
 
 export const revalidate = 60;
 
@@ -11,9 +13,8 @@ const FACTORY_ABI = parseAbi([
   "function marketInfo(uint256 marketId) external view returns (uint8 templateId, address creator, string creatorName, uint64 createdAt, uint64 bettingCloseTime, uint64 endTime, uint64 voidAfter, bytes params, uint8 outcomeCount)",
 ]);
 
-async function marketQuestion(marketId: bigint): Promise<string | null> {
+async function marketQuestion(marketId: bigint, factory: `0x${string}`): Promise<string | null> {
   try {
-    const factory = process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS as `0x${string}`;
     if (!factory) return null;
     const client = getPublicClient();
     const info = await client.readContract({
@@ -42,7 +43,7 @@ async function marketQuestion(marketId: bigint): Promise<string | null> {
         parseAbiParameters("uint16, uint256, uint64, bool"),
         params
       );
-      return `Will ${sym(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return `Will ${targetCoinById(Number(teamId))?.symbol ?? sym(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
     if (templateId === 4) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);
@@ -73,8 +74,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
   const site = siteUrl();
-  const validId = isNumericId(id);
-  const question = validId ? await marketQuestion(BigInt(id)) : null;
+  const route = marketFromRoute(id);
+  const question = route ? await marketQuestion(route.id, route.factory) : null;
   const title = question ? `${question} — TICKR` : `Market ${id} — TICKR`;
   const description = question
     ? `${question} Pick your lineup and back your team on TICKR.`

@@ -22,6 +22,29 @@ export const MARKET_FACTORY_ADDRESS = envAddress(
   process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS
 ) as Address;
 
+export const NEW_MARKET_FACTORY_ADDRESS = envAddress(
+  process.env.NEXT_PUBLIC_NEW_MARKET_FACTORY_ADDRESS ||
+    (process.env.NEXT_PUBLIC_TICKR_CHAIN_ENV === "mainnet"
+      ? ""
+      : "0xac04f4ff8b2e71984cb25e75456915c81075acdc")
+) as Address;
+
+export function marketRouteKey(factory: Address, id: number | bigint): string {
+  return NEW_MARKET_FACTORY_ADDRESS &&
+    NEW_MARKET_FACTORY_ADDRESS.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase() &&
+    factory.toLowerCase() === NEW_MARKET_FACTORY_ADDRESS.toLowerCase()
+    ? `n-${id}`
+    : String(id);
+}
+
+export function marketFromRoute(key: string): { id: bigint; factory: Address } | null {
+  const isNew = key.startsWith("n-");
+  const idPart = isNew ? key.slice(2) : key;
+  if (!/^(0|[1-9]\d*)$/.test(idPart)) return null;
+  const factory = isNew ? NEW_MARKET_FACTORY_ADDRESS : MARKET_FACTORY_ADDRESS;
+  return factory ? { id: BigInt(idPart), factory } : null;
+}
+
 /** v0.2: creation fee / seed liquidity (250 TICK, 18 decimals). */
 export const CREATION_SEED_TICK = 250;
 /** v0.2: minimum stake on factory markets (mirrors PredictionPool). */

@@ -82,13 +82,13 @@ export default buildModule("TickrV02Module", (m) => {
     "Bitcoin", "Ethereum", "Somnia", "Binance Coin", "Solana",
     "Cardano", "Ripple", "Polygon", "Dogecoin", "Avalanche",
     "Litecoin", "Sui", "Tron", "Chainlink", "Polkadot",
-    "Near", "Ton", "Filecoin", "Cosmos", "Shiba Inu",
+    "Near", "Gram", "Filecoin", "Cosmos", "Shiba Inu",
   ];
   const teamSymbols = [
     "BTC", "ETH", "SOMI", "BNB", "SOL",
     "ADA", "XRP", "POL", "DOGE", "AVAX",
     "LTC", "SUI", "TRX", "LINK", "DOT",
-    "NEAR", "TON", "FIL", "ATOM", "SHIB",
+    "NEAR", "GRAM", "FIL", "ATOM", "SHIB",
   ];
   const teamRegistrySeason1 = m.contract("TeamRegistry", [owner, teamNames, teamSymbols], {
     id: "TeamRegistrySeason1",

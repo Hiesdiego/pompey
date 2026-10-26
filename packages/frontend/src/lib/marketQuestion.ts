@@ -9,6 +9,7 @@
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TEMPLATES, TEMPLATE_NAMES } from "./marketFactory";
 import type { ApiFixture, ApiFixtureTeam } from "./api";
+import { targetCoinById } from "./targetCoins";
 
 export interface TeamRef {
   teamId: number;
@@ -77,7 +78,7 @@ export function marketQuestion(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         paramsHex as `0x${string}`
       );
-      return `Will ${teamSymbol(teams, team)} finish ${above ? "at or above" : "at or below"} $${(
+      return `Will ${targetCoinById(Number(team))?.symbol ?? teamSymbol(teams, team)} finish ${above ? "at or above" : "at or below"} $${(
         Number(price) / 1e8
       ).toLocaleString()}?`;
     }

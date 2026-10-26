@@ -56,7 +56,8 @@ async function main(): Promise<void> {
 
   const factory = await viem.deployContract("MarketFactory", [...constructorArgs]);
   console.log("MarketFactory:", factory.address);
-  console.log(`NEXT_PUBLIC_MARKET_FACTORY_ADDRESS=${factory.address}`);
+  console.log(`NEW_MARKET_FACTORY_ADDRESS=${factory.address}`);
+  console.log(`NEXT_PUBLIC_NEW_MARKET_FACTORY_ADDRESS=${factory.address}`);
 }
 
 main().catch((error) => {

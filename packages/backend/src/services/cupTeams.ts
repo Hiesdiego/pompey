@@ -1,6 +1,8 @@
 
 import type { TeamPriceMap } from "./priceFeed.js";
 
+export const CUP_TARGET_ORACLE_OFFSET = 1000;
+
 interface CupTeamDef {
   teamId: number;
   symbol: string;
@@ -15,7 +17,7 @@ const DEFS: CupTeamDef[] = [
   { teamId: 2, symbol: "BNB", coinbasePair: "BNB-USD", binanceSymbol: "BNBUSDT", coingeckoId: "binancecoin" },
   { teamId: 3, symbol: "XRP", coinbasePair: "XRP-USD", binanceSymbol: "XRPUSDT", coingeckoId: "ripple" },
   { teamId: 4, symbol: "SOL", coinbasePair: "SOL-USD", binanceSymbol: "SOLUSDT", coingeckoId: "solana" },
-  { teamId: 5, symbol: "TRON", coinbasePair: "TRX-USD", binanceSymbol: "TRXUSDT", coingeckoId: "tron" },
+  { teamId: 5, symbol: "TRON", coinbasePair: "", binanceSymbol: "TRXUSDT", coingeckoId: "tron" },
   { teamId: 6, symbol: "HYPE", coinbasePair: "HYPE-USD", binanceSymbol: "HYPEUSDT", coingeckoId: "hyperliquid" },
   { teamId: 7, symbol: "ZEC", coinbasePair: "ZEC-USD", binanceSymbol: "ZECUSDT", coingeckoId: "zcash" },
   { teamId: 8, symbol: "DOGE", coinbasePair: "DOGE-USD", binanceSymbol: "DOGEUSDT", coingeckoId: "dogecoin" },
@@ -32,7 +34,7 @@ const DEFS: CupTeamDef[] = [
   { teamId: 19, symbol: "WAL", coinbasePair: "WAL-USD", binanceSymbol: "WALUSDT", coingeckoId: "walrus-2" },
   { teamId: 20, symbol: "HBAR", coinbasePair: "HBAR-USD", binanceSymbol: "HBARUSDT", coingeckoId: "hedera-hashgraph" },
   { teamId: 21, symbol: "SUI", coinbasePair: "SUI-USD", binanceSymbol: "SUIUSDT", coingeckoId: "sui" },
-  { teamId: 22, symbol: "GRAM", coinbasePair: "TON-USD", binanceSymbol: "GRAMUSDT", coingeckoId: "" },
+  { teamId: 22, symbol: "GRAM", coinbasePair: "TON-USD", binanceSymbol: "GRAMUSDT", coingeckoId: "the-open-network" },
   { teamId: 23, symbol: "TAO", coinbasePair: "TAO-USD", binanceSymbol: "TAOUSDT", coingeckoId: "bittensor" },
   { teamId: 24, symbol: "XAUT", coinbasePair: "", binanceSymbol: "XAUTUSDT", coingeckoId: "tether-gold" },
   { teamId: 25, symbol: "PUMP", coinbasePair: "PUMP-USD", binanceSymbol: "PUMPUSDT", coingeckoId: "pump-fun" },

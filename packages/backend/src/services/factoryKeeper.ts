@@ -116,10 +116,11 @@ export class FactoryKeeper {
   private readonly walletClient: WalletClient;
   private readonly account: PrivateKeyAccount;
   private readonly chain: Chain;
-  private readonly queue = new TxQueue();
+  private static readonly queue = new TxQueue();
   private loop: LoopHandle | null = null;
+  private scanCursor: bigint | null = null;
 
-  constructor(private readonly db: SupabaseClient | null) {
+  constructor(private readonly db: SupabaseClient | null, private readonly factory: `0x${string}` = config.contracts.marketFactory) {
     this.chain = tickrChain();
     this.publicClient = publicClient;
     this.account = privateKeyToAccount(config.backendSignerPrivateKey as `0x${string}`);
@@ -146,7 +147,7 @@ export class FactoryKeeper {
   }
 
   private async resolveDueMarkets(): Promise<void> {
-    const factory = config.contracts.marketFactory as `0x${string}` | undefined;
+    const factory = this.factory;
     if (!factory) {
       logger.warn("[FactoryKeeper] no marketFactory address configured — skipping");
       return;
@@ -175,7 +176,7 @@ export class FactoryKeeper {
 
       attempted++;
       try {
-        const hash = await this.queue.enqueue(() =>
+        const hash = await FactoryKeeper.queue.enqueue(() =>
           this.walletClient.writeContract({
             address: factory,
             abi: FACTORY_ABI,
@@ -226,7 +227,7 @@ export class FactoryKeeper {
       logger.warn("[FactoryKeeper] index query failed — falling back to on-chain scan", {
         error: error.message,
       });
-      return this.candidatesFromChain(config.contracts.marketFactory);
+      return this.candidatesFromChain(this.factory);
     }
     return ((data ?? []) as Array<{ market_id: string }>).map((r) => BigInt(r.market_id));
   }
@@ -244,9 +245,14 @@ export class FactoryKeeper {
       })
     )) as bigint;
     if (count === 0n) return [];
-    const start = count > FALLBACK_SCAN_LIMIT ? count - FALLBACK_SCAN_LIMIT : 0n;
     const ids: bigint[] = [];
-    for (let id = count - 1n; id >= start; id--) ids.push(id); // newest-first
+    let id = this.scanCursor === null || this.scanCursor >= count ? count - 1n : this.scanCursor;
+    const limit = count < FALLBACK_SCAN_LIMIT ? count : FALLBACK_SCAN_LIMIT;
+    for (let scanned = 0n; scanned < limit; scanned++) {
+      ids.push(id);
+      id = id === 0n ? count - 1n : id - 1n;
+    }
+    this.scanCursor = id;
     return ids;
   }
 

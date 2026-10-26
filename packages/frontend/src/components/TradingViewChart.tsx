@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import { getTeamById } from "@tickr/shared/teams";
 import { cupChartSymbol, cupTeamName } from "../lib/cup";
+import { CUP_TARGET_ORACLE_OFFSET, targetCoinById } from "../lib/targetCoins";
 
 export function TradingViewChart({ teamId, height = 220, cup = false }: { teamId: number; height?: number; cup?: boolean }) {
   const container = useRef<HTMLDivElement>(null);
   const team = getTeamById(teamId);
-  const symbol = cup ? cupChartSymbol(teamId) : team ? `BINANCE:${team.binanceSymbol}` : null;
-  const name = cup ? cupTeamName(teamId) : team?.name;
+  const targetCupTeamId = teamId >= CUP_TARGET_ORACLE_OFFSET ? targetCoinById(teamId)?.cupTeamId : undefined;
+  const symbol = cup ? cupChartSymbol(teamId) : targetCupTeamId !== undefined ? cupChartSymbol(targetCupTeamId) : team ? `BINANCE:${team.binanceSymbol}` : null;
+  const name = cup ? cupTeamName(teamId) : targetCupTeamId !== undefined ? cupTeamName(targetCupTeamId) : team?.name;
 
   useEffect(() => {
     const root = container.current;

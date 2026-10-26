@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { backendUrl } from "../app/api/social/og/_shared";
+import { fetchMarketsDirect } from "../lib/chainDirect";
+import { MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 
 type FooterLink = { href: string; label: string; sortAt: number };
 
@@ -8,9 +10,12 @@ async function getDynamicLinks(): Promise<FooterLink[]> {
   const base = backendUrl();
   const options = { next: { revalidate: 300 }, signal: AbortSignal.timeout(3_000) };
 
-  const [fixturesResult, marketsResult] = await Promise.allSettled([
+  const [fixturesResult, marketsResult, newMarketsResult] = await Promise.allSettled([
     fetch(`${base}/api/fixtures`, options).then((res) => res.ok ? res.json() : []),
     fetch(`${base}/api/chain/markets`, options).then((res) => res.ok ? res.json() : null),
+    NEW_MARKET_FACTORY_ADDRESS && NEW_MARKET_FACTORY_ADDRESS.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase()
+      ? fetchMarketsDirect(NEW_MARKET_FACTORY_ADDRESS)
+      : Promise.resolve(null),
   ]);
 
   const links: FooterLink[] = [];
@@ -39,6 +44,19 @@ async function getDynamicLinks(): Promise<FooterLink[]> {
           sortAt: Number(market.bettingCloseTime),
         });
       }
+    }
+  }
+
+  if (newMarketsResult.status === "fulfilled" && newMarketsResult.value) {
+    const now = Math.floor(Date.now() / 1000);
+    const templateNames = ["Matchday Top Gainer", "Season Champion", "Head-to-Head", "Price Target", "Spread"];
+    for (const market of newMarketsResult.value.markets) {
+      if (market.state !== 0 || Number(market.bettingCloseTime) <= now) continue;
+      links.push({
+        href: `/markets/${market.marketKey ?? `n-${market.id}`}`,
+        label: `${templateNames[market.templateId] ?? "Prediction Market"} #${market.id}`,
+        sortAt: Number(market.bettingCloseTime),
+      });
     }
   }
 

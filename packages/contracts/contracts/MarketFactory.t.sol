@@ -361,6 +361,21 @@ contract MarketFactoryTest is Test {
 
     // --- TARGET template ---
 
+    function test_TargetAcceptsCupOracleIdsAndRejectsOutsideRange() public {
+        _approveAll(creator);
+        uint8 templateId = factory.T_TARGET();
+        uint16 firstCupId = factory.CUP_TARGET_ORACLE_OFFSET();
+        uint16 lastCupId = firstCupId + factory.CUP_TARGET_COUNT() - 1;
+        uint64 atTime = uint64(block.timestamp) + 3 hours;
+
+        vm.startPrank(creator);
+        factory.createMarket(templateId, abi.encode(firstCupId, 105 * ONE, atTime, true), "first");
+        factory.createMarket(templateId, abi.encode(lastCupId, 105 * ONE, atTime, true), "last");
+        vm.expectRevert(MarketFactory.InvalidParams.selector);
+        factory.createMarket(templateId, abi.encode(lastCupId + 1, 105 * ONE, atTime, true), "outside");
+        vm.stopPrank();
+    }
+
     function test_TargetResolvesYes() public {
         _approveAll(creator);
         _approveAll(alice);

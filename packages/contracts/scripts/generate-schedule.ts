@@ -66,8 +66,8 @@ async function main(): Promise<void> {
     console.log("intervalSec :", intervalSec.toString());
   } else {
     // Resuming — reuse the timing pinned on-chain by the first batch.
-    seasonStart = await matchRegistry.read.seasonStartTimestamp();
-    intervalSec = await matchRegistry.read.matchdayIntervalSeconds();
+    seasonStart = await matchRegistry.read.seasonStartTimestamp() as bigint;
+    intervalSec = await matchRegistry.read.matchdayIntervalSeconds() as bigint;
     console.log(`Resuming from matchday ${start} (season timing pinned by first batch)`);
   }
 
@@ -107,8 +107,8 @@ async function main(): Promise<void> {
   let fixtureCount = 0n;
   let done = false;
   for (let attempt = 0; attempt < 6; attempt++) {
-    fixtureCount = await matchRegistry.read.fixtureCount();
-    done = await matchRegistry.read.scheduleGenerated();
+    fixtureCount = await matchRegistry.read.fixtureCount() as bigint;
+    done = await matchRegistry.read.scheduleGenerated() as boolean;
     if (fixtureCount === BigInt(EXPECTED_FIXTURES) && done) break;
     await new Promise((resolve) => setTimeout(resolve, 4000));
   }

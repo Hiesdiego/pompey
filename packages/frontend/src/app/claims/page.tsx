@@ -163,9 +163,9 @@ export default function ClaimsPage() {
       for (let i = 0; i < items.length; i++) {
         const c = items[i];
         if (c.kind === "market") {
-          if (!MARKET_FACTORY_ADDRESS) throw new Error("MarketFactory address not configured.");
+          if (!c.market.factoryAddress && !MARKET_FACTORY_ADDRESS) throw new Error("MarketFactory address not configured.");
           await write({
-            to: MARKET_FACTORY_ADDRESS,
+            to: c.market.factoryAddress ?? MARKET_FACTORY_ADDRESS,
             abi: MARKET_FACTORY_ABI,
             functionName: "claim",
             args: [BigInt(c.market.id)],
@@ -344,8 +344,8 @@ export default function ClaimsPage() {
           <div className="space-y-3">
             {items.map((c) => c.kind === "market" ? (
               <Link
-                key={`market-${c.market.id}`}
-                href={`/markets/${c.market.id}`}
+                key={`market-${c.market.marketKey ?? c.market.id}`}
+                href={`/markets/${c.market.marketKey ?? c.market.id}`}
                 className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
               >
                 <div className="flex flex-1 flex-col gap-1">

@@ -65,6 +65,8 @@ contract MarketFactory is Ownable, ReentrancyGuard {
     uint8 public constant T_CHAMPION = 1;
     uint8 public constant T_H2H = 2;
     uint8 public constant T_TARGET = 3;
+    uint16 public constant CUP_TARGET_ORACLE_OFFSET = 1000;
+    uint16 public constant CUP_TARGET_COUNT = 64;
     uint8 public constant T_SPREAD = 4;
     uint8 public constant TEMPLATE_COUNT = 5;
 
@@ -653,7 +655,10 @@ contract MarketFactory is Ownable, ReentrancyGuard {
                 abi.decode(params, (uint16, uint256, uint64, bool));
             above; // silence unused warning (kept for signature clarity)
             uint16 n = _teamCount(seasonRegistry.currentSeasonId());
-            if (teamId >= n) revert InvalidParams();
+            if (
+                teamId >= n &&
+                (teamId < CUP_TARGET_ORACLE_OFFSET || teamId >= CUP_TARGET_ORACLE_OFFSET + CUP_TARGET_COUNT)
+            ) revert InvalidParams();
             if (targetPrice == 0) revert InvalidParams();
             if (atTime <= now_ + MIN_MARKET_LEAD) revert InvalidParams();
             if (atTime > now_ + MAX_MARKET_WINDOW) revert InvalidParams();

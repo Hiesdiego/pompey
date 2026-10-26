@@ -35,7 +35,8 @@ import { getPublicClient } from "../../../hooks/usePublicClient";
 import { useTeams } from "../../../hooks/useTeams";
 import { useContractWrite } from "../../../hooks/useContractWrite";
 import {
-  MARKET_FACTORY_ADDRESS,
+  NEW_MARKET_FACTORY_ADDRESS,
+  marketRouteKey,
   MARKET_FACTORY_ABI,
   TEMPLATES,
   TEMPLATE_NAMES,
@@ -48,6 +49,7 @@ import { cn } from "../../../lib/cn";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
+import { LEAGUE_TARGET_COINS, TARGET_COINS } from "../../../lib/targetCoins";
 
 const TEMPLATE_IDS = [
   TEMPLATES.TOP_GAINER,
@@ -110,6 +112,8 @@ export default function CreateMarketPage() {
   const publicClient = getPublicClient();
   const { teams } = useTeams();
   const { prices, status: priceFeedStatus } = usePriceFeed(true);
+  const [cupTargetsEnabled, setCupTargetsEnabled] = useState(false);
+  const targetCoins = cupTargetsEnabled ? TARGET_COINS : LEAGUE_TARGET_COINS;
   const { write: writeApprove, status: approveStatus } = useContractWrite();
   const { write: writeCreate, status: createStatus } = useContractWrite();
   const { ready: walletReady } = useContractWrite();
@@ -149,6 +153,17 @@ export default function CreateMarketPage() {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
+    if (!NEW_MARKET_FACTORY_ADDRESS) return;
+    let active = true;
+    publicClient.readContract({
+      address: NEW_MARKET_FACTORY_ADDRESS,
+      abi: [{ type: "function", name: "CUP_TARGET_COUNT", stateMutability: "pure", inputs: [], outputs: [{ type: "uint16" }] }] as const,
+      functionName: "CUP_TARGET_COUNT",
+    }).then((count) => { if (active) setCupTargetsEnabled(Number(count) >= 64); }).catch(() => { if (active) setCupTargetsEnabled(false); });
+    return () => { active = false; };
+  }, [publicClient]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -157,7 +172,7 @@ export default function CreateMarketPage() {
   // from the factory. `createdTerms` holds "md:N" (top-gainer), "fixture:N"
   // (spread) and "champion" for terms that can never be reused.
   useEffect(() => {
-    if (!MARKET_FACTORY_ADDRESS) {
+    if (!NEW_MARKET_FACTORY_ADDRESS) {
       setTermsLoading(false);
       return;
     }
@@ -165,10 +180,10 @@ export default function CreateMarketPage() {
     (async () => {
       try {
         const fixtureList = await api.fixtures();
-        const count = (await publicClient.readContract({ address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketCount" })) as bigint;
+        const count = (await publicClient.readContract({ address: NEW_MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketCount" })) as bigint;
         const ids = Array.from({ length: Number(count) }, (_, i) => BigInt(i));
         const infos = ids.length === 0 ? [] : await publicClient.multicall({
-          contracts: ids.map((id) => ({ address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [id] })) as any,
+          contracts: ids.map((id) => ({ address: NEW_MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [id] })) as any,
           allowFailure: true,
         }) as any[];
         const terms = new Set<string>();
@@ -289,6 +304,9 @@ export default function CreateMarketPage() {
       if (templateId === TEMPLATES.CHAMPION && championAlreadyCreated) {
         throw new Error("The season champion market has already been created");
       }
+      if (templateId === TEMPLATES.TARGET && !targetCoins.some((coin) => coin.teamId === Number(targetTeam))) {
+        throw new Error("Select an available coin");
+      }
       if (templateId === TEMPLATES.SPREAD) {
         const opt = fixtureOptions.find((o) => String(o.fixture.fixtureId) === spreadFixture);
         if (!opt) throw new Error("Select a fixture from the list");
@@ -328,9 +346,10 @@ export default function CreateMarketPage() {
     matchdayCards,
     fixtureOptions,
     championAlreadyCreated,
+    targetCoins,
   ]);
 
-  if (!MARKET_FACTORY_ADDRESS) {
+  if (!NEW_MARKET_FACTORY_ADDRESS) {
     return (
       <div className="py-10">
         <ErrorState
@@ -342,7 +361,7 @@ export default function CreateMarketPage() {
   }
 
   const busy = approveStatus === "pending" || createStatus === "pending";
-  const selectedTeam = teams?.find((team) => team.teamId === Number(targetTeam));
+  const selectedTeam = targetCoins.find((team) => team.teamId === Number(targetTeam));
   const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
   const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
   const previewTitle = templateId === TEMPLATES.TARGET
@@ -372,7 +391,7 @@ export default function CreateMarketPage() {
     });
 
     const activeRaw = (await publicClient.readContract({
-      address: MARKET_FACTORY_ADDRESS,
+      address: NEW_MARKET_FACTORY_ADDRESS,
       abi: MARKET_FACTORY_ABI,
       functionName: "activeMarket",
       args: [templateId, params],
@@ -392,7 +411,7 @@ export default function CreateMarketPage() {
     // against a factory deployed before the createdMarket getter existed.
     try {
       const createdRaw = (await publicClient.readContract({
-        address: MARKET_FACTORY_ADDRESS,
+        address: NEW_MARKET_FACTORY_ADDRESS,
         abi: MARKET_FACTORY_ABI,
         functionName: "createdMarket",
         args: [templateId, params],
@@ -415,20 +434,20 @@ export default function CreateMarketPage() {
       address: CONTRACTS.tickToken as `0x${string}`,
       abi: TICK_TOKEN_ABI,
       functionName: "allowance",
-      args: [address, MARKET_FACTORY_ADDRESS],
+      args: [address, NEW_MARKET_FACTORY_ADDRESS],
     })) as bigint;
     if (allowance < seedWei) {
       await writeApprove({
         address: CONTRACTS.tickToken as `0x${string}`,
         abi: TICK_TOKEN_ABI,
         functionName: "approve",
-        args: [MARKET_FACTORY_ADDRESS, seedWei],
+        args: [NEW_MARKET_FACTORY_ADDRESS, seedWei],
       });
     }
 
     // 2. Create the market.
     await writeCreate({
-      address: MARKET_FACTORY_ADDRESS,
+      address: NEW_MARKET_FACTORY_ADDRESS,
       abi: MARKET_FACTORY_ABI,
       functionName: "createMarket",
       args: [templateId, params, (myProfile?.username || creatorName).slice(0, 32)],
@@ -525,12 +544,13 @@ export default function CreateMarketPage() {
           <TemplateParamsForm
             templateId={templateId}
             teams={teams ?? []}
+            targetCoins={targetCoins}
             matchdayCards={matchdayCards}
             fixtureOptions={fixtureOptions}
             termsLoading={termsLoading}
             targetMin={targetMin}
             targetMax={targetMax}
-            currentTargetPrice={prices[teams.find((team) => team.teamId === Number(targetTeam))?.symbol ?? ""] ?? null}
+            currentTargetPrice={prices[selectedTeam?.symbol ?? ""] ?? null}
             priceFeedStatus={priceFeedStatus}
             values={{
               matchdayIndex,
@@ -633,7 +653,7 @@ export default function CreateMarketPage() {
           {duplicateMarketId !== null && (
             <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
               An unresolved market with these exact terms already exists. You can join it instead: {" "}
-              <button className="underline" onClick={() => router.push(`/markets/${duplicateMarketId}`)}>
+              <button className="underline" onClick={() => router.push(`/markets/${marketRouteKey(NEW_MARKET_FACTORY_ADDRESS, duplicateMarketId)}`)}>
                 view market #{duplicateMarketId.toString()}
               </button>
             </p>
@@ -642,7 +662,7 @@ export default function CreateMarketPage() {
             <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
               A market with these exact terms was already created (market #{reusedMarketId.toString()},
               now settled or voided). Terms can&apos;t be reused — pick a different matchday, fixture, or spread.{" "}
-              <button className="underline" onClick={() => router.push(`/markets/${reusedMarketId}`)}>
+              <button className="underline" onClick={() => router.push(`/markets/${marketRouteKey(NEW_MARKET_FACTORY_ADDRESS, reusedMarketId)}`)}>
                 view market #{reusedMarketId.toString()}
               </button>
             </p>
@@ -736,6 +756,7 @@ function encodeParams(templateId: number, v: ParamValues): `0x${string}` {
 function TemplateParamsForm({
   templateId,
   teams,
+  targetCoins,
   matchdayCards,
   fixtureOptions,
   termsLoading,
@@ -747,6 +768,7 @@ function TemplateParamsForm({
 }: {
   templateId: number;
   teams: { teamId: number; symbol: string; name: string }[];
+  targetCoins: { teamId: number; symbol: string; name: string }[];
   matchdayCards: MatchdayCard[];
   fixtureOptions: FixtureOption[];
   termsLoading: boolean;
@@ -874,7 +896,7 @@ function TemplateParamsForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className={labelCls}>Coin</label>
-          <TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={teams} inputCls={inputCls} searchable />
+          <TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={targetCoins} inputCls={inputCls} searchable />
         </div>
         <div>
           <label className={labelCls}>Direction</label>
@@ -891,7 +913,7 @@ function TemplateParamsForm({
           <label className={labelCls}>Target price (USD)</label>
           <p className="mb-2 text-xs text-zinc-500" aria-live="polite">
             {currentTargetPrice !== null
-              ? <>Current {teams.find((team) => team.teamId === Number(v.targetTeam))?.symbol ?? "coin"} price: <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">${currentTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span> <span className="text-zinc-400">({priceFeedStatus === "live" ? "live" : priceFeedStatus === "polling" ? "updating" : "stale"} guide)</span></>
+              ? <>Current {targetCoins.find((team) => team.teamId === Number(v.targetTeam))?.symbol ?? "coin"} price: <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">${currentTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span> <span className="text-zinc-400">({priceFeedStatus === "live" ? "live" : priceFeedStatus === "polling" ? "updating" : "stale"} guide)</span></>
               : "Current coin price is loading; it will appear here as a guide."}
           </p>
           <input

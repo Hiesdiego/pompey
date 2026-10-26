@@ -21,12 +21,14 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
+import { targetCoinById } from "../../lib/targetCoins";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { useTickr } from "../../hooks/useTickr";
 import { useTeams } from "../../hooks/useTeams";
 import {
   MARKET_FACTORY_ADDRESS,
+  NEW_MARKET_FACTORY_ADDRESS,
   MARKET_FACTORY_ABI,
   TEMPLATE_NAMES,
   TEMPLATES,
@@ -52,6 +54,8 @@ import { useMarketFees } from "../../lib/query/useMarketFees";
 
 export interface MarketSummary {
   id: bigint;
+  marketKey: string;
+  factoryAddress: `0x${string}`;
   templateId: number;
   creator: string;
   creatorName: string;
@@ -75,6 +79,8 @@ function useMarkets() {
   useFactoryEvents();
   const markets = useMemo<MarketSummary[] | null>(() => summaries?.map((s) => ({
     id: BigInt(s.id),
+    marketKey: s.marketKey ?? String(s.id),
+    factoryAddress: s.factoryAddress ?? MARKET_FACTORY_ADDRESS,
     templateId: s.templateId,
     creator: s.creator,
     creatorName: s.creatorName,
@@ -149,7 +155,7 @@ function outcomeLabel(
 }
 
 function teamSymbol(teams: TeamRef[], teamId: number): string {
-  return teams.find((t) => t.teamId === teamId)?.symbol ?? `#${teamId}`;
+  return teams.find((t) => t.teamId === teamId)?.symbol ?? targetCoinById(teamId)?.symbol ?? `#${teamId}`;
 }
 
 /** Full spread context: fixture teams in home/away order, the spread in goals, timing. */
@@ -266,6 +272,8 @@ function MarketCard({
   feesBps: readonly [number, number, number] | null;
   quoteAsOf: number;
 }) {
+  const { feesBps: factoryFees } = useMarketFees(market.factoryAddress);
+  const effectiveFeesBps = factoryFees ?? (market.factoryAddress.toLowerCase() === MARKET_FACTORY_ADDRESS?.toLowerCase() ? feesBps : null);
   const nowSec = Math.floor(Date.now() / 1000);
   const bettingOpen = market.state === 0 && Number(market.bettingCloseTime) > nowSec;
   const pendingSettlement = market.state === 0 && Number(market.endTime) <= nowSec;
@@ -292,7 +300,7 @@ function MarketCard({
     index,
     label: outcomeLabel(market, index, teams, fixtures),
     share: stakedTotal > 0n ? Number((total * 10_000n) / stakedTotal) / 100 : 0,
-    odds: bettingOpen && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null,
+    odds: bettingOpen && effectiveFeesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps: effectiveFeesBps })?.multiplier ?? null : null,
     total,
     teamId: outcomeTeamId(market, index, fixtures),
   }));
@@ -302,10 +310,10 @@ function MarketCard({
   return (
     <div className="group relative flex h-full flex-col">
     <div className="absolute right-3 top-3 z-20">
-      <ShareButtons path={`/markets/${market.id.toString()}`} text={`${question} — predict on TICKR`} compact />
+      <ShareButtons path={`/markets/${market.marketKey}`} text={`${question} — predict on TICKR`} compact />
     </div>
     <Link
-      href={`/markets/${market.id.toString()}`}
+      href={`/markets/${market.marketKey}`}
       className="surface-card relative flex h-full flex-col overflow-hidden p-5 transition duration-300 hover:-translate-y-1 hover:border-[#2E7CF6]/40 hover:shadow-[0_20px_60px_rgba(46,124,246,.13)]"
     >
       <div className="relative flex items-center justify-between gap-3">
@@ -353,12 +361,14 @@ function MarketCard({
       </div>
       <QuickStakeSheet
         marketId={market.id}
+        marketKey={market.marketKey}
+        factoryAddress={market.factoryAddress}
         question={question}
         outcome={quickPick}
         outcomeTotals={market.outcomeTotals}
         totalStaked={market.totalStaked}
         seedAmount={market.seedAmount}
-        feesBps={feesBps}
+        feesBps={effectiveFeesBps}
         onClose={() => setQuickPick(null)}
       />
     </div>
@@ -411,19 +421,19 @@ export default function MarketsPage() {
     return { unresolved, featured, community, bounty, bountyCandidates };
   }, [markets]);
   const claimQuery = useQuery({
-    queryKey: ["marketClaims", playerAddress?.toLowerCase(), bountyCandidates.map((m) => m.id.toString())],
-    enabled: Boolean(playerAddress && MARKET_FACTORY_ADDRESS && bountyCandidates.length),
+    queryKey: ["marketClaims", playerAddress?.toLowerCase(), bountyCandidates.map((m) => m.marketKey)],
+    enabled: Boolean(playerAddress && bountyCandidates.length),
     gcTime: 0,
     refetchInterval: 15_000,
     queryFn: async () => {
-      if (!playerAddress || !MARKET_FACTORY_ADDRESS) return [] as string[];
+      if (!playerAddress) return [] as string[];
       const client = getPublicClient();
       const claimable: string[] = [];
       for (let offset = 0; offset < bountyCandidates.length; offset += 25) {
         const chunk = bountyCandidates.slice(offset, offset + 25);
         const claimedResults = await client.multicall({
           contracts: chunk.map((market) => ({
-            address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI,
+            address: market.factoryAddress, abi: MARKET_FACTORY_ABI,
             functionName: "claimed" as const, args: [market.id, playerAddress] as const,
           })),
           allowFailure: true,
@@ -436,7 +446,7 @@ export default function MarketsPage() {
         ));
         const stakeResults = await client.multicall({
           contracts: unclaimed.flatMap((market, index) => winningOutcomes[index].map((outcome) => ({
-            address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI,
+            address: market.factoryAddress, abi: MARKET_FACTORY_ABI,
             functionName: "stakes" as const, args: [market.id, playerAddress, BigInt(outcome)] as const,
           }))),
           allowFailure: true,
@@ -447,18 +457,18 @@ export default function MarketsPage() {
           const count = winningOutcomes[index].length;
           const hasWinningStake = stakeResults.slice(resultIndex, resultIndex + count)
             .some((result) => result.status === "success" && result.result > 0n);
-          if (hasWinningStake) claimable.push(market.id.toString());
+          if (hasWinningStake) claimable.push(market.marketKey);
           resultIndex += count;
         });
       }
       return claimable;
     },
   });
-  const winnings = bountyCandidates.filter((market) => claimQuery.data?.includes(market.id.toString()));
+  const winnings = bountyCandidates.filter((market) => claimQuery.data?.includes(market.marketKey));
   const winningsLoading = Boolean(playerAddress && bountyCandidates.length && claimQuery.isPending);
   const visible = tab === "all" ? unresolved : tab === "featured" ? featured : tab === "bounty" ? bounty : winnings;
 
-  if (!MARKET_FACTORY_ADDRESS) {
+  if (!MARKET_FACTORY_ADDRESS && !NEW_MARKET_FACTORY_ADDRESS) {
     return (
       <div className="py-10">
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div>
@@ -538,7 +548,7 @@ export default function MarketsPage() {
         />
       ) : tab === "bounty" || tab === "winnings" ? (
         <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((m) => <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />)}
+          {visible.map((m) => <MarketCard key={m.marketKey} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />)}
         </div>
       ) : (
         <div role="tabpanel">
@@ -551,7 +561,7 @@ export default function MarketsPage() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {cupConfigured && <CupOutrightMarketCard />}
                 {featured.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
+                  <MarketCard key={m.marketKey} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}
               </div>
             </section>
@@ -567,7 +577,7 @@ export default function MarketsPage() {
             {community.length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {community.map((m) => (
-                  <MarketCard key={m.id.toString()} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
+                  <MarketCard key={m.marketKey} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}
               </div>
             ) : (

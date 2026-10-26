@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CoinbasePoller } from "./coinbase.js";
 
-test("accepts Coinbase's documented spot response without a base field", async () => {
+test("accepts a Coinbase Exchange ticker price", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ data: { amount: "100.25", currency: "USD" } }), { status: 200 });
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), "https://api.exchange.coinbase.com/products/BTC-USD/ticker");
+    return new Response(JSON.stringify({ price: "100.25" }), { status: 200 });
+  };
   try {
-    const poller = new CoinbasePoller(["BTC-USD"], "https://api.coinbase.com", 60_000);
+    const poller = new CoinbasePoller(["BTC-USD"], "https://api.exchange.coinbase.com", 60_000);
     await poller.pollPairs(["BTC-USD"]);
     assert.equal(poller.getLatest("BTC-USD")?.price, "100.25");
   } finally {
@@ -14,11 +17,11 @@ test("accepts Coinbase's documented spot response without a base field", async (
   }
 });
 
-test("rejects a quote for the wrong currency", async () => {
+test("rejects a nonpositive Coinbase Exchange ticker price", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ data: { amount: "100.25", currency: "EUR" } }), { status: 200 });
+  globalThis.fetch = async () => new Response(JSON.stringify({ price: "0" }), { status: 200 });
   try {
-    const poller = new CoinbasePoller(["BTC-USD"], "https://api.coinbase.com", 60_000);
+    const poller = new CoinbasePoller(["BTC-USD"], "https://api.exchange.coinbase.com", 60_000);
     await poller.pollPairs(["BTC-USD"]);
     assert.equal(poller.getLatest("BTC-USD"), undefined);
   } finally {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TICKR_TEAMS } from "@tickr/shared/teams";
+import { TARGET_COINS } from "../targetCoins";
 import { BACKEND_API_URL } from "../contracts";
 
 export type PriceFeedStatus = "live" | "polling" | "stale";
@@ -19,7 +19,7 @@ interface PriceRow {
   ok?: boolean;
 }
 
-const TEAM_SYMBOLS = new Set(TICKR_TEAMS.map((team) => team.symbol));
+const TEAM_SYMBOLS = new Set(TARGET_COINS.map((coin) => coin.symbol));
 const POLL_MS = 15_000;
 const STALE_AFTER_MS = 180_000;
 

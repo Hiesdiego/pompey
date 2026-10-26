@@ -138,7 +138,7 @@ export class CoinbasePoller extends EventEmitter {
   }
 
   private async fetchPair(pair: string): Promise<string | null> {
-    const url = `${this.baseUrl}/v2/prices/${pair}/spot`;
+    const url = `${this.baseUrl}/products/${pair}/ticker`;
     let res: Response;
     try {
       res = await fetch(url, {
@@ -172,17 +172,15 @@ export class CoinbasePoller extends EventEmitter {
       });
       return null;
     }
-    let body: { data?: { amount?: string | number; base?: string; currency?: string } };
+    let body: { price?: string | number };
     try {
       body = (await res.json()) as typeof body;
     } catch {
-      logger.warn("[CoinbasePoller] unparseable spot body", { pair });
+      logger.warn("[CoinbasePoller] unparseable ticker body", { pair });
       return null;
     }
-    const amount = body?.data?.amount;
+    const amount = body.price;
     if (amount == null || String(amount).trim() === "") return null;
-    const [base, currency] = pair.split("-");
-    if ((body.data?.base && body.data.base !== base) || body.data?.currency !== currency) return null;
     if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return null;
     return String(amount);
   }

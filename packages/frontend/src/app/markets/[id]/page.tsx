@@ -53,6 +53,8 @@ import { queryClient } from "../../../lib/query/queryClient";
 import { celebrateClaim } from "../../../lib/confetti";
 import {
   MARKET_FACTORY_ADDRESS,
+  marketFromRoute,
+  marketRouteKey,
   MARKET_FACTORY_ABI,
   TEMPLATES,
   TEMPLATE_NAMES,
@@ -63,6 +65,7 @@ import {
   normalizeMarketSettlement,
 } from "../../../lib/marketFactory";
 import { CONTRACTS, TICK_TOKEN_ABI } from "../../../lib/contracts";
+import { targetCoinById } from "../../../lib/targetCoins";
 import { ErrorState, SkeletonMarketDetail } from "../../../components/States";
 import { Countdown } from "../../../components/Countdown";
 import { TeamBadge } from "../../../components/TeamBadge";
@@ -78,6 +81,7 @@ import { useMarketFees } from "../../../lib/query/useMarketFees";
 
 interface MarketDetail {
   id: bigint;
+  factoryAddress: `0x${string}`;
   templateId: number;
   creator: string;
   creatorName: string;
@@ -131,11 +135,11 @@ function useAnimatedValue(target: number, durationMs = 700): number {
 }
 
 function teamSymbol(teams: TeamRef[], teamId: number): string {
-  return teams.find((t) => t.teamId === teamId)?.symbol ?? `#${teamId}`;
+  return teams.find((t) => t.teamId === teamId)?.symbol ?? targetCoinById(teamId)?.symbol ?? `#${teamId}`;
 }
 
 function teamName(teams: TeamRef[], teamId: number): string {
-  return teams.find((t) => t.teamId === teamId)?.name ?? teamSymbol(teams, teamId);
+  return teams.find((t) => t.teamId === teamId)?.name ?? targetCoinById(teamId)?.name ?? teamSymbol(teams, teamId);
 }
 
 /** Full spread context: fixture teams in home/away order, spread in goals, timing. */
@@ -340,25 +344,28 @@ function StatePill({
 export default function MarketDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const id = BigInt(params.id as string);
+  const routeKey = params.id as string;
+  const route = marketFromRoute(routeKey);
+  const id = route?.id ?? 0n;
+  const factoryAddress = route?.factory ?? MARKET_FACTORY_ADDRESS;
   const { playerAddress: address } = useTickr();
   const publicClient = getPublicClient();
   const { teams } = useTeams();
   const { write, writeBatch, status } = useContractWrite();
   const { balance } = useTickBalance(address ?? null);
 
-  const { market: summary, isLoading: marketLoading, error: marketError, dataUpdatedAt: marketUpdatedAt } = useMarket(id);
-  const { feesBps } = useMarketFees();
+  const { market: summary, isLoading: marketLoading, error: marketError, dataUpdatedAt: marketUpdatedAt } = useMarket(routeKey);
+  const { feesBps } = useMarketFees(factoryAddress);
   useFactoryEvents();
   const market: MarketDetail | null = useMemo(() => summary ? {
-    id: BigInt(summary.id), templateId: summary.templateId, creator: summary.creator,
+    id: BigInt(summary.id), factoryAddress, templateId: summary.templateId, creator: summary.creator,
     creatorName: summary.creatorName, bettingCloseTime: BigInt(summary.bettingCloseTime),
     endTime: BigInt(summary.endTime), voidAfter: BigInt(summary.voidAfter),
     voidInitiatedAt: BigInt(summary.voidInitiatedAt), params: summary.params as `0x${string}`,
     outcomeCount: summary.outcomeCount, seedAmount: BigInt(summary.seedAmount),
     totalStaked: BigInt(summary.totalStaked), state: summary.state,
     winnerBitmap: BigInt(summary.winnerBitmap), payoutPerShare: BigInt(summary.payoutPerShare),
-  } : null, [summary]);
+  } : null, [summary, factoryAddress]);
   const outcomeTotals = useMemo(() => summary?.outcomeTotals.map((t) => BigInt(t)) ?? null, [summary]);
   const [userStakes, setUserStakes] = useState<bigint[] | null>(null);
   const [alreadyClaimed, setAlreadyClaimed] = useState(false);
@@ -373,21 +380,21 @@ export default function MarketDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (!address || !summary || !publicClient || !MARKET_FACTORY_ADDRESS) return;
+    if (!address || !summary || !publicClient || !factoryAddress) return;
     let alive = true;
     const calls = Array.from({ length: summary.outcomeCount }, (_, o) => ({
-      address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "stakes" as const,
+      address: factoryAddress, abi: MARKET_FACTORY_ABI, functionName: "stakes" as const,
       args: [id, address, BigInt(o)] as const,
     }));
     void publicClient.multicall({ contracts: calls, allowFailure: true }).then((results) => {
       if (alive) setUserStakes(results.map((r) => r.status === "success" ? r.result as bigint : 0n));
     }).catch(() => {});
-    void publicClient.readContract({ address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI,
+    void publicClient.readContract({ address: factoryAddress, abi: MARKET_FACTORY_ABI,
       functionName: "claimed", args: [id, address] }).then((value) => {
       if (alive) setAlreadyClaimed(value as boolean);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [address, id, summary, publicClient]);
+  }, [address, id, summary, publicClient, factoryAddress]);
 
   // Fixture directory (spread markets).
   useEffect(() => {
@@ -448,7 +455,7 @@ export default function MarketDetailPage() {
         address: CONTRACTS.tickToken as `0x${string}`,
         abi: TICK_TOKEN_ABI,
         functionName: "allowance",
-        args: [address, MARKET_FACTORY_ADDRESS!],
+        args: [address, factoryAddress],
       })) as bigint;
       // Improvement B — approval buffer (max amount × 10, 10k TICK): future
       // stakes skip the approve. approve+stake go in ONE batched userOp on
@@ -462,12 +469,12 @@ export default function MarketDetailPage() {
           address: CONTRACTS.tickToken as `0x${string}`,
           abi: TICK_TOKEN_ABI,
           functionName: "approve",
-          args: [MARKET_FACTORY_ADDRESS!, buffer],
+          args: [factoryAddress, buffer],
           label: "TICK approval",
         });
       }
       calls.push({
-        address: MARKET_FACTORY_ADDRESS!,
+        address: factoryAddress,
         abi: MARKET_FACTORY_ABI,
         functionName: "stake",
         args: [id, BigInt(stakeSel), amountWei],
@@ -486,7 +493,7 @@ export default function MarketDetailPage() {
           setStakeSel(null);
         },
       });
-      void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
+      void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) });
       void queryClient.invalidateQueries({ queryKey: qks.balance(address.toLowerCase()) });
     } catch (err) {
       toast.error(
@@ -498,46 +505,46 @@ export default function MarketDetailPage() {
 
   async function handleResolve() {
     await write({
-      address: MARKET_FACTORY_ADDRESS!,
+      address: factoryAddress,
       abi: MARKET_FACTORY_ABI,
       functionName: "resolve",
       args: [id],
     });
-    void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
+    void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) });
   }
 
   async function handleInitiateVoid() {
     await write({
-      address: MARKET_FACTORY_ADDRESS!,
+      address: factoryAddress,
       abi: MARKET_FACTORY_ABI,
       functionName: "initiateVoid",
       args: [id],
     });
-    void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
+    void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) });
   }
 
   async function handleFinalizeVoid() {
     await write({
-      address: MARKET_FACTORY_ADDRESS!,
+      address: factoryAddress,
       abi: MARKET_FACTORY_ABI,
       functionName: "finalizeVoid",
       args: [id],
     });
-    void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
+    void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) });
   }
 
   async function handleClaim() {
     await write({
-      address: MARKET_FACTORY_ADDRESS!,
+      address: factoryAddress,
       abi: MARKET_FACTORY_ABI,
       functionName: "claim",
       args: [id],
     });
     celebrateClaim();
-    void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) });
+    void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) });
   }
 
-  if (!MARKET_FACTORY_ADDRESS) {
+  if (!route) {
     return (
       <div className="py-10">
         <ErrorState message="Markets not deployed on this network yet." onRetry={() => router.back()} />
@@ -547,7 +554,7 @@ export default function MarketDetailPage() {
   if (marketError) {
     return (
       <div className="py-10">
-        <ErrorState message={marketError.message} onRetry={() => void queryClient.invalidateQueries({ queryKey: qks.market(id.toString()) })} />
+        <ErrorState message={marketError.message} onRetry={() => void queryClient.invalidateQueries({ queryKey: qks.market(routeKey) })} />
       </div>
     );
   }
@@ -574,7 +581,7 @@ export default function MarketDetailPage() {
         <Link href="/markets" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-[#2E7CF6]">
           <ArrowLeft className="h-4 w-4" /> All markets
         </Link>
-        {market && <div className="flex items-center gap-2"><WatchButton marketId={id.toString()} /><ShareButtons path={`/markets/${id}`} text={`${question} — predict on TICKR`} compact /></div>}
+        {market && <div className="flex items-center gap-2"><WatchButton marketId={routeKey} /><ShareButtons path={`/markets/${routeKey}`} text={`${question} — predict on TICKR`} compact /></div>}
       </div>
 
       {/* Market hero */}
@@ -616,7 +623,7 @@ export default function MarketDetailPage() {
         </div>
       </section>
 
-      {market.templateId === TEMPLATES.TARGET && (() => { const targetTeam = outcomeTeamId(market, 0); const symbol = teams?.find((t) => t.teamId === targetTeam)?.symbol; return symbol ? <><TargetTracker params={market.params} symbol={symbol} settled={market.state !== 0} /><TargetSettlementReplay marketId={id.toString()} params={market.params} symbol={symbol} state={market.state} winnerBitmap={market.winnerBitmap} payoutPerShare={market.payoutPerShare} userStakes={userStakes} /></> : null; })()}
+      {market.templateId === TEMPLATES.TARGET && (() => { const targetTeam = outcomeTeamId(market, 0); const symbol = targetCoinById(targetTeam ?? -1)?.symbol; return symbol ? <><TargetTracker params={market.params} symbol={symbol} settled={market.state !== 0} /><TargetSettlementReplay marketId={routeKey} params={market.params} symbol={symbol} state={market.state} winnerBitmap={market.winnerBitmap} payoutPerShare={market.payoutPerShare} userStakes={userStakes} /></> : null; })()}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -754,7 +761,7 @@ export default function MarketDetailPage() {
       </div>
 
       {/* ── Similar markets ── */}
-      <SimilarMarkets currentId={id} templateId={market.templateId} teams={teams ?? []} fixtures={fixtures} />
+      <SimilarMarkets currentId={id} factoryAddress={factoryAddress} templateId={market.templateId} teams={teams ?? []} fixtures={fixtures} />
 
       {/* ── Stake modal ── */}
       <StakeModal
@@ -1285,11 +1292,11 @@ function HowThisResolves({ market, teams }: { market: MarketDetail; teams: TeamR
   }>(null);
 
   useEffect(() => {
-    if (!publicClient || !MARKET_FACTORY_ADDRESS || market.templateId !== TEMPLATES.TOP_GAINER) return;
+    if (!publicClient || !market.factoryAddress || market.templateId !== TEMPLATES.TOP_GAINER) return;
     let alive = true;
     publicClient
       .readContract({
-        address: MARKET_FACTORY_ADDRESS,
+        address: market.factoryAddress,
         abi: MARKET_FACTORY_ABI,
         functionName: "getTopGainerTable",
         args: [market.id],
@@ -1309,7 +1316,7 @@ function HowThisResolves({ market, teams }: { market: MarketDetail; teams: TeamR
     return () => {
       alive = false;
     };
-  }, [publicClient, market.id, market.templateId]);
+  }, [publicClient, market.id, market.templateId, market.factoryAddress]);
 
   const ruleText = useMemo(() => {
     const t = market.templateId;
@@ -1414,11 +1421,13 @@ function HowThisResolves({ market, teams }: { market: MarketDetail; teams: TeamR
 
 function SimilarMarkets({
   currentId,
+  factoryAddress,
   templateId,
   teams,
   fixtures,
 }: {
   currentId: bigint;
+  factoryAddress: `0x${string}`;
   templateId: number;
   teams: TeamRef[];
   fixtures: Map<string, ApiFixture>;
@@ -1435,13 +1444,13 @@ function SimilarMarkets({
   }[]>(null);
 
   useEffect(() => {
-    if (!MARKET_FACTORY_ADDRESS) return;
+    if (!factoryAddress) return;
     let alive = true;
     (async () => {
       try {
         const count = Number(
           (await publicClient.readContract({
-            address: MARKET_FACTORY_ADDRESS,
+            address: factoryAddress,
             abi: MARKET_FACTORY_ABI,
             functionName: "marketCount",
           })) as bigint
@@ -1452,8 +1461,8 @@ function SimilarMarkets({
           return;
         }
         const calls = ids.flatMap((i) => [
-          { address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [i] } as const,
-          { address: MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketSettlement", args: [i] } as const,
+          { address: factoryAddress, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [i] } as const,
+          { address: factoryAddress, abi: MARKET_FACTORY_ABI, functionName: "marketSettlement", args: [i] } as const,
         ]);
         const res = await publicClient.multicall({ contracts: calls });
         const list: NonNullable<typeof items> = [];
@@ -1487,7 +1496,7 @@ function SimilarMarkets({
     return () => {
       alive = false;
     };
-  }, [publicClient, currentId, templateId]);
+  }, [publicClient, currentId, templateId, factoryAddress]);
 
   if (!items?.length) return null;
   const style = TEMPLATE_STYLE[templateId] ?? TEMPLATE_STYLE[TEMPLATES.TOP_GAINER];
@@ -1504,7 +1513,7 @@ function SimilarMarkets({
         {items.map((m) => (
           <Link
             key={m.id.toString()}
-            href={`/markets/${m.id}`}
+            href={`/markets/${marketRouteKey(factoryAddress, m.id)}`}
             className="glass group rounded-2xl p-5 transition-all hover:-translate-y-1 hover:shadow-[0_12px_36px_rgba(46,124,246,0.18)]"
           >
             <div className="flex items-center justify-between">

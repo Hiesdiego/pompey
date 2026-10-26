@@ -1,7 +1,7 @@
 import type { Address } from "viem";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { fetchMarketsDirect, proxyGet, type MarketSummary } from "./chainDirect";
-import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS } from "./marketFactory";
+import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS } from "./marketFactory";
 
 export interface ClaimableMarket {
   kind: "market";
@@ -10,12 +10,17 @@ export interface ClaimableMarket {
 }
 
 export async function scanMarketClaims(player: Address): Promise<ClaimableMarket[]> {
-  if (!MARKET_FACTORY_ADDRESS) return [];
-  let markets: MarketSummary[];
-  try {
-    markets = (await proxyGet<{ markets: MarketSummary[] }>("/api/chain/markets")).markets;
-  } catch {
-    markets = (await fetchMarketsDirect()).markets;
+  if (!MARKET_FACTORY_ADDRESS && !NEW_MARKET_FACTORY_ADDRESS) return [];
+  let markets: MarketSummary[] = [];
+  if (MARKET_FACTORY_ADDRESS) {
+    try {
+      markets = (await proxyGet<{ markets: MarketSummary[] }>("/api/chain/markets")).markets;
+    } catch {
+      markets = (await fetchMarketsDirect()).markets;
+    }
+  }
+  if (NEW_MARKET_FACTORY_ADDRESS && NEW_MARKET_FACTORY_ADDRESS.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase()) {
+    markets = [...markets, ...(await fetchMarketsDirect(NEW_MARKET_FACTORY_ADDRESS)).markets];
   }
 
   const candidates = markets.filter((market) =>
@@ -31,7 +36,7 @@ export async function scanMarketClaims(player: Address): Promise<ClaimableMarket
     const chunk = candidates.slice(offset, offset + 25);
     const claimed = await client.multicall({
       contracts: chunk.map((market) => ({
-        address: MARKET_FACTORY_ADDRESS,
+        address: market.factoryAddress ?? MARKET_FACTORY_ADDRESS,
         abi: MARKET_FACTORY_ABI,
         functionName: "claimed" as const,
         args: [BigInt(market.id), player] as const,
@@ -47,7 +52,7 @@ export async function scanMarketClaims(player: Address): Promise<ClaimableMarket
         market.state === 2 || (BigInt(market.winnerBitmap) & (1n << BigInt(index))) !== 0n)
     );
     const stakeCalls = pending.flatMap((market, index) => outcomes[index].map((outcome) => ({
-      address: MARKET_FACTORY_ADDRESS,
+      address: market.factoryAddress ?? MARKET_FACTORY_ADDRESS,
       abi: MARKET_FACTORY_ABI,
       functionName: "stakes" as const,
       args: [BigInt(market.id), player, BigInt(outcome)] as const,

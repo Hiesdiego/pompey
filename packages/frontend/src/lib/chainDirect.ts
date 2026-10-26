@@ -16,11 +16,13 @@
 
 import { getPublicClient } from "../hooks/usePublicClient";
 import { parseAbiItem } from "viem";
+import type { Address } from "viem";
 import { BACKEND_API_URL } from "./contracts";
 import { integerString } from "./integerString";
 import {
   MARKET_FACTORY_ABI,
   MARKET_FACTORY_ADDRESS,
+  marketRouteKey,
   normalizeMarketInfo,
   normalizeMarketSettlement,
 } from "./marketFactory";
@@ -28,6 +30,8 @@ import {
 /** Mirrors the backend MarketSummary (bigints arrive as strings). */
 export interface MarketSummary {
   id: number;
+  marketKey?: string;
+  factoryAddress?: Address;
   templateId: number;
   creator: string;
   creatorName: string;
@@ -97,6 +101,8 @@ function integerField(value: unknown): string {
 function normalizeMarketSummary(market: MarketSummary): MarketSummary {
   return {
     ...market,
+    marketKey: market.marketKey ?? String(market.id),
+    factoryAddress: market.factoryAddress ?? MARKET_FACTORY_ADDRESS,
     winnerBitmap: integerField(market.winnerBitmap),
     payoutPerShare: integerField(market.payoutPerShare),
     seedAmount: integerField(market.seedAmount),
@@ -151,20 +157,21 @@ type MulticallResult =
   | { status: "success"; result: unknown }
   | { status: "failure"; error?: unknown };
 
-function assertFactoryConfigured(): void {
-  if (!MARKET_FACTORY_ADDRESS) throw new Error("MarketFactory not configured");
+function assertFactoryConfigured(factory: Address): void {
+  if (!factory) throw new Error("MarketFactory not configured");
 }
 
 /** ONE multicall for outcomeTotals across every outcome of one market. */
 async function readOutcomeTotalsDirect(
   marketId: bigint,
-  outcomeCount: number
+  outcomeCount: number,
+  factory: Address
 ): Promise<string[]> {
   const client = getPublicClient();
   if (outcomeCount === 0) return [];
   const results = (await client.multicall({
     contracts: Array.from({ length: outcomeCount }, (_, outcome) => ({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "outcomeTotals",
       args: [marketId, BigInt(outcome)],
@@ -180,12 +187,15 @@ function toMarketSummary(
   id: number,
   infoRaw: unknown,
   settlementRaw: unknown,
-  outcomeTotals: string[]
+  outcomeTotals: string[],
+  factory: Address
 ): MarketSummary {
   const info = normalizeMarketInfo(infoRaw);
   const settlement = normalizeMarketSettlement(settlementRaw);
   return {
     id,
+    marketKey: marketRouteKey(factory, id),
+    factoryAddress: factory,
     templateId: info.templateId,
     creator: info.creator,
     creatorName: info.creatorName,
@@ -207,15 +217,15 @@ function toMarketSummary(
  * one marketInfo multicall, one marketSettlement multicall, one outcomeTotals
  * multicall. Markets whose reads fail are skipped, never fatal.
  */
-export async function fetchMarketsDirect(): Promise<{
+export async function fetchMarketsDirect(factory: Address = MARKET_FACTORY_ADDRESS): Promise<{
   markets: MarketSummary[];
   asOfBlock: string;
 }> {
-  assertFactoryConfigured();
+  assertFactoryConfigured(factory);
   const client = getPublicClient();
   const count = Number(
     (await client.readContract({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "marketCount",
     })) as bigint
@@ -227,7 +237,7 @@ export async function fetchMarketsDirect(): Promise<{
     client
       .multicall({
         contracts: ids.map((id) => ({
-          address: MARKET_FACTORY_ADDRESS,
+          address: factory,
           abi: MARKET_FACTORY_ABI,
           functionName: "marketInfo",
           args: [id],
@@ -238,7 +248,7 @@ export async function fetchMarketsDirect(): Promise<{
     client
       .multicall({
         contracts: ids.map((id) => ({
-          address: MARKET_FACTORY_ADDRESS,
+          address: factory,
           abi: MARKET_FACTORY_ABI,
           functionName: "marketSettlement",
           args: [id],
@@ -266,7 +276,7 @@ export async function fetchMarketsDirect(): Promise<{
       (s.info as { status: "success"; result: unknown }).result
     );
     return Array.from({ length: info.outcomeCount }, (_, outcome) => ({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "outcomeTotals",
       args: [BigInt(s.id), BigInt(outcome)],
@@ -298,7 +308,8 @@ export async function fetchMarketsDirect(): Promise<{
         s.id,
         (s.info as { status: "success"; result: unknown }).result,
         (s.settlement as { status: "success"; result: unknown }).result,
-        totals
+        totals,
+        factory
       )
     );
   }
@@ -308,20 +319,21 @@ export async function fetchMarketsDirect(): Promise<{
 
 /** One market by id. Also reads the void-lifecycle fields the detail page needs. */
 export async function fetchMarketDirect(
-  id: number | bigint
+  id: number | bigint,
+  factory: Address = MARKET_FACTORY_ADDRESS
 ): Promise<MarketSummary> {
-  assertFactoryConfigured();
+  assertFactoryConfigured(factory);
   const client = getPublicClient();
   const marketId = BigInt(id);
   const [infoRaw, settlementRaw, voidInitiated] = await Promise.all([
     client.readContract({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "marketInfo",
       args: [marketId],
     }),
     client.readContract({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "marketSettlement",
       args: [marketId],
@@ -329,7 +341,7 @@ export async function fetchMarketDirect(
     // Tolerate the pre-two-step-void factory: no challenge timestamp there.
     client
       .readContract({
-        address: MARKET_FACTORY_ADDRESS,
+        address: factory,
         abi: MARKET_FACTORY_ABI,
         functionName: "voidInitiatedAt",
         args: [marketId],
@@ -337,9 +349,9 @@ export async function fetchMarketDirect(
       .catch(() => 0n),
   ]);
   const info = normalizeMarketInfo(infoRaw);
-  const totals = await readOutcomeTotalsDirect(marketId, info.outcomeCount);
+  const totals = await readOutcomeTotalsDirect(marketId, info.outcomeCount, factory);
   return {
-    ...toMarketSummary(Number(marketId), infoRaw, settlementRaw, totals),
+    ...toMarketSummary(Number(marketId), infoRaw, settlementRaw, totals, factory),
     voidAfter: info.voidAfter.toString(),
     voidInitiatedAt: (voidInitiated as bigint).toString(),
   };
@@ -361,16 +373,17 @@ export async function fetchMarketDirect(
  */
 export async function fetchOddsHistoryDirect(
   marketId: number | bigint,
-  opts?: { fromBlock?: bigint; seedTotals?: string[] }
+  opts?: { fromBlock?: bigint; seedTotals?: string[] },
+  factory: Address = MARKET_FACTORY_ADDRESS
 ): Promise<OddsHistoryData> {
-  assertFactoryConfigured();
+  assertFactoryConfigured(factory);
   const client = getPublicClient();
   const id = BigInt(marketId);
   const cursor = opts?.fromBlock ?? 0n;
 
   const info = normalizeMarketInfo(
     await client.readContract({
-      address: MARKET_FACTORY_ADDRESS,
+      address: factory,
       abi: MARKET_FACTORY_ABI,
       functionName: "marketInfo",
       args: [id],
@@ -380,7 +393,7 @@ export async function fetchOddsHistoryDirect(
   if (outcomeCount === 0) return { points: [], latestBlock: Number(cursor) };
 
   const logs = await client.getLogs({
-    address: MARKET_FACTORY_ADDRESS,
+    address: factory,
     event: parseAbiItem("event MarketStaked(uint256 indexed marketId, address indexed user, uint256 outcome, uint256 amount)"),
     args: { marketId: id },
     fromBlock: cursor,

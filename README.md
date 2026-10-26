@@ -81,7 +81,8 @@ Market creators earn a **revenue share** of their markets' fees.
 |---|---|
 | MatchRegistry | [`0xd5b0d27bb9c523ed777f355191a9dd2dcbee0c62`](https://sepolia.basescan.org/address/0xd5b0d27bb9c523ed777f355191a9dd2dcbee0c62) |
 | TeamRegistry | [`0x352e6fce9c07de4bf3e187ce93a0120db05d2ea8`](https://sepolia.basescan.org/address/0x352e6fce9c07de4bf3e187ce93a0120db05d2ea8) |
-| MarketFactory | [`0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1`](https://sepolia.basescan.org/address/0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1) |
+| MarketFactory (existing markets) | [`0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1`](https://sepolia.basescan.org/address/0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1) |
+| MarketFactory (new markets) | [`0xac04f4ff8b2e71984cb25e75456915c81075acdc`](https://sepolia.basescan.org/address/0xac04f4ff8b2e71984cb25e75456915c81075acdc) |
 | ResultEngine | [`0x82e00f543ddf320eec4447fd16810852bda4ec12`](https://sepolia.basescan.org/address/0x82e00f543ddf320eec4447fd16810852bda4ec12) |
 | PredictionPool | [`0xc47358e69d145f94728796a337ec14401641700f`](https://sepolia.basescan.org/address/0xc47358e69d145f94728796a337ec14401641700f) |
 | PriceOracle | [`0x2814bd64f7774eccd5dc11a792f15fecdfebdf90`](https://sepolia.basescan.org/address/0x2814bd64f7774eccd5dc11a792f15fecdfebdf90) |

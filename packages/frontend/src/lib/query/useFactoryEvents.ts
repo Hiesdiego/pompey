@@ -23,17 +23,19 @@
 
 import { useEffect } from "react";
 import { getPublicClient } from "../../hooks/usePublicClient";
-import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS } from "../marketFactory";
+import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS, marketRouteKey } from "../marketFactory";
+import type { Address } from "viem";
 import { qks } from "./keys";
 import { queryClient } from "./queryClient";
 
 let consumers = 0;
-let unwatch: (() => void) | null = null;
+let unwatch: (() => void)[] = [];
 
 function ensureSubscribed(): void {
-  if (unwatch || !MARKET_FACTORY_ADDRESS) return;
-  unwatch = getPublicClient().watchContractEvent({
-    address: MARKET_FACTORY_ADDRESS,
+  if (unwatch.length) return;
+  const factories = [MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS].filter((address, index, all) => address && all.findIndex((item) => item?.toLowerCase() === address.toLowerCase()) === index);
+  unwatch = factories.map((factory) => getPublicClient().watchContractEvent({
+    address: factory,
     abi: MARKET_FACTORY_ABI,
     pollingInterval: 4_000,
     onLogs: (logs) => {
@@ -42,24 +44,22 @@ function ensureSubscribed(): void {
       for (const log of logs) {
         const marketId = (log as unknown as { args?: { marketId?: unknown } })
           .args?.marketId;
-        if (typeof marketId === "bigint") ids.add(marketId.toString());
+        if (typeof marketId === "bigint") ids.add(marketRouteKey(factory as Address, marketId));
       }
       for (const id of ids) {
         queryClient.invalidateQueries({ queryKey: qks.market(id) });
         queryClient.invalidateQueries({ queryKey: qks.oddsHistory(id) });
       }
     },
-  });
+  }));
 }
 
 function release(): void {
   consumers -= 1;
   if (consumers <= 0) {
     consumers = 0;
-    if (unwatch) {
-      unwatch();
-      unwatch = null;
-    }
+    unwatch.forEach((stop) => stop());
+    unwatch = [];
   }
 }
 

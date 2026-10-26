@@ -8,6 +8,7 @@ import {
   type MarketSummary,
 } from "../chainDirect";
 import { toAppError } from "../errors";
+import { MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS } from "../marketFactory";
 
 export interface MarketsData {
   markets: MarketSummary[];
@@ -21,15 +22,19 @@ export function useMarkets() {
   const query = useQuery({
     queryKey: qks.markets,
     queryFn: async (): Promise<MarketsData> => {
+      let oldMarkets: MarketsData;
       try {
-        return await proxyGet<MarketsData>("/api/chain/markets");
+        oldMarkets = await proxyGet<MarketsData>("/api/chain/markets");
       } catch {
         try {
-          return { ...await fetchMarketsDirect(), refreshedAt: new Date().toISOString() };
+          oldMarkets = { ...await fetchMarketsDirect(), refreshedAt: new Date().toISOString() };
         } catch (e) {
           throw toAppError(e);
         }
       }
+      if (!NEW_MARKET_FACTORY_ADDRESS || NEW_MARKET_FACTORY_ADDRESS.toLowerCase() === MARKET_FACTORY_ADDRESS?.toLowerCase()) return oldMarkets;
+      const newMarkets = await fetchMarketsDirect(NEW_MARKET_FACTORY_ADDRESS).catch(() => null);
+      return { ...oldMarkets, markets: [...(newMarkets?.markets ?? []), ...oldMarkets.markets] };
     },
     staleTime: 10_000,
     refetchInterval: 15_000,

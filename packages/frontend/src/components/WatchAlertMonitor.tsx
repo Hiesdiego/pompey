@@ -18,7 +18,7 @@ export function WatchAlertMonitor() {
     const now = Date.now();
     const finished: string[] = [];
     for (const entry of entries) {
-      const market = markets.find((m) => m.id === Number(entry.marketId));
+      const market = markets.find((m) => (m.marketKey ?? String(m.id)) === entry.marketId);
       if (!market) continue;
       const notify = (type: string, message: string) => {
         const key = `${entry.marketId}:${type}`;

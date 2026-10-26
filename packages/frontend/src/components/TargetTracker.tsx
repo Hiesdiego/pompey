@@ -36,7 +36,7 @@ export function TargetTracker({ params, symbol, settled = false }: {
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span>Recent price movements</span><span className="text-xs font-semibold text-[#2E7CF6] group-open:hidden">Show chart</span><span className="hidden text-xs font-semibold text-[#2E7CF6] group-open:inline">Hide chart</span></summary>
       <div className="mt-3">
         {chartOpen && <TradingViewChart teamId={terms.teamId} height={280} />}
-        <div className="flex flex-wrap justify-between gap-1 text-[11px] font-semibold text-zinc-500"><span>TradingView · Binance spot · 5-minute chart</span><span className="text-emerald-600">Target: {formatUsd(terms.target)}</span></div>
+        <div className="flex flex-wrap justify-between gap-1 text-[11px] font-semibold text-zinc-500"><span>TradingView · spot market · 5-minute chart</span><span className="text-emerald-600">Target: {formatUsd(terms.target)}</span></div>
       </div>
     </details>
     <p className="mt-3 text-sm font-semibold">{yesNow === null ? "Waiting for a fresh spot quote" : yesNow ? "Yes is currently on side" : "No is currently on side"} <span className="font-normal text-zinc-500">· The result uses the latest available hourly oracle checkpoint at or before {new Date(terms.atTime * 1000).toLocaleString()}. {symbolUpdatedAt && !settled ? `Spot updated ${new Date(symbolUpdatedAt).toLocaleTimeString()}.` : ""}</span></p>

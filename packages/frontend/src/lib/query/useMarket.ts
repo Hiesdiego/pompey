@@ -18,6 +18,7 @@ import { getPublicClient } from "../../hooks/usePublicClient";
 import {
   MARKET_FACTORY_ABI,
   MARKET_FACTORY_ADDRESS,
+  marketFromRoute,
   normalizeMarketInfo,
 } from "../marketFactory";
 import { qks } from "./keys";
@@ -74,7 +75,12 @@ export function useMarket(id: number | string | bigint | null | undefined) {
   const query = useQuery({
     queryKey: qks.market(idStr ?? "pending"),
     queryFn: async (): Promise<MarketWithVoid> => {
-      const numId = Number(idStr);
+      const route = marketFromRoute(idStr ?? "");
+      if (!route) throw new Error("Invalid market address or ID.");
+      const numId = Number(route.id);
+      if (route.factory.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase()) {
+        return fetchMarketDirect(numId, route.factory) as Promise<MarketWithVoid>;
+      }
       try {
         const data = await proxyGet<{ market: MarketSummary }>(
           `/api/chain/markets/${numId}`

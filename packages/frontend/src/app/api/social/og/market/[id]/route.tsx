@@ -8,6 +8,7 @@ import {
 } from "viem";
 import { getPublicClient } from "@/hooks/usePublicClient";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
+import { targetCoinById } from "@/lib/targetCoins";
 import {
   OG_WIDTH,
   OG_HEIGHT,
@@ -70,7 +71,7 @@ async function questionFor(templateId: number, params: `0x${string}`): Promise<s
         parseAbiParameters("uint16, uint256, uint64, bool"),
         params
       );
-      return `Will ${teamSymbol(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return `Will ${targetCoinById(Number(teamId))?.symbol ?? teamSymbol(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
     if (templateId === TEMPLATES.SPREAD) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);

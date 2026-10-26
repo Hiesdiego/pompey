@@ -148,7 +148,7 @@ export const CUP_TEAM_SYMBOLS: Record<number, string> = Object.fromEntries(
 
 const CUP_TEAM_NAMES = [
   "Bitcoin", "Ethereum", "BNB", "XRP", "Solana", "TRON", "Hyperliquid", "Zcash", "Dogecoin", "Chainlink", "Cardano", "NEAR Protocol", "Litecoin", "Avalanche", "Shiba Inu", "Official Trump",
-  "Stellar", "Uniswap", "Bitcoin Cash", "Walrus", "Hedera", "Sui", "Toncoin", "Bittensor", "Tether Gold", "Pump.fun", "Worldcoin", "Ethena", "Quant", "Aave", "Ondo Finance", "Polkadot",
+  "Stellar", "Uniswap", "Bitcoin Cash", "Walrus", "Hedera", "Sui", "Gram", "Bittensor", "Tether Gold", "Pump.fun", "Worldcoin", "Ethena", "Quant", "Aave", "Ondo Finance", "Polkadot",
   "Aster", "World Liberty Financial", "Arbitrum", "Internet Computer", "Pepe", "Sky", "Ore", "Filecoin", "Ethereum Classic", "JUST", "Jupiter", "Algorand", "Raydium", "Polygon", "Render", "Cosmos",
   "Injective", "Toshi", "Midnight", "PancakeSwap", "Virtuals Protocol", "Pyth Network", "Dash", "Curve DAO Token", "Optimism", "Celestia", "VeChain", "Starknet", "Pudgy Penguins", "Sei", "Axie Infinity", "Immutable",
 ];

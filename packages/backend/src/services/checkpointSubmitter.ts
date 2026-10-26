@@ -2,19 +2,14 @@
  * Checkpoint submitter — v0.2 hourly oracle checkpoints (spec addendum).
  *
  * Every CHECKPOINT_INTERVAL_MINUTES (default 60), submits one checkpoint
- * per team to PriceOracle.submitCheckpoints: the current validated price
- * for every team in the current season's roster. These checkpoints are the
+ * per asset to PriceOracle.submitCheckpoints: the current validated price
+ * for every league and cup asset. These checkpoints are the
  * resolution data for MarketFactory templates (TOP_GAINER, H2H, TARGET)
  * and power the transparency views ("how this resolves" panels).
  *
- * Idempotency: submitCheckpoints is idempotent within the hour on-chain
- * (re-submitting the same hour-slot is a no-op), and this service skips
- * hours already checkpointed (tracked in-memory + verified on-chain via
- * getPriceAt). A backend restart re-derives state from chain — no double
- * work, no missed hours beyond the restart gap (which the next tick fills
- * only for the current hour; historical gaps stay gaps, and markets that
- * need those checkpoints simply can't resolve until VOID_WINDOW — by
- * design, so resolution is never fabricated).
+ * Re-submitting an hour-slot updates its checkpoint with the latest validated
+ * price. The process submits each hour once and retries the current hour
+ * after a restart so missing asset checkpoints can be filled.
  *
  * Gas: one tx per tick, batching up to CHECKPOINT_BATCH_SIZE teams.
  */
@@ -30,6 +25,7 @@ import { logger } from "../lib/logger.js";
 import { publicClient, createBackendWalletClient, tickrChain } from "../lib/rpc.js";
 import { runLoop, type LoopHandle } from "../lib/loop.js";
 import type { PriceFeed } from "./priceFeed.js";
+import { CUP_TEAM_PRICE_MAP, CUP_TARGET_ORACLE_OFFSET } from "./cupTeams.js";
 
 const PRICE_ORACLE_CHECKPOINT_ABI = [
   {
@@ -41,19 +37,6 @@ const PRICE_ORACLE_CHECKPOINT_ABI = [
       { name: "prices", type: "uint256[]" },
     ],
     outputs: [],
-  },
-  {
-    type: "function",
-    name: "getPriceAt",
-    stateMutability: "view",
-    inputs: [
-      { name: "teamId", type: "uint16" },
-      { name: "timestamp", type: "uint64" },
-    ],
-    outputs: [
-      { name: "found", type: "bool" },
-      { name: "price", type: "uint256" },
-    ],
   },
   { type: "error", name: "OnlyBackendSigner", inputs: [] },
   { type: "error", name: "ArrayLengthMismatch", inputs: [] },
@@ -110,10 +93,9 @@ export class CheckpointSubmitter {
   private readonly chain: Chain;
   private readonly queue = new TxQueue();
   private loop: LoopHandle | null = null;
-  /** Hour slots already checkpointed this process lifetime (chain is source of truth on restart). */
   private readonly doneSlots = new Set<number>();
 
-  constructor(private readonly feed: PriceFeed) {
+  constructor(private readonly feed: PriceFeed, private readonly cupFeed: PriceFeed) {
     this.chain = tickrChain();
     // Shared resilient transport (lib/rpc.ts): retry + batching + fallback.
     this.publicClient = publicClient;
@@ -144,7 +126,6 @@ export class CheckpointSubmitter {
     const slot = hourSlotOf(now);
     if (this.doneSlots.has(slot)) return;
 
-    // Confirm on-chain: maybe a previous process already checkpointed this hour.
     const seasonId = (await this.publicClient.readContract({
       address: config.contracts.seasonRegistry,
       abi: SEASON_REGISTRY_ABI,
@@ -170,19 +151,6 @@ export class CheckpointSubmitter {
       return;
     }
 
-    const slotStartSec = BigInt(slot * 3600);
-    const [found] = (await this.publicClient.readContract({
-      address: config.contracts.priceOracle,
-      abi: PRICE_ORACLE_CHECKPOINT_ABI,
-      functionName: "getPriceAt",
-      args: [0, slotStartSec],
-    })) as [boolean, bigint];
-    if (found) {
-      this.doneSlots.add(slot);
-      logger.info("[CheckpointSubmitter] hour already checkpointed on-chain", { slot });
-      return;
-    }
-
     // Gather validated prices for every team from the feed.
     const teamIds: number[] = [];
     const prices: bigint[] = [];
@@ -199,6 +167,16 @@ export class CheckpointSubmitter {
           teamId,
           error: String(err),
         });
+      }
+    }
+    for (const cupTeam of CUP_TEAM_PRICE_MAP) {
+      try {
+        const quote = this.cupFeed.getValidatedPrice(cupTeam.teamId);
+        if (quote.scaled <= 0n) continue;
+        teamIds.push(CUP_TARGET_ORACLE_OFFSET + cupTeam.teamId);
+        prices.push(quote.scaled);
+      } catch (err) {
+        logger.warn("[CheckpointSubmitter] no cup coin price", { cupTeamId: cupTeam.teamId, error: String(err) });
       }
     }
     if (teamIds.length === 0) {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Trophy, Zap } from "lucide-react";
-import { TEMPLATES, TEMPLATE_NAMES } from "../lib/marketFactory";
+import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
 import { useMarkets } from "../lib/query/useMarkets";
 import { useTeams } from "../hooks/useTeams";
@@ -27,6 +27,7 @@ import { normalizeScoreline, roundPctLikeOracle, formatSignedPct } from "../lib/
 import { getMatchDurationMs } from "../lib/matchConfig";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
+import { targetCoinById } from "../lib/targetCoins";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
 import { MyPicksDashboard } from "../components/MyPicksDashboard";
 import { TargetCardStatus } from "../components/TargetCardStatus";
@@ -76,7 +77,7 @@ function marketQuestion(market: MarketSummary, teams: { symbol: string }[], fixt
     }
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, target, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
-      return `Will ${teams[Number(team)]?.symbol ?? `Team ${team}`} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return `Will ${targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
     }
     if (market.templateId === TEMPLATES.SPREAD) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), market.params as `0x${string}`);
@@ -108,7 +109,7 @@ function marketSubheading(market: MarketSummary, teams: { symbol: string }[]) {
     }
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, target, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
-      return `${teams[Number(team)]?.symbol ?? `Team ${team}`} target · ${above ? "≥" : "≤"} $${(Number(target) / 1e8).toLocaleString()}`;
+      return `${targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`} target · ${above ? "≥" : "≤"} $${(Number(target) / 1e8).toLocaleString()}`;
     }
   } catch {
     return `${market.outcomeCount} outcomes`;
@@ -117,7 +118,7 @@ function marketSubheading(market: MarketSummary, teams: { symbol: string }[]) {
 }
 
 function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = false }: { market: MarketSummary; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; featured?: boolean }) {
-  const { feesBps } = useMarketFees();
+  const { feesBps } = useMarketFees(market.factoryAddress ?? MARKET_FACTORY_ADDRESS);
   const { dataUpdatedAt: quoteAsOf } = useMarkets();
   const total = market.outcomeTotals.reduce((a, v) => a + BigInt(v), 0n);
   const poolAmount = pool(market);
@@ -152,7 +153,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
   // otherwise); the wrapper carries `group` for hover reveal.
   return (
     <div className="group relative flex h-full flex-col">
-    <Link href={`/markets/${market.id}`} className={`relative flex h-full flex-col overflow-hidden ${card} transition duration-300 hover:-translate-y-1 hover:border-[#2E7CF6]/40 hover:shadow-[0_20px_60px_rgba(46,124,246,.13)] ${featured ? "p-6 sm:p-8" : "p-5"}`}>
+    <Link href={`/markets/${market.marketKey ?? market.id}`} className={`relative flex h-full flex-col overflow-hidden ${card} transition duration-300 hover:-translate-y-1 hover:border-[#2E7CF6]/40 hover:shadow-[0_20px_60px_rgba(46,124,246,.13)] ${featured ? "p-6 sm:p-8" : "p-5"}`}>
       {featured && <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-[#2E7CF6]/10 blur-3xl" />}
       <div className="relative flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[.16em] text-[#2E7CF6]"><span className="grid h-8 w-8 place-items-center rounded-xl bg-[#2E7CF6]/10"><Trophy className="h-4 w-4" /></span>{TEMPLATE_NAMES[market.templateId] ?? "Featured market"}</span>
@@ -163,7 +164,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
       </h3>
       {market.templateId !== TEMPLATES.TARGET && <p className="relative mt-2 text-sm text-zinc-500 dark:text-zinc-400">{marketSubheading(market, teams)}</p>}
       {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && <div className="relative mt-4 flex items-center gap-3"><TeamBadge teamId={targetTeamId} size={40} showName={false} showSymbol /><span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target coin</span></div>}
-      {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && market.state === 0 && <TargetCardStatus params={market.params as `0x${string}`} symbol={teams[targetTeamId]?.symbol ?? `#${targetTeamId}`} price={prices[teams[targetTeamId]?.symbol ?? ""]} fresh={priceFresh} />}
+      {market.templateId === TEMPLATES.TARGET && targetTeamId !== null && market.state === 0 && <TargetCardStatus params={market.params as `0x${string}`} symbol={targetCoinById(targetTeamId)?.symbol ?? `#${targetTeamId}`} price={prices[targetCoinById(targetTeamId)?.symbol ?? ""]} fresh={priceFresh} />}
       {market.templateId === TEMPLATES.SPREAD && <SpreadFixtureBadges market={market} fixtures={fixtures} className="relative mt-4" />}
       {market.templateId === TEMPLATES.TARGET ? <div className="relative mt-5 grid grid-cols-1 gap-2.5">
         {rankedOutcomes.map(({ amount, index }) => {
@@ -203,6 +204,8 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
       </div>
       <QuickStakeSheet
         marketId={BigInt(market.id)}
+        marketKey={market.marketKey}
+        factoryAddress={market.factoryAddress}
         question={marketQuestion(market, teams, fixtures)}
         outcome={quickPick}
         outcomeTotals={market.outcomeTotals.map((v) => BigInt(v))}

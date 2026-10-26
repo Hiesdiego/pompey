@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { cn } from "../lib/cn";
 import { useTeams, teamById, type TeamInfo } from "../hooks/useTeams";
+import { targetCoinById } from "../lib/targetCoins";
 
 /**
  * Logo source chain — first success wins:
@@ -67,7 +68,8 @@ export function TeamBadge({
   className?: string;
 }) {
   const { teams } = useTeams();
-  const team = teamById(teams, teamId);
+  const target = targetCoinById(teamId);
+  const team = teamById(teams, teamId) ?? (target ? { ...target, cmcId: 0, imageUrl: null } : undefined);
   if (!team) return <span className="text-sm text-zinc-500">Team #{teamId}</span>;
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>

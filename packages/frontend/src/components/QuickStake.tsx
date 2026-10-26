@@ -91,6 +91,8 @@ function potentialWin(
 
 export function QuickStakeSheet({
   marketId,
+  marketKey,
+  factoryAddress = MARKET_FACTORY_ADDRESS,
   question,
   outcome,
   outcomeTotals,
@@ -102,6 +104,8 @@ export function QuickStakeSheet({
 }: {
   /** Factory: market id. Match: fixture id (global id is derived inside). */
   marketId: bigint;
+  marketKey?: string;
+  factoryAddress?: `0x${string}`;
   question: string;
   outcome: QuickStakeOutcome | null;
   outcomeTotals: bigint[];
@@ -126,7 +130,7 @@ export function QuickStakeSheet({
   // Allowance read (approve defensively when unknown — approve is idempotent).
   useEffect(() => {
     let alive = true;
-    if (!playerAddress || !CONTRACTS.tickToken || !MARKET_FACTORY_ADDRESS) {
+    if (!playerAddress || !CONTRACTS.tickToken || !factoryAddress) {
       setAllowance(null);
       return;
     }
@@ -135,12 +139,12 @@ export function QuickStakeSheet({
         address: CONTRACTS.tickToken,
         abi: TICK_TOKEN_ABI,
         functionName: "allowance",
-        args: [playerAddress, MARKET_FACTORY_ADDRESS],
+        args: [playerAddress, factoryAddress],
       })
       .then((v) => alive && setAllowance(v as bigint))
       .catch(() => alive && setAllowance(null));
     return () => { alive = false; };
-  }, [playerAddress]);
+  }, [playerAddress, factoryAddress]);
 
   const needsApproval = amountWei > 0n && (allowance === null || allowance < amountWei);
   const balanceOk = balance === null || amountWei <= balance;
@@ -167,7 +171,7 @@ export function QuickStakeSheet({
       return;
     }
     const isMatch = variant === "match";
-    const spender = isMatch ? CONTRACTS.predictionPool : MARKET_FACTORY_ADDRESS;
+    const spender = isMatch ? CONTRACTS.predictionPool : factoryAddress;
     if (!spender) {
       toast.error("Staking contract is not deployed on this network.");
       return;
@@ -205,7 +209,7 @@ export function QuickStakeSheet({
           label: "Stake",
         }
       : {
-          address: MARKET_FACTORY_ADDRESS!,
+          address: factoryAddress,
           abi: MARKET_FACTORY_ABI,
           functionName: "stake",
           args: [marketId, BigInt(outcome.index), amountWei],
@@ -233,7 +237,7 @@ export function QuickStakeSheet({
         await writeBatch([stakeCall], { label: "Stake", onHashed: onStakeHashed });
       }
       // Reconcile optimistically shown pools + balance.
-      void queryClient.invalidateQueries({ queryKey: qks.market(marketId.toString()) });
+      void queryClient.invalidateQueries({ queryKey: qks.market(marketKey ?? marketId.toString()) });
       void queryClient.invalidateQueries({ queryKey: qks.markets });
       void queryClient.invalidateQueries({
         queryKey: qks.balance(playerAddress.toLowerCase()),

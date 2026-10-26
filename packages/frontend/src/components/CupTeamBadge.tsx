@@ -11,7 +11,7 @@ export function CupTeamBadge({ teamId, size = 34, showName = true }: { teamId: n
   const { teams } = useTeams();
   const [stage, setStage] = useState(0);
   const symbol = CUP_TEAM_SYMBOLS[teamId];
-  const leagueTeam = teams.find((team) => team.symbol === symbol || (symbol === "TRON" && team.symbol === "TRX") || (symbol === "GRAM" && team.symbol === "TON"));
+  const leagueTeam = teams.find((team) => team.symbol === symbol || (symbol === "TRON" && team.symbol === "TRX"));
   const cmcId = CUP_CMC_IDS[teamId] ?? leagueTeam?.cmcId;
   const sources = [leagueTeam?.imageUrl, cmcId ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${cmcId}.png` : null, symbol ? `https://assets.coincap.io/assets/icons/${symbol.toLowerCase()}@2x.png` : null].filter((src): src is string => !!src);
   if (teamId === CUP_TBD || !symbol) return <span className="text-sm font-semibold text-zinc-400">TBA</span>;

@@ -15,6 +15,7 @@ import type { CoingeckoPoller } from "../services/coingecko.js";
 import { ChainCache, ChainApiError } from "../services/chainCache.js";
 import { scaledToPrice } from "../lib/priceMath.js";
 import { fetchPriceHistory, type PriceHistoryPoint } from "../services/priceHistory.js";
+import { CUP_TEAM_PRICE_MAP, CUP_TEAM_SYMBOLS, CUP_TARGET_ORACLE_OFFSET } from "../services/cupTeams.js";
 
 const priceHistoryCache = new Map<string, { at: number; points: PriceHistoryPoint[] }>();
 const gzipAsync = promisify(gzip);
@@ -41,6 +42,7 @@ export interface ApiDeps {
   reader: ChainReader;
   lifecycle: MatchLifecycle;
   priceFeed: PriceFeed;
+  cupPriceFeed: PriceFeed;
   coingecko: CoingeckoPoller;
   chainCache: ChainCache;
 
@@ -342,7 +344,7 @@ export function buildRouter(deps: ApiDeps): Router {
 
   router.get("/api/prices", (_req: Request, res: Response) => {
     try {
-      const out = TICKR_TEAMS.map((t) => {
+      const out: Array<{ teamId: number; symbol: string; price: string | null; source: string | null; ok: boolean; error?: string }> = TICKR_TEAMS.map((t) => {
         try {
           const q = deps.priceFeed.getValidatedPrice(t.teamId);
           return {
@@ -363,6 +365,18 @@ export function buildRouter(deps: ApiDeps): Router {
           };
         }
       });
+      const leagueSymbols = new Set(TICKR_TEAMS.map((team) => team.symbol));
+      for (const cupTeam of CUP_TEAM_PRICE_MAP) {
+        const displaySymbol = CUP_TEAM_SYMBOLS[cupTeam.teamId];
+        const symbol = displaySymbol === "TRON" ? "TRX" : displaySymbol === "PENGUIN" ? "PENGU" : displaySymbol;
+        if (leagueSymbols.has(symbol)) continue;
+        try {
+          const quote = deps.cupPriceFeed.getValidatedPrice(cupTeam.teamId);
+          out.push({ teamId: CUP_TARGET_ORACLE_OFFSET + cupTeam.teamId, symbol, price: scaledToPrice(quote.scaled), source: quote.source, ok: true });
+        } catch (err) {
+          out.push({ teamId: CUP_TARGET_ORACLE_OFFSET + cupTeam.teamId, symbol, price: null, source: null, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       res.json(out);
     } catch (err) {
       logger.warn("[api] getPrices failed", { error: String(err) });

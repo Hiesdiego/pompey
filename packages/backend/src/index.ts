@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   if (cupConfigured && (!config.cup.engine || !config.cup.ballot)) {
     throw new Error("[config] CUP_ENGINE_ADDRESS and CUP_BALLOT_ADDRESS are required when the cup is enabled");
   }
-  const cupTeamMaps: TeamPriceMap[] = cupConfigured ? CUP_TEAM_PRICE_MAP : [];
+  const cupTeamMaps: TeamPriceMap[] = CUP_TEAM_PRICE_MAP;
   const allTeamMaps = [...teamMaps, ...cupTeamMaps];
   const coinbasePairs = [...new Set(allTeamMaps.map((t) => t.coinbasePair).filter(Boolean))];
   const binanceSymbols = [...new Set(allTeamMaps.map((t) => t.binanceSymbol).filter(Boolean))];
@@ -121,9 +121,13 @@ async function main(): Promise<void> {
   const submitter = new SnapshotSubmitter();
   lifecycle = new MatchLifecycle(priceFeed, submitter);
   const cupLifecycle = cupConfigured ? new CupLifecycle(cupPriceFeed, new CupSubmitter()) : null;
-  const checkpointSubmitter = new CheckpointSubmitter(priceFeed);
+  const checkpointSubmitter = new CheckpointSubmitter(priceFeed, cupPriceFeed);
   const db = createSocialDb();
   const factoryKeeper = new FactoryKeeper(db);
+  const newFactoryKeeper = config.contracts.newMarketFactory &&
+    config.contracts.newMarketFactory.toLowerCase() !== config.contracts.marketFactory.toLowerCase()
+    ? new FactoryKeeper(null, config.contracts.newMarketFactory)
+    : null;
   const reader = new ChainReader();
   const chainCache = new ChainCache();
   const socialIndexer = new SocialIndexer(db, (marketId) => chainCache.markMarketDirty(marketId));
@@ -217,7 +221,7 @@ async function main(): Promise<void> {
     next();
   });
   app.use(express.json());
-  app.use(buildRouter({ reader, lifecycle, priceFeed, coingecko, chainCache, health: buildHealth }));
+  app.use(buildRouter({ reader, lifecycle, priceFeed, cupPriceFeed, coingecko, chainCache, health: buildHealth }));
 
   app.use(
     (
@@ -259,6 +263,7 @@ async function main(): Promise<void> {
     }
     try {
       factoryKeeper.start();
+      newFactoryKeeper?.start();
     } catch (err) {
       logger.error("[backend] factory keeper failed to start", { error: String(err) });
     }
@@ -277,6 +282,7 @@ async function main(): Promise<void> {
     cupLifecycle?.stop();
     checkpointSubmitter.stop();
     factoryKeeper.stop();
+    newFactoryKeeper?.stop();
     socialIndexer.stop();
     chainCache.stop();
     coinbase.stop();
