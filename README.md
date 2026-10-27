@@ -16,7 +16,7 @@ Coins are the teams. Price moves are the goals. You call the result, stake TICK,
 
 ![TICKR in action — home, fixtures, staking, markets, leaderboard](packages/frontend/public/tickr-gif/tickr-showoff.gif)
 
-[🎮 Open the app](https://tickrbase.top) · [📖 How to play](https://tickrbase.top/how-to-play) · [🧠 How it works](https://tickrbase.top/about) · [🗺 Roadmap](https://tickrbase.top/roadmap)
+[🎮 Open the app](https://tickrbase.top) · [📚 Documentation](https://docs.tickrbase.top) · [📖 How to play](https://tickrbase.top/how-to-play) · [🧠 How it works](https://tickrbase.top/about) · [🗺 Roadmap](https://tickrbase.top/roadmap)
 
 </div>
 
@@ -24,7 +24,7 @@ Coins are the teams. Price moves are the goals. You call the result, stake TICK,
 
 ## Documentation
 
-The standalone documentation app lives in [`packages/docs`](packages/docs). Run it with `pnpm --filter @tickr/docs dev` and deploy that package at `docs.tickrbase.top`. The public documentation URL becomes active once its hosting and DNS are configured.
+Read the [Tickr documentation](https://docs.tickrbase.top) for the rules, price sources, settlement and contracts. Its source lives in [`packages/docs`](packages/docs); run it locally with `pnpm --filter @tickr/docs dev`.
 
 ## ⚡ The 10-second version
 

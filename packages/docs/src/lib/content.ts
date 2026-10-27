@@ -1,4 +1,4 @@
-export type Doc = { slug: string; title: string; description: string; group: string; readTime: string; sections: { id: string; title: string; paragraphs: string[]; note?: string; code?: string; bullets?: string[] }[] };
+export type Doc = { slug: string; title: string; description: string; group: string; readTime: string; sections: { id: string; title: string; paragraphs: string[]; note?: string; code?: string; bullets?: string[]; links?: { label: string; address: string; description: string }[] }[] };
 
 export const docs: Doc[] = [
   { slug: "overview", title: "What is Tickr?", description: "A crypto prediction league, explained from first principles.", group: "Start here", readTime: "3 min", sections: [
@@ -44,6 +44,12 @@ export const docs: Doc[] = [
   { slug: "contracts", title: "Smart contracts", description: "The onchain components and where to verify them.", group: "Developers", readTime: "4 min", sections: [
     { id: "network", title: "Network", paragraphs: ["The current public build runs on Base Sepolia. Confirm the network and active addresses in the app before sending any transaction. The backend and frontend each carry deployment configuration, which can change between releases."] },
     { id: "components", title: "Core components", paragraphs: ["SeasonRegistry defines the fixture schedule and records settlement state. PriceOracle accepts price snapshots. ResultEngine derives scorelines and outcomes. PredictionPool holds TICK stakes, settles pools and handles claims. TeamRegistry and TickToken support team metadata and the staking token."], bullets: ["SeasonRegistry — fixtures and season state", "PriceOracle — submitted prices", "ResultEngine — match scoring", "PredictionPool — stakes, fees, claims and refunds", "TickToken — TICK balances"] },
+    { id: "addresses", title: "Essential Base Sepolia addresses", paragraphs: ["These addresses match the checked-in frontend and backend deployment examples. Only contracts needed to trace the token, prices, result calculation and fixture payouts are listed here. The active app configuration is the final reference before a transaction."], links: [
+      { label: "TICK token", address: "0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b", description: "Token used for fixture staking and claims" },
+      { label: "PriceOracle", address: "0x2814bd64f7774eccd5dc11a792f15fecdfebdf90", description: "Kickoff and end price submissions" },
+      { label: "ResultEngine", address: "0x82e00f543ddf320eec4447fd16810852bda4ec12", description: "Official score and outcome computation" },
+      { label: "PredictionPool", address: "0xc47358e69d145f94728796a337ec14401641700f", description: "Fixture stakes, settlement, payouts and void claims" }
+    ] },
     { id: "verify", title: "Verifying a result", paragraphs: ["Start at the fixture page and note the fixture ID and chain. Open the relevant verified contract on the chain explorer, inspect its recorded prices and settlement events, then compare the contract result with the app's final score."] }
   ] },
   { slug: "api", title: "Read API", description: "Public backend endpoints for fixtures, teams and prices.", group: "Developers", readTime: "4 min", sections: [

@@ -30,6 +30,7 @@ const NAV = [
   { href: "/cup", label: "World Cup" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/claims", label: "Claims" },
+  { href: "https://docs.tickrbase.top", label: "Docs" },
 ];
 
 function ThemeToggle({ inMenu = false }: { inMenu?: boolean }) {
