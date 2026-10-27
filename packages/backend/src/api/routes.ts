@@ -16,6 +16,7 @@ import { ChainCache, ChainApiError } from "../services/chainCache.js";
 import { scaledToPrice } from "../lib/priceMath.js";
 import { fetchPriceHistory, type PriceHistoryPoint } from "../services/priceHistory.js";
 import { CUP_TEAM_PRICE_MAP, CUP_TEAM_SYMBOLS, CUP_TARGET_ORACLE_OFFSET } from "../services/cupTeams.js";
+import { buildTargetTeamDirectory } from "../services/teamDirectory.js";
 
 const priceHistoryCache = new Map<string, { at: number; points: PriceHistoryPoint[] }>();
 const gzipAsync = promisify(gzip);
@@ -125,7 +126,7 @@ export function buildRouter(deps: ApiDeps): Router {
         : /^\/api\/fixtures\/\d+\/(pool|form)$/.test(path) ? 5
         : path === "/api/table" ? 30
         : path === "/api/prices" ? 5
-        : path === "/api/teams" ? 3600
+        : path === "/api/teams" || path === "/api/target-teams" ? 3600
         : 0;
       if (ttl > 0) {
         // Browser revalidates; only the shared edge keeps a short copy.
@@ -248,6 +249,15 @@ export function buildRouter(deps: ApiDeps): Router {
     } catch (err) {
       logger.warn("[api] getTeams failed", { error: String(err) });
       apiError(res, 502, "INTERNAL", "Team list is refreshing — please try again in a moment.");
+    }
+  });
+
+  router.get("/api/target-teams", (_req: Request, res: Response) => {
+    try {
+      res.json(buildTargetTeamDirectory(deps.coingecko.getMetadata()));
+    } catch (err) {
+      logger.warn("[api] getTargetTeams failed", { error: String(err) });
+      apiError(res, 502, "INTERNAL", "Target coin logos are refreshing — please try again in a moment.");
     }
   });
 

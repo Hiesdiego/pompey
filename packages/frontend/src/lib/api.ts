@@ -129,6 +129,7 @@ async function get<T>(path: string): Promise<T> {
 export const api = {
   health: () => get<{ status: string; chainEnv: string; seasonId: string }>("/health"),
   teams: () => get<ApiTeam[]>("/api/teams"),
+  targetTeams: () => get<ApiTeam[]>("/api/target-teams"),
   fixtures: () => get<ApiFixture[]>("/api/fixtures"),
   fixture: (id: string | number) => get<ApiFixture>(`/api/fixtures/${id}`),
   pool: (id: string | number) => get<ApiPool>(`/api/fixtures/${id}/pool`),
