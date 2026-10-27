@@ -91,6 +91,7 @@ export async function Footer() {
         <nav aria-label="Footer" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-semibold text-zinc-500">
           <Link href="/about" className="transition-colors hover:text-[#2E7CF6]">About</Link>
           <Link href="/how-to-play" className="transition-colors hover:text-[#2E7CF6]">How to play</Link>
+          <a href="https://docs.tickrbase.top" className="transition-colors hover:text-[#2E7CF6]">Docs</a>
           <Link href="/roadmap" className="transition-colors hover:text-[#2E7CF6]">Roadmap</Link>
           <Link href="/fixtures" className="transition-colors hover:text-[#2E7CF6]">Fixtures</Link>
           <Link href="/markets" className="transition-colors hover:text-[#2E7CF6]">Markets</Link>

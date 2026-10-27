@@ -22,6 +22,10 @@ Coins are the teams. Price moves are the goals. You call the result, stake TICK,
 
 ---
 
+## Documentation
+
+The standalone documentation app lives in [`packages/docs`](packages/docs). Run it with `pnpm --filter @tickr/docs dev` and deploy that package at `docs.tickrbase.top`. The public documentation URL becomes active once its hosting and DNS are configured.
+
 ## ⚡ The 10-second version
 
 1. **20 cryptocurrencies** play a full football-style season — 380 fixtures, league table, the works.
