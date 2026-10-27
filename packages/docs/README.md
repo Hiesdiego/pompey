@@ -15,6 +15,6 @@ Open `http://localhost:3001`.
 
 ## Deployment
 
-Deploy `packages/docs` as its own Next.js application using the monorepo root as the install directory and `packages/docs` as the project root. Set `NEXT_PUBLIC_DOCS_URL` to the public origin, for example `https://docs.tickrbase.top`, before building. Add the `docs` DNS record and custom domain in the host once deployed.
+Create a new Vercel project from this repository and set its **Root Directory** to `packages/docs`. The local `vercel.json` identifies this as a Next.js app. Do not group it into a Services project with the existing frontend or backend. Set `NEXT_PUBLIC_DOCS_URL=https://docs.tickrbase.top`, then add `docs.tickrbase.top` as the custom domain for this new project and configure the DNS record Vercel provides. The existing frontend and backend deployments are independent.
 
 Content that depends on live configuration should be checked against the backend environment and deployed contracts before release. In particular, price freshness, deviation limits, fee settings and contract addresses can change between deployments.
