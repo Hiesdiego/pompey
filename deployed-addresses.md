@@ -37,7 +37,8 @@ All four contracts are wired, and the 64-team field is registered (16 teams per 
 | Status | Address | Deployment block |
 | --- | --- | --- |
 | Existing markets | `0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1` | `47568821` |
-| New markets | `0xac04f4ff8b2e71984cb25e75456915c81075acdc` | Standalone deployment |
+| Previous markets (`n-` links) | `0xac04f4ff8b2e71984cb25e75456915c81075acdc` | Standalone deployment |
+| New price-target markets (`v-` links) | `0x7ead4c6b3cc884adb82b60e9c34ef2d59604bfc2` | Standalone deployment |
 
 ## Deployment record
 

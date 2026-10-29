@@ -6,9 +6,6 @@
  *   - TOP_GAINER: matchday cards; only future, not-yet-created matchdays are
  *     selectable. Ineligible ones are grayed out with the reason.
  *   - CHAMPION: can only ever exist once; the card is disabled once created.
- *   - TARGET: "at time" defaults to 2 hours out (ceiled to the minute
- *     so the picker can never produce a value the contract would reject),
- *     and the picker forbids anything earlier or more than 30 days out.
  *   - SPREAD: fixtures grouped by matchday; only unplayed fixtures are
  *     selectable. Multiple spreads per fixture are allowed as long as the
  *     spread points differ — only an exact (fixture, points) duplicate is
@@ -50,6 +47,7 @@ import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
 import { LEAGUE_TARGET_COINS, TARGET_COINS } from "../../../lib/targetCoins";
+import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
 
 const TEMPLATE_IDS = [
   TEMPLATES.TOP_GAINER,
@@ -63,7 +61,7 @@ const TEMPLATE_ICONS = [Trophy, Crown, Swords, Target, BarChart3];
 
 /** "2026-09-29T15:04" in the user's local timezone. */
 function localDateTimeFromMs(ms: number) {
-  const d = new Date(ms - new Date().getTimezoneOffset() * 60_000);
+  const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
   return d.toISOString().slice(0, 16);
 }
 
@@ -137,12 +135,8 @@ export default function CreateMarketPage() {
   const [windowEnd, setWindowEnd] = useState("");
   const [targetTeam, setTargetTeam] = useState("0");
   const [targetPrice, setTargetPrice] = useState("");
-  // Strict target-time bounds, fixed when the page loads: the earliest
-  // selectable minute is ceil(now + 1h) so the picker can never produce a
-  // value the contract's 1-hour lead would reject; the latest is +30 days
-  // (the contract's MAX_MARKET_WINDOW).
   const [targetMin] = useState(() => localDateTimeFromMs(ceilToMinute(Date.now() + 3_600_000)));
-  const [targetMax] = useState(() => localDateTimeFromMs(Date.now() + 30 * 24 * 3_600_000));
+  const [targetMax] = useState(() => localDateTimeFromMs(Math.min(new Date(2026, 11, 31, 23, 59).getTime(), Date.UTC(2027, 0, 1) - 60_000)));
   const [targetTime, setTargetTime] = useState(() => localDateTimeFromMs(ceilToMinute(Date.now() + 2 * 3_600_000)));
   const [targetAbove, setTargetAbove] = useState(true);
   const [spreadFixture, setSpreadFixture] = useState("0");
@@ -365,7 +359,7 @@ export default function CreateMarketPage() {
   const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
   const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
   const previewTitle = templateId === TEMPLATES.TARGET
-    ? targetPrice ? `Will ${selectedTeam?.name ?? "this coin"} finish ${targetAbove ? "at or above" : "at or below"} $${Number(targetPrice).toLocaleString()}?` : "Set a target price to preview the question"
+    ? targetPrice ? priceTargetQuestion(selectedTeam?.name ?? "this coin", Number(targetPrice), targetAbove, new Date(targetTime)) : "Set a target price to preview the question"
     : templateId === TEMPLATES.SPREAD
       ? `Will ${selectedFixture?.home?.symbol ?? "home"} cover a ${spreadPoints} goal spread against ${selectedFixture?.away?.symbol ?? "away"}?`
       : templateId === TEMPLATES.TOP_GAINER
@@ -731,9 +725,8 @@ function encodeParams(templateId: number, v: ParamValues): `0x${string}` {
     const price = Number(v.targetPrice);
     if (!price || price <= 0) throw new Error("Enter a target price above 0");
     const at = Math.floor(new Date(v.targetTime).getTime() / 1000);
-    // Mirrors the contract: atTime must be in (now + 1h, now + 30d].
     if (!at || at <= Date.now() / 1000 + 3600) throw new Error("Target time must be at least 1 hour out");
-    if (at > Date.now() / 1000 + 30 * 24 * 3600) throw new Error("Target time can't be more than 30 days out");
+    if (at >= Date.UTC(2027, 0, 1) / 1000) throw new Error("Target time must be before 2027 UTC");
     // Price scaled by 1e8 (PRICE_DECIMALS).
     const scaled = BigInt(Math.round(price * 1e8));
     return encodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), [
@@ -938,8 +931,17 @@ function TemplateParamsForm({
             className={inputCls}
           />
           <p className="mt-2 text-xs text-zinc-500">
-            Defaults to 2 hours from now. You can choose a time at least 1 hour out and no more than 30 days out.
+            Defaults to 2 hours from now. Times use your local time zone. Choose a time at least 1 hour out and through the end of 2026.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[
+              { label: "End of this month", date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59) },
+              { label: "End of next month", date: new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0, 23, 59) },
+              { label: "End of 2026", date: new Date(2026, 11, 31, 23, 59) },
+            ].filter(({ date }) => date.getTime() > Date.now() + 3_600_000 && date.getTime() < Date.UTC(2027, 0, 1)).map(({ label, date }) => (
+              <button key={label} type="button" onClick={() => v.setTargetTime(localDateTimeFromMs(date.getTime()))} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{label}</button>
+            ))}
+          </div>
         </div>
       </div>
     );

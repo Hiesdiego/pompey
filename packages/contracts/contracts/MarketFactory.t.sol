@@ -376,6 +376,19 @@ contract MarketFactoryTest is Test {
         vm.stopPrank();
     }
 
+    function test_TargetDeadlineExtendsPastThirtyDaysThrough2026() public {
+        vm.warp(1793232000);
+        _approveAll(creator);
+        uint8 templateId = factory.T_TARGET();
+        uint64 lastSecond = factory.MAX_TARGET_TIME();
+
+        vm.startPrank(creator);
+        factory.createMarket(templateId, abi.encode(uint16(0), 105 * ONE, lastSecond, true), "year end");
+        vm.expectRevert(MarketFactory.InvalidParams.selector);
+        factory.createMarket(templateId, abi.encode(uint16(0), 105 * ONE, lastSecond + 1, true), "2027");
+        vm.stopPrank();
+    }
+
     function test_TargetResolvesYes() public {
         _approveAll(creator);
         _approveAll(alice);

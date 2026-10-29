@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { targetCoinById } from "../../lib/targetCoins";
+import { priceTargetQuestion } from "../../lib/priceTargetQuestion";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { useTickr } from "../../hooks/useTickr";
@@ -232,9 +233,9 @@ function describeCardMarket(
       return `Will ${teamSymbol(teams, a)} outperform ${teamSymbol(teams, b)}?`;
     }
     if (market.templateId === TEMPLATES.TARGET) {
-      const [team, price, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params);
+      const [team, price, atTime, above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params);
       const symbol = teamSymbol(teams, team);
-      return `Will ${symbol} finish ${above ? "at or above" : "at or below"} $${(Number(price) / 1e8).toLocaleString()}?`;
+      return priceTargetQuestion(symbol, Number(price) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     // Spread: name the teams in home/away order and state the number.
     // Home covers iff (homeGoals − awayGoals) > spread.

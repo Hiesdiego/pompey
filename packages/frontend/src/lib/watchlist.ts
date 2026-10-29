@@ -36,7 +36,7 @@ export function readWatchlist(wallet: string): WatchEntry[] {
   const now = Date.now();
   const active = entries.filter((entry): entry is WatchEntry =>
     !!entry && typeof entry === "object" && typeof entry.marketId === "string" &&
-    /^(?:0|[1-9]\d*|n-(?:0|[1-9]\d*))$/.test(entry.marketId) && (!entry.expiresAt || (Number.isFinite(entry.expiresAt) && entry.expiresAt > now)))
+    /^(?:(?:n|v)-)?(?:0|[1-9]\d*)$/.test(entry.marketId) && (!entry.expiresAt || (Number.isFinite(entry.expiresAt) && entry.expiresAt > now)))
     .map((entry) => ({
       marketId: entry.marketId,
       expiresAt: entry.expiresAt || now + WATCH_LIFETIME_MS,

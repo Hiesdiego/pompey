@@ -8,7 +8,7 @@ import {
   type MarketSummary,
 } from "../chainDirect";
 import { toAppError } from "../errors";
-import { MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS } from "../marketFactory";
+import { MARKET_FACTORY_ADDRESS, MARKET_FACTORY_ADDRESSES } from "../marketFactory";
 
 export interface MarketsData {
   markets: MarketSummary[];
@@ -32,9 +32,10 @@ export function useMarkets() {
           throw toAppError(e);
         }
       }
-      if (!NEW_MARKET_FACTORY_ADDRESS || NEW_MARKET_FACTORY_ADDRESS.toLowerCase() === MARKET_FACTORY_ADDRESS?.toLowerCase()) return oldMarkets;
-      const newMarkets = await fetchMarketsDirect(NEW_MARKET_FACTORY_ADDRESS).catch(() => null);
-      return { ...oldMarkets, markets: [...(newMarkets?.markets ?? []), ...oldMarkets.markets] };
+      const additional = await Promise.all(MARKET_FACTORY_ADDRESSES
+        .filter((factory) => factory.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase())
+        .map((factory) => fetchMarketsDirect(factory).catch(() => null)));
+      return { ...oldMarkets, markets: [...additional.reverse().flatMap((result) => result?.markets ?? []), ...oldMarkets.markets] };
     },
     staleTime: 10_000,
     refetchInterval: 15_000,

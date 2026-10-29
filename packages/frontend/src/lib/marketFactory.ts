@@ -22,26 +22,34 @@ export const MARKET_FACTORY_ADDRESS = envAddress(
   process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS
 ) as Address;
 
-export const NEW_MARKET_FACTORY_ADDRESS = envAddress(
-  process.env.NEXT_PUBLIC_NEW_MARKET_FACTORY_ADDRESS ||
+export const PREVIOUS_MARKET_FACTORY_ADDRESS = envAddress(
+  process.env.NEXT_PUBLIC_PREVIOUS_MARKET_FACTORY_ADDRESS ||
     (process.env.NEXT_PUBLIC_TICKR_CHAIN_ENV === "mainnet"
       ? ""
       : "0xac04f4ff8b2e71984cb25e75456915c81075acdc")
 ) as Address;
 
+export const NEW_MARKET_FACTORY_ADDRESS = envAddress(
+  process.env.NEXT_PUBLIC_NEW_MARKET_FACTORY_ADDRESS ||
+    (process.env.NEXT_PUBLIC_TICKR_CHAIN_ENV === "mainnet"
+      ? ""
+      : "0x7ead4c6b3cc884adb82b60e9c34ef2d59604bfc2")
+) as Address;
+
+export const MARKET_FACTORY_ADDRESSES = [MARKET_FACTORY_ADDRESS, PREVIOUS_MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS]
+  .filter((address, index, all): address is Address => !!address && all.findIndex((item) => item?.toLowerCase() === address.toLowerCase()) === index);
+
 export function marketRouteKey(factory: Address, id: number | bigint): string {
-  return NEW_MARKET_FACTORY_ADDRESS &&
-    NEW_MARKET_FACTORY_ADDRESS.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase() &&
-    factory.toLowerCase() === NEW_MARKET_FACTORY_ADDRESS.toLowerCase()
-    ? `n-${id}`
-    : String(id);
+  if (NEW_MARKET_FACTORY_ADDRESS && factory.toLowerCase() === NEW_MARKET_FACTORY_ADDRESS.toLowerCase()) return `v-${id}`;
+  if (PREVIOUS_MARKET_FACTORY_ADDRESS && factory.toLowerCase() === PREVIOUS_MARKET_FACTORY_ADDRESS.toLowerCase()) return `n-${id}`;
+  return String(id);
 }
 
 export function marketFromRoute(key: string): { id: bigint; factory: Address } | null {
-  const isNew = key.startsWith("n-");
-  const idPart = isNew ? key.slice(2) : key;
+  const prefix = key.startsWith("v-") ? "v" : key.startsWith("n-") ? "n" : "";
+  const idPart = prefix ? key.slice(2) : key;
   if (!/^(0|[1-9]\d*)$/.test(idPart)) return null;
-  const factory = isNew ? NEW_MARKET_FACTORY_ADDRESS : MARKET_FACTORY_ADDRESS;
+  const factory = prefix === "v" ? NEW_MARKET_FACTORY_ADDRESS : prefix === "n" ? PREVIOUS_MARKET_FACTORY_ADDRESS : MARKET_FACTORY_ADDRESS;
   return factory ? { id: BigInt(idPart), factory } : null;
 }
 

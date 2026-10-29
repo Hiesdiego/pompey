@@ -28,6 +28,7 @@ import { getMatchDurationMs } from "../lib/matchConfig";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { targetCoinById } from "../lib/targetCoins";
+import { priceTargetQuestion } from "../lib/priceTargetQuestion";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
 import { MyPicksDashboard } from "../components/MyPicksDashboard";
 import { TargetCardStatus } from "../components/TargetCardStatus";
@@ -76,8 +77,8 @@ function marketQuestion(market: MarketSummary, teams: { symbol: string }[], fixt
       return `Will ${teams[Number(a)]?.symbol ?? `Team ${a}`} outperform ${teams[Number(b)]?.symbol ?? `Team ${b}`}?`;
     }
     if (market.templateId === TEMPLATES.TARGET) {
-      const [team, target, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
-      return `Will ${targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      const [team, target, atTime, above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
+      return priceTargetQuestion(targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`, Number(target) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     if (market.templateId === TEMPLATES.SPREAD) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), market.params as `0x${string}`);
@@ -228,7 +229,7 @@ function FeaturedCarousel({ markets, teams, fixtures, prices, priceFresh, loadin
   const current = index % count;
   const market = markets[current];
   return <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocusCapture={() => setPaused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false); }}>
-    {market ? <MarketCard key={market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured /> : <CupOutrightMarketCard featured />}
+    {market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured /> : <CupOutrightMarketCard featured />}
     {count > 1 && <div className="absolute bottom-5 right-6 z-10 flex items-center gap-2 sm:bottom-9 sm:right-8"><button aria-label="Previous featured market" onClick={() => setIndex((i) => (i - 1 + count) % count)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronLeft className="h-4 w-4" /></button><span className="min-w-10 text-center text-xs font-bold tabular-nums text-zinc-500">{current + 1} / {count}</span><button aria-label="Next featured market" onClick={() => setIndex((i) => (i + 1) % count)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronRight className="h-4 w-4" /></button></div>}
     <div className="mt-3 flex justify-center gap-1.5">{Array.from({ length: count }, (_, i) => <button key={i} aria-label={`Show featured market ${i + 1}`} onClick={() => setIndex(i)} className={`h-1.5 rounded-full transition-all ${i === current ? "w-7 bg-amber-500" : "w-1.5 bg-zinc-300 dark:bg-zinc-700"}`} />)}</div>
   </div>;
@@ -344,8 +345,8 @@ export default function HomePage() {
 
     {cupConfigured && <section className="rounded-3xl border border-amber-400/25 bg-gradient-to-br from-amber-500/[.12] via-yellow-500/[.04] to-transparent p-4 dark:border-amber-400/20 sm:p-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[.2em] text-amber-700 dark:text-amber-300"><Trophy className="h-4 w-4" /> Crypto Price World Cup</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white">World Cup matches</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Follow the knockout ties and pick a winner.</p></div><Link href="/cup" className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 hover:underline dark:text-amber-300">View all matches <ArrowRight className="h-4 w-4" /></Link></div>{homeCupMatches.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{homeCupMatches.map((match) => <CupMatchCard key={match.matchId} match={match} now={cupNow} />)}</div> : <div className="rounded-2xl border border-amber-400/15 bg-white/60 p-6 text-center text-sm text-zinc-500 dark:bg-white/[.03]">{cupError ? <>Could not load World Cup matches. <button onClick={() => void reloadCup()} className="font-bold text-amber-700 underline dark:text-amber-300">Retry</button></> : "Loading World Cup matches…"}</div>}</section>}
 
-    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
+    <section><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 
-    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => market ? <MarketCard key={market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div></section>}
+    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div></section>}
   </div>;
 }

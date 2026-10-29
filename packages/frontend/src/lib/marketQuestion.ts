@@ -10,6 +10,7 @@ import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TEMPLATES, TEMPLATE_NAMES } from "./marketFactory";
 import type { ApiFixture, ApiFixtureTeam } from "./api";
 import { targetCoinById } from "./targetCoins";
+import { priceTargetQuestion } from "./priceTargetQuestion";
 
 export interface TeamRef {
   teamId: number;
@@ -74,13 +75,11 @@ export function marketQuestion(
       return `Will ${teamSymbol(teams, a)} outperform ${teamSymbol(teams, b)}?`;
     }
     if (templateId === TEMPLATES.TARGET) {
-      const [team, price, , above] = decodeAbiParameters(
+      const [team, price, atTime, above] = decodeAbiParameters(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         paramsHex as `0x${string}`
       );
-      return `Will ${targetCoinById(Number(team))?.symbol ?? teamSymbol(teams, team)} finish ${above ? "at or above" : "at or below"} $${(
-        Number(price) / 1e8
-      ).toLocaleString()}?`;
+      return priceTargetQuestion(targetCoinById(Number(team))?.symbol ?? teamSymbol(teams, team), Number(price) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     // SPREAD — name the teams in home/away order and state the number.
     const si = spreadInfo(paramsHex, fixtures);

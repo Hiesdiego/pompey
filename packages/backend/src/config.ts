@@ -104,6 +104,7 @@ export const config = {
      * is worse than a loud boot failure. Update on every factory redeploy.
      */
     marketFactory: required("MARKET_FACTORY_ADDRESS") as `0x${string}`,
+    previousMarketFactory: optional("PREVIOUS_MARKET_FACTORY_ADDRESS", "") as `0x${string}` | "",
     newMarketFactory: optional("NEW_MARKET_FACTORY_ADDRESS", "") as `0x${string}` | "",
   },
 

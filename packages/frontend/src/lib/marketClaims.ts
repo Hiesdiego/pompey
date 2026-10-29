@@ -1,7 +1,7 @@
 import type { Address } from "viem";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { fetchMarketsDirect, proxyGet, type MarketSummary } from "./chainDirect";
-import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS } from "./marketFactory";
+import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, MARKET_FACTORY_ADDRESSES } from "./marketFactory";
 
 export interface ClaimableMarket {
   kind: "market";
@@ -10,7 +10,7 @@ export interface ClaimableMarket {
 }
 
 export async function scanMarketClaims(player: Address): Promise<ClaimableMarket[]> {
-  if (!MARKET_FACTORY_ADDRESS && !NEW_MARKET_FACTORY_ADDRESS) return [];
+  if (MARKET_FACTORY_ADDRESSES.length === 0) return [];
   let markets: MarketSummary[] = [];
   if (MARKET_FACTORY_ADDRESS) {
     try {
@@ -19,9 +19,10 @@ export async function scanMarketClaims(player: Address): Promise<ClaimableMarket
       markets = (await fetchMarketsDirect()).markets;
     }
   }
-  if (NEW_MARKET_FACTORY_ADDRESS && NEW_MARKET_FACTORY_ADDRESS.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase()) {
-    markets = [...markets, ...(await fetchMarketsDirect(NEW_MARKET_FACTORY_ADDRESS)).markets];
-  }
+  const additional = await Promise.all(MARKET_FACTORY_ADDRESSES
+    .filter((factory) => factory.toLowerCase() !== MARKET_FACTORY_ADDRESS?.toLowerCase())
+    .map((factory) => fetchMarketsDirect(factory)));
+  markets = [...markets, ...additional.flatMap((result) => result.markets)];
 
   const candidates = markets.filter((market) =>
     market.state === 2 ||

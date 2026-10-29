@@ -9,6 +9,8 @@ import {
 import { getPublicClient } from "@/hooks/usePublicClient";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { targetCoinById } from "@/lib/targetCoins";
+import { marketFromRoute, MARKET_FACTORY_ADDRESS } from "@/lib/marketFactory";
+import { priceTargetQuestion } from "@/lib/priceTargetQuestion";
 import {
   OG_WIDTH,
   OG_HEIGHT,
@@ -19,14 +21,12 @@ import {
   backendUrl,
   formatTickShort,
   handleForAddress,
-  isNumericId,
   logoDataUrl,
 } from "../../_shared";
 
 
 export const runtime = "nodejs";
 
-const FACTORY = (process.env.NEXT_PUBLIC_MARKET_FACTORY_ADDRESS || "") as `0x${string}`;
 const FACTORY_DEPLOY_BLOCK = BigInt(process.env.MARKET_FACTORY_DEPLOY_BLOCK?.trim() || "0");
 
 const FACTORY_ABI = parseAbi([
@@ -67,11 +67,11 @@ async function questionFor(templateId: number, params: `0x${string}`): Promise<s
       return `Will ${teamName(a)} outperform ${teamName(b)}?`;
     }
     if (templateId === TEMPLATES.TARGET) {
-      const [teamId, target, , above] = decodeAbiParameters(
+      const [teamId, target, atTime, above] = decodeAbiParameters(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         params
       );
-      return `Will ${targetCoinById(Number(teamId))?.symbol ?? teamSymbol(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return priceTargetQuestion(targetCoinById(Number(teamId))?.symbol ?? teamSymbol(teamId), Number(target) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     if (templateId === TEMPLATES.SPREAD) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);
@@ -237,18 +237,15 @@ async function cachedMarketState(id: string): Promise<CachedMarket | null> {
 
 async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const c = OG_COLORS;
-  if (!isNumericId(id)) return new Response("Market not found", { status: 404 });
-  const marketId = BigInt(id);
+  const route = marketFromRoute(id);
+  if (!route) return new Response("Market not found", { status: 404 });
+  const { id: marketId, factory } = route;
 
-  if (!FACTORY) {
-    return marketFallback(id, fallbackTitle);
-  }
-
-  const cachedMarket = await cachedMarketState(id);
+  const cachedMarket = factory.toLowerCase() === MARKET_FACTORY_ADDRESS?.toLowerCase() ? await cachedMarketState(id) : null;
   const client = getPublicClient();
   const reads = await Promise.all([
-    client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
-    client.readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
+    client.readContract({ address: factory, abi: FACTORY_ABI, functionName: "marketInfo", args: [marketId] }),
+    client.readContract({ address: factory, abi: FACTORY_ABI, functionName: "marketSettlement", args: [marketId] }),
   ]).catch(() => null);
   if (!reads) return marketFallback(id, fallbackTitle);
   const [info, settlement] = reads;
@@ -270,7 +267,7 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   const totals = await Promise.all(
     labels.map((_, i) =>
       client
-        .readContract({ address: FACTORY, abi: FACTORY_ABI, functionName: "outcomeTotals", args: [marketId, BigInt(i)] })
+        .readContract({ address: factory, abi: FACTORY_ABI, functionName: "outcomeTotals", args: [marketId, BigInt(i)] })
         .catch(() => 0n)
     )
   );
@@ -296,10 +293,10 @@ async function renderMarketCard({ id }: { id: string }, fallbackTitle: string) {
   if (resolved) {
     try {
       const logs = await client.getLogs({
-        address: FACTORY,
+        address: factory,
         event: FACTORY_ABI[3],
         args: { marketId },
-        fromBlock: FACTORY_DEPLOY_BLOCK > 0n ? FACTORY_DEPLOY_BLOCK : undefined,
+        fromBlock: factory.toLowerCase() === MARKET_FACTORY_ADDRESS?.toLowerCase() && FACTORY_DEPLOY_BLOCK > 0n ? FACTORY_DEPLOY_BLOCK : undefined,
       });
       const resolver = (logs[0]?.args as { resolver?: `0x${string}` } | undefined)?.resolver;
       if (resolver) resolverHandle = await handleForAddress(resolver);

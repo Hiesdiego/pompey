@@ -38,6 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
+import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
 import { ShareButtons } from "../../../components/ShareButtons";
 import { StakeDialog } from "../../../components/StakeDialog";
 import { CONFIRM_THRESHOLD_TICK, LargeStakeConfirm } from "../../../components/LargeStakeConfirm";
@@ -248,12 +249,12 @@ function describeMarket(
       return `Will ${teamName(teams, a)} outperform ${teamName(teams, b)}?`;
     }
     if (t === TEMPLATES.TARGET) {
-      const [teamId, target, , above] = decodeAbiParameters(
+      const [teamId, target, atTime, above] = decodeAbiParameters(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         market.params
       );
       const s = teamName(teams, teamId);
-      return `Will ${s} finish ${above ? "at or above" : "at or below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return priceTargetQuestion(s, Number(target) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     if (t === TEMPLATES.SPREAD) {
       const si = getSpreadInfo(market, fixtures);

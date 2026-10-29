@@ -124,8 +124,14 @@ async function main(): Promise<void> {
   const checkpointSubmitter = new CheckpointSubmitter(priceFeed, cupPriceFeed);
   const db = createSocialDb();
   const factoryKeeper = new FactoryKeeper(db);
+  const previousFactoryKeeper = config.contracts.previousMarketFactory &&
+    config.contracts.previousMarketFactory.toLowerCase() !== config.contracts.marketFactory.toLowerCase()
+    ? new FactoryKeeper(null, config.contracts.previousMarketFactory)
+    : null;
   const newFactoryKeeper = config.contracts.newMarketFactory &&
-    config.contracts.newMarketFactory.toLowerCase() !== config.contracts.marketFactory.toLowerCase()
+    ![config.contracts.marketFactory, config.contracts.previousMarketFactory].some(
+      (factory) => factory && factory.toLowerCase() === config.contracts.newMarketFactory.toLowerCase()
+    )
     ? new FactoryKeeper(null, config.contracts.newMarketFactory)
     : null;
   const reader = new ChainReader();
@@ -263,6 +269,7 @@ async function main(): Promise<void> {
     }
     try {
       factoryKeeper.start();
+      previousFactoryKeeper?.start();
       newFactoryKeeper?.start();
     } catch (err) {
       logger.error("[backend] factory keeper failed to start", { error: String(err) });
@@ -282,6 +289,7 @@ async function main(): Promise<void> {
     cupLifecycle?.stop();
     checkpointSubmitter.stop();
     factoryKeeper.stop();
+    previousFactoryKeeper?.stop();
     newFactoryKeeper?.stop();
     socialIndexer.stop();
     chainCache.stop();

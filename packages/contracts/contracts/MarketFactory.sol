@@ -99,6 +99,7 @@ contract MarketFactory is Ownable, ReentrancyGuard {
     uint256 public constant VOID_CHALLENGE_WINDOW = 2 days;
     /// @notice Max H2H window / lookback, bounded by checkpoint retention.
     uint64 public constant MAX_MARKET_WINDOW = 30 days;
+    uint64 public constant MAX_TARGET_TIME = 1798761599;
 
     uint256 public constant MAX_CREATOR_NAME_BYTES = 32;
 
@@ -661,7 +662,7 @@ contract MarketFactory is Ownable, ReentrancyGuard {
             ) revert InvalidParams();
             if (targetPrice == 0) revert InvalidParams();
             if (atTime <= now_ + MIN_MARKET_LEAD) revert InvalidParams();
-            if (atTime > now_ + MAX_MARKET_WINDOW) revert InvalidParams();
+            if (atTime > MAX_TARGET_TIME) revert InvalidParams();
             return (atTime - uint64(BETTING_CLOSE_BUFFER), atTime, 2);
         }
 

@@ -23,7 +23,7 @@
 
 import { useEffect } from "react";
 import { getPublicClient } from "../../hooks/usePublicClient";
-import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS, marketRouteKey } from "../marketFactory";
+import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESSES, marketRouteKey } from "../marketFactory";
 import type { Address } from "viem";
 import { qks } from "./keys";
 import { queryClient } from "./queryClient";
@@ -33,7 +33,7 @@ let unwatch: (() => void)[] = [];
 
 function ensureSubscribed(): void {
   if (unwatch.length) return;
-  const factories = [MARKET_FACTORY_ADDRESS, NEW_MARKET_FACTORY_ADDRESS].filter((address, index, all) => address && all.findIndex((item) => item?.toLowerCase() === address.toLowerCase()) === index);
+  const factories = MARKET_FACTORY_ADDRESSES;
   unwatch = factories.map((factory) => getPublicClient().watchContractEvent({
     address: factory,
     abi: MARKET_FACTORY_ABI,
