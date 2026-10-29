@@ -22,7 +22,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
-  ArrowUpRight,
   Info,
   Gavel,
   Ban,
@@ -56,15 +55,12 @@ import { celebrateClaim } from "../../../lib/confetti";
 import {
   MARKET_FACTORY_ADDRESS,
   marketFromRoute,
-  marketRouteKey,
   MARKET_FACTORY_ABI,
   TEMPLATES,
   TEMPLATE_NAMES,
   TEMPLATE_DESCRIPTIONS,
   FACTORY_MIN_STAKE_TICK,
   VOID_CHALLENGE_WINDOW_SECONDS,
-  normalizeMarketInfo,
-  normalizeMarketSettlement,
 } from "../../../lib/marketFactory";
 import { CONTRACTS, TICK_TOKEN_ABI } from "../../../lib/contracts";
 import { targetCoinById } from "../../../lib/targetCoins";
@@ -80,6 +76,7 @@ import { TargetSettlementReplay } from "../../../components/TargetSettlementRepl
 import { WatchButton } from "../../../components/WatchButton";
 import { marketOdds, formatMarketOdds, isHighPayout } from "../../../lib/marketOdds";
 import { useMarketFees } from "../../../lib/query/useMarketFees";
+import { SimilarMarkets } from "../../../components/SimilarMarkets";
 
 interface MarketDetail {
   id: bigint;
@@ -758,7 +755,7 @@ export default function MarketDetailPage() {
       </div>
 
       {/* ── Similar markets ── */}
-      <SimilarMarkets currentId={id} factoryAddress={factoryAddress} templateId={market.templateId} teams={teams ?? []} fixtures={fixtures} />
+      <SimilarMarkets currentId={id} factoryAddress={factoryAddress} templateId={market.templateId} currentParams={market.params} teams={teams ?? []} fixtures={fixtures} />
 
       {/* ── Stake modal ── */}
       <StakeModal
@@ -821,7 +818,6 @@ export default function MarketDetailPage() {
 function OutcomeRow({
   index,
   label,
-  total,
   share,
   odds,
   highPayout,
@@ -834,7 +830,6 @@ function OutcomeRow({
 }: {
   index: number;
   label: string;
-  total: bigint;
   share: number;
   odds: number | null;
   highPayout: boolean;
@@ -884,10 +879,9 @@ function OutcomeRow({
               </span>
             )}
           </div>
-          <div className="text-xs text-zinc-500">
-            {formatTick(total)} TICK
-            {userStake > 0n && <span className="text-zinc-400"> · you: {formatTick(userStake)}</span>}
-          </div>
+          {userStake > 0n && (
+            <div className="text-xs text-zinc-500">Your stake: {formatTick(userStake)} TICK</div>
+          )}
         </div>
         <div className="text-right">
           <div className="font-display text-2xl font-black tabular-nums text-zinc-900 dark:text-white">{odds === null ? "—" : formatMarketOdds(animatedOdds)}</div>
@@ -983,7 +977,6 @@ function OddsBoard({
             key={r.i}
             index={r.i}
             label={outcomeLabels[r.i] ?? `Outcome ${r.i}`}
-            total={r.total}
             share={r.share}
             odds={market.state === 1 ? winnerIndex.includes(r.i) ? Number(market.payoutPerShare) / 1e18 : null : selectable && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: r.total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null}
             highPayout={selectable && isHighPayout(market.state === 0 && feesBps ? marketOdds({ stake: 10n * 10n ** 18n, sideStaked: r.total, totalStaked: market.totalStaked, seed: market.seedAmount, feesBps })?.multiplier ?? null : null, market.totalStaked, 10n * 10n ** 18n, r.total)}
@@ -1411,131 +1404,5 @@ function HowThisResolves({ market, teams }: { market: MarketDetail; teams: TeamR
         )}
       </div>
     </div>
-  );
-}
-
-// ── similar markets ─────────────────────────────────────────────────
-
-function SimilarMarkets({
-  currentId,
-  factoryAddress,
-  templateId,
-  teams,
-  fixtures,
-}: {
-  currentId: bigint;
-  factoryAddress: `0x${string}`;
-  templateId: number;
-  teams: TeamRef[];
-  fixtures: Map<string, ApiFixture>;
-}) {
-  const publicClient = getPublicClient();
-  const [items, setItems] = useState<null | {
-    id: bigint;
-    templateId: number;
-    params: `0x${string}`;
-    outcomeCount: number;
-    poolWei: bigint;
-    bettingCloseTime: bigint;
-    state: number;
-  }[]>(null);
-
-  useEffect(() => {
-    if (!factoryAddress) return;
-    let alive = true;
-    (async () => {
-      try {
-        const count = Number(
-          (await publicClient.readContract({
-            address: factoryAddress,
-            abi: MARKET_FACTORY_ABI,
-            functionName: "marketCount",
-          })) as bigint
-        );
-        const ids = Array.from({ length: count }, (_, i) => BigInt(i)).filter((i) => i !== currentId);
-        if (!ids.length) {
-          if (alive) setItems([]);
-          return;
-        }
-        const calls = ids.flatMap((i) => [
-          { address: factoryAddress, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [i] } as const,
-          { address: factoryAddress, abi: MARKET_FACTORY_ABI, functionName: "marketSettlement", args: [i] } as const,
-        ]);
-        const res = await publicClient.multicall({ contracts: calls });
-        const list: NonNullable<typeof items> = [];
-        for (let k = 0; k < ids.length; k++) {
-          const infoR = res[k * 2];
-          const setR = res[k * 2 + 1];
-          if (infoR.status !== "success" || setR.status !== "success") continue;
-          try {
-            const info = normalizeMarketInfo(infoR.result);
-            const s = normalizeMarketSettlement(setR.result);
-            if (info.templateId !== templateId) continue;
-            list.push({
-              id: ids[k],
-              templateId: info.templateId,
-              params: info.params,
-              outcomeCount: info.outcomeCount,
-              poolWei: s.totalStaked + s.seedAmount,
-              bettingCloseTime: info.bettingCloseTime,
-              state: s.state,
-            });
-          } catch {
-            /* skip malformed */
-          }
-        }
-        list.sort((a, b) => (b.poolWei > a.poolWei ? 1 : b.poolWei < a.poolWei ? -1 : 0));
-        if (alive) setItems(list.slice(0, 3));
-      } catch {
-        if (alive) setItems([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [publicClient, currentId, templateId, factoryAddress]);
-
-  if (!items?.length) return null;
-  const style = TEMPLATE_STYLE[templateId] ?? TEMPLATE_STYLE[TEMPLATES.TOP_GAINER];
-
-  return (
-    <section className="mt-10">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-display text-xl font-black">Similar markets</h2>
-        <Link href="/markets" className="flex items-center gap-1 text-sm font-bold text-[#2E7CF6] hover:underline">
-          View all <ArrowUpRight className="h-4 w-4" />
-        </Link>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        {items.map((m) => (
-          <Link
-            key={m.id.toString()}
-            href={`/markets/${marketRouteKey(factoryAddress, m.id)}`}
-            className="glass group rounded-2xl p-5 transition-all hover:-translate-y-1 hover:shadow-[0_12px_36px_rgba(46,124,246,0.18)]"
-          >
-            <div className="flex items-center justify-between">
-              <span className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em]", style.chip)}>
-                <style.icon className="h-3 w-3" />
-                {TEMPLATE_NAMES[m.templateId] ?? "Market"}
-              </span>
-              <span className="text-[11px] font-bold text-zinc-500">
-                {m.state === 0 ? <Countdown target={Number(m.bettingCloseTime) * 1000} /> : m.state === 1 ? "Resolved" : "Void"}
-              </span>
-            </div>
-            <div className="mt-3 line-clamp-2 min-h-[3rem] font-display text-base font-extrabold leading-snug text-zinc-900 transition-colors group-hover:text-[#2E7CF6] dark:text-white">
-              {describeMarket(m, teams, fixtures)}
-            </div>
-            <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-              <span className="font-display font-extrabold tabular-nums text-zinc-700 dark:text-zinc-200">
-                {formatTick(m.poolWei)} TICK
-              </span>
-              <span className="flex items-center gap-1 font-bold text-[#2E7CF6] opacity-0 transition-opacity group-hover:opacity-100">
-                Predict <ArrowUpRight className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
   );
 }
