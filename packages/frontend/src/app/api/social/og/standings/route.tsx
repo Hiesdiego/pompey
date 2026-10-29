@@ -1,3 +1,4 @@
+import { Brand } from "../_design";
 import { ImageResponse } from "next/og";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { backendUrl, logoDataUrl, OG_HEIGHT, OG_WIDTH, siteUrl } from "../_shared";
@@ -56,12 +57,7 @@ export async function GET() {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 20, fontWeight: 700, letterSpacing: 4, color: "#22d3ee" }}>
-              <span style={{ fontSize: 32, color: "#fff" }}>↑</span>TICKR
-            </div>
-            <div style={{ fontSize: 13, letterSpacing: 4, color: "#94a3b8" }}>THE CRYPTO FANTASY LEAGUE</div>
-          </div>
+          <Brand />
           <div style={{ display: "flex", padding: "10px 16px", border: "1px solid #155e75", borderRadius: 999, color: "#67e8f9", fontSize: 15, letterSpacing: 2 }}>LIVE LEAGUE TABLE</div>
         </div>
         <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", marginBottom: 8 }}>
@@ -82,7 +78,7 @@ export async function GET() {
             </div>
           )) : <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 24 }}>League table is temporarily unavailable</div>}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #18343b", paddingTop: 11, marginTop: 8, color: "#8ca3ad", fontSize: 15 }}><span>Pick your lineup. Back your team.</span><span>{siteUrl().replace(/^https?:\/\//, "")}/standings</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #18343b", paddingTop: 11, marginTop: 8, color: "#8ca3ad", fontSize: 15 }}><span>Crypto Price Prediction League.</span><span>{siteUrl().replace(/^https?:\/\//, "")}/standings</span></div>
       </div>
     ),
     { width: OG_WIDTH, height: OG_HEIGHT, headers: { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300" } }

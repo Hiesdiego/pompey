@@ -79,11 +79,11 @@ export async function generateMetadata({
   const question = route ? await marketQuestion(route.id, route.factory) : null;
   const title = question ? `${question} — TICKR` : `Market ${id} — TICKR`;
   const description = question
-    ? `${question} Pick your lineup and back your team on TICKR.`
-    : "The crypto fantasy league. Pick your lineup and back your team.";
+    ? `${question} Predict crypto prices on TICKR.`
+    : "Crypto Price Prediction League.";
 
   const safeId = encodeURIComponent(id);
-  const ogImage = `${site}/api/social/og/market/${safeId}?title=${encodeURIComponent(question ?? "TICKR prediction market")}`;
+  const ogImage = `${site}/api/social/og/market/${safeId}?v=2&title=${encodeURIComponent(question ?? "TICKR prediction market")}`;
   const url = `${site}/markets/${safeId}`;
 
   return {

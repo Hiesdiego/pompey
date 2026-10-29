@@ -1,9 +1,9 @@
+import { Card, Brand } from "../../_design";
 
 
 import { ImageResponse } from "next/og";
-import { getPublicClient } from "@/hooks/usePublicClient";
-import { normalizeScoreline } from "@/lib/format";
-import { CONTRACTS, SEASON_ID } from "@/lib/contracts";
+import { leagueScore } from "../../_league";
+import { SEASON_ID } from "@/lib/contracts";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
   OG_WIDTH,
@@ -20,30 +20,6 @@ import {
 
 
 export const runtime = "nodejs";
-
-const SNAPSHOT_ABI = [
-  {
-    type: "function",
-    name: "getSnapshot",
-    stateMutability: "view",
-    inputs: [{ name: "seasonId", type: "uint256" }, { name: "fixtureId", type: "uint256" }],
-    outputs: [
-      { name: "homeStart", type: "uint256" },
-      { name: "awayStart", type: "uint256" },
-      { name: "homeEnd", type: "uint256" },
-      { name: "awayEnd", type: "uint256" },
-      { name: "startSubmitted", type: "bool" },
-      { name: "endSubmitted", type: "bool" },
-    ],
-  },
-] as const;
-
-function roundedPercentChange(start: bigint, end: bigint): number | null {
-  if (start <= 0n || end <= 0n) return null;
-  const basisPoints = ((end - start) * 10_000n) / start;
-  const adjustment = basisPoints >= 0n ? 25n : -25n;
-  return Number((basisPoints + adjustment) / 50n);
-}
 
 interface FixtureDto {
   fixtureId: string;
@@ -95,7 +71,9 @@ export async function GET(
 
 async function fallbackMatchCard(title: string): Promise<ImageResponse> {
   const c = OG_COLORS;
-  const [homeName, awayName] = title.split(/\s+vs\.?\s+/i, 2);
+  const final = title.match(/^(.+?)\s+(-?\d+)[�-](-?\d+)\s+(.+)$/);
+  const finalPending = title.match(/^(.+?)\s+FT\s+(.+)$/);
+  const [homeName, awayName] = final ? [final[1], final[4]] : finalPending ? [finalPending[1], finalPending[2]] : title.split(/\s+vs\.?\s+/i, 2);
   const home = (homeName || title || "TICKR Match").slice(0, 42);
   const away = (awayName || "Opponent").slice(0, 42);
   const homeTeam = TICKR_TEAMS.find((team) => team.name.toLowerCase() === home.toLowerCase() || team.symbol.toLowerCase() === home.toLowerCase());
@@ -103,31 +81,18 @@ async function fallbackMatchCard(title: string): Promise<ImageResponse> {
   const [homeLogo, awayLogo] = await Promise.all([logoDataUrl(homeTeam?.cmcId), logoDataUrl(awayTeam?.cmcId)]);
   return new ImageResponse(
     (
-      <div
-        style={{
-          width: OG_WIDTH,
-          height: OG_HEIGHT,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          padding: 54,
-          background: "radial-gradient(ellipse at 100% 0%, #073847 0%, #071014 48%, #080b10 100%)",
-          color: c.white,
-          fontFamily: "system-ui, sans-serif",
-          border: "1px solid #24434a",
-        }}
-      >
+      <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 26, fontWeight: 800, letterSpacing: 2 }}><span style={{ color: "#22d3ee", fontSize: 38 }}>◈</span> TICKR <span style={{ color: "#22d3ee", fontSize: 18, letterSpacing: 1 }}>• THE CRYPTO FANTASY LEAGUE</span></div>
-          <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>FIXTURE</div>
+          <Brand />
+          <div style={{ color: "#67e8f9", border: "1px solid #155e75", borderRadius: 999, padding: "9px 18px", fontSize: 16, letterSpacing: 2 }}>{final || finalPending ? "FULL TIME" : "FIXTURE"}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28, width: "100%" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 380 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{homeLogo ? <img src={homeLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : home.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800, textAlign: "center" }}>{home}</div></div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>VS</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>BACK YOUR TEAM</span></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>{final ? `${final[2]}�${final[3]}` : finalPending ? "FT" : "VS"}</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>BACK YOUR TEAM</span></div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 300 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{awayLogo ? <img src={awayLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : away.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800 }}>{away}</div></div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>◉  Pick your lineup. Back your team.</span><span>tickrbase.top</span></div>
-      </div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>◉  Back your team. Climb the table.</span><span>tickrbase.top</span></div>
+      </Card>
     ),
     {
       width: OG_WIDTH,
@@ -160,25 +125,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
 
   const settled = fixture.settled || pool?.settled || false;
   const seasonId = BigInt(fixture.seasonId ?? pool?.seasonId ?? SEASON_ID.toString());
-  let score: [number, number] | null = null;
-  if (settled && CONTRACTS.priceOracle) {
-    try {
-      const client = getPublicClient();
-      const snapshot = await client.readContract({
-        address: CONTRACTS.priceOracle,
-        abi: SNAPSHOT_ABI,
-        functionName: "getSnapshot",
-        args: [seasonId, BigInt(id)],
-      });
-      if (snapshot[5]) {
-        const homeGoals = roundedPercentChange(snapshot[0], snapshot[2]);
-        const awayGoals = roundedPercentChange(snapshot[1], snapshot[3]);
-        if (homeGoals !== null && awayGoals !== null) score = normalizeScoreline(homeGoals, awayGoals);
-      }
-    } catch {
-      score = null;
-    }
-  }
+  const score = settled ? await leagueScore(id, seasonId) : null;
   const totalPool =
     BigInt(pool?.totalHome ?? "0") +
     BigInt(pool?.totalDraw ?? "0") +
@@ -201,41 +148,9 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
 
   return new ImageResponse(
     (
-      <div
-        style={{
-          width: OG_WIDTH,
-          height: OG_HEIGHT,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          background: "radial-gradient(ellipse at 100% 0%, #062b3a 0%, #05090f 42%, #020307 100%)",
-          color: c.white,
-          fontFamily: "system-ui, -apple-system, sans-serif",
-          padding: 64,
-          border: "1px solid #17404d",
-          borderRadius: 28,
-          overflow: "hidden",
-        }}
-      >
+      <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 18,
-                background: "linear-gradient(145deg, #23d5f4 0%, #1474ff 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 30,
-                fontWeight: 900,
-              }}
-            >
-              ↑
-            </div>
-            <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 2 }}>TICKR</div>
-          </div>
+          <Brand />
           <div
             style={{
               fontSize: 24,
@@ -263,8 +178,9 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
                 {score[0]}–{score[1]}
               </div>
             ) : (
-              <div style={{ fontSize: 64, fontWeight: 800, color: c.zinc400 }}>VS</div>
+              <div style={{ fontSize: 64, fontWeight: 800, color: c.zinc400 }}>{settled ? "FT" : "VS"}</div>
             )}
+            {settled && <div style={{ fontSize: 21, color: c.greenLight }}>{winner === 0 ? `${fixture.home.symbol} wins` : winner === 2 ? `${fixture.away.symbol} wins` : winner === 1 ? "Draw" : pool?.winningOutcome === 0 ? `${fixture.home.symbol} wins` : pool?.winningOutcome === 2 ? `${fixture.away.symbol} wins` : pool?.winningOutcome === 1 ? "Draw" : "Result pending"}</div>}
             {!settled && (
               <div style={{ fontSize: 22, color: c.zinc400 }}>{kickoffLabel}</div>
             )}
@@ -299,7 +215,7 @@ async function renderMatchCard({ id }: { id: string }, fallbackTitle: string) {
             {ogBaseUrl().replace(/^https?:\/\//, "")}/match/{id}
           </div>
         </div>
-      </div>
+      </Card>
     ),
     {
       width: OG_WIDTH,
