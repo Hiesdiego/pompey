@@ -17,6 +17,7 @@ import { cupMatchStatus } from "../../../../components/CupMatchCard";
 import { CUP_FEE_BPS, CUP_ROUNDS, CUP_TBD, cupRoundOf, cupTeamName } from "../../../../lib/cup";
 import { EmptyState, ErrorState } from "../../../../components/States";
 import { formatTick } from "../../../../lib/format";
+import { ShareButtons } from "../../../../components/ShareButtons";
 
 export default function CupMatchPage() {
   const params = useParams<{ id: string }>();
@@ -44,7 +45,10 @@ export default function CupMatchPage() {
     ? stake * (poolTotal * BigInt(10_000 - CUP_FEE_BPS) / 10_000n) / sideTotal : 0n;
   return <div>
     <Link href="/cup" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-amber-600"><ArrowLeft className="h-4 w-4" /> World Cup</Link>
-    <h1 className="mb-4 font-display text-xl font-extrabold">{CUP_ROUNDS[cupRoundOf(matchId)].name} · Match {matchId + 1}</h1>
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h1 className="font-display text-xl font-extrabold">{CUP_ROUNDS[cupRoundOf(matchId)].name} · Match {matchId + 1}</h1>
+      {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <ShareButtons path={`/cup/match/${match.matchId}`} text={`${cupTeamName(match.teamA)} vs ${cupTeamName(match.teamB)} — Crypto Price World Cup on TICKR`} compact />}
+    </div>
     <div className="relative mb-6 overflow-hidden rounded-[2rem] border border-amber-400/30 bg-white p-5 text-zinc-900 shadow-[0_28px_80px_rgba(180,130,30,.12)] dark:border-amber-400/20 dark:bg-[#17130b] dark:text-white sm:p-8">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(251,191,36,.16),transparent_58%)] dark:bg-[radial-gradient(ellipse_at_50%_0%,rgba(251,191,36,.22),transparent_58%)]" />
       <div className="relative mb-7 flex items-center justify-between gap-3">
