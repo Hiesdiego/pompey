@@ -28,7 +28,7 @@ import { getMatchDurationMs } from "../lib/matchConfig";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { targetCoinById } from "../lib/targetCoins";
-import { priceTargetQuestion } from "../lib/priceTargetQuestion";
+import { formatPriceTargetUsd, priceTargetQuestion } from "../lib/priceTargetQuestion";
 import { formatUtcTime } from "../lib/utcTime";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
 import { MyPicksDashboard } from "../components/MyPicksDashboard";
@@ -111,7 +111,7 @@ function marketSubheading(market: MarketSummary, teams: { symbol: string }[]) {
     }
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, target, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params as `0x${string}`);
-      return `${targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`} target · ${above ? "≥" : "≤"} $${(Number(target) / 1e8).toLocaleString()}`;
+      return `${targetCoinById(Number(team))?.symbol ?? teams[Number(team)]?.symbol ?? `Team ${team}`} target · ${above ? "≥" : "≤"} ${formatPriceTargetUsd(Number(target) / 1e8)}`;
     }
   } catch {
     return `${market.outcomeCount} outcomes`;

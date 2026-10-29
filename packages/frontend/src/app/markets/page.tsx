@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { targetCoinById } from "../../lib/targetCoins";
-import { priceTargetQuestion } from "../../lib/priceTargetQuestion";
+import { formatPriceTargetUsd, priceTargetQuestion } from "../../lib/priceTargetQuestion";
 import { formatUtcTime } from "../../lib/utcTime";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
@@ -205,7 +205,7 @@ function marketMeta(
     }
     if (market.templateId === TEMPLATES.TARGET) {
       const [team, price, , above] = decodeAbiParameters(parseAbiParameters("uint16, uint256, uint64, bool"), market.params);
-      return `${teamSymbol(teams, team)} ${above ? "≥" : "≤"} $${(Number(price) / 1e8).toLocaleString()}`;
+      return `${teamSymbol(teams, team)} ${above ? "≥" : "≤"} ${formatPriceTargetUsd(Number(price) / 1e8)}`;
     }
     const si = getSpreadInfo(market, fixtures);
     if (si) {
