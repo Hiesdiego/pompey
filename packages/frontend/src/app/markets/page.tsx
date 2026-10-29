@@ -23,6 +23,7 @@ import {
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { targetCoinById } from "../../lib/targetCoins";
 import { priceTargetQuestion } from "../../lib/priceTargetQuestion";
+import { formatUtcTime } from "../../lib/utcTime";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { useTickr } from "../../hooks/useTickr";
@@ -345,7 +346,7 @@ function MarketCard({
           return <div key={index} className={`min-w-0 rounded-2xl border p-3 ${high ? "border-amber-500/40 bg-amber-500/[.07]" : leading ? "border-[#2E7CF6]/35 bg-[#2E7CF6]/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.07] dark:bg-white/[.025]"}`}><div className="flex min-w-0 items-center gap-1 sm:gap-2.5">{(market.templateId === TEMPLATES.TOP_GAINER || market.templateId === TEMPLATES.CHAMPION) && <TeamBadge teamId={index} size={20} showName={false} />}<span className="min-w-0 flex-1 truncate text-xs font-bold text-zinc-800 dark:text-zinc-100 sm:text-sm">{outcomeLabel(market, index, teams, fixtures)}</span><span className="shrink-0 text-right"><span className="block font-display text-xs font-black tabular-nums text-zinc-950 dark:text-white sm:text-base">{formatMarketOdds(odds)}</span>{high && <span className="block text-[8px] font-bold uppercase text-amber-600 dark:text-amber-300 sm:text-[9px]">High payout</span>}</span></div><div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.08]"><div className={`h-full rounded-full ${leading ? "bg-gradient-to-r from-[#2E7CF6] to-cyan-400" : "bg-zinc-300 dark:bg-zinc-600"}`} style={{ width: `${Math.max(pct, pct ? 3 : 0)}%` }} /></div></div>;
         })}
       </div>}
-      <p className="mt-3 hidden text-[10px] text-zinc-500 sm:block">{bettingOpen ? `Projected for 10 TICK, assuming one winner · ${quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move` : "Betting closed · no new stake quote"}</p>
+      <p className="mt-3 hidden text-[10px] text-zinc-500 sm:block">{bettingOpen ? `Projected for 10 TICK, assuming one winner · ${quoteAsOf ? `quote refreshed ${formatUtcTime(quoteAsOf)}` : "checking pool"} · final odds may move` : "Betting closed · no new stake quote"}</p>
       <div className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]" style={{ marginTop: 18 }}>
         <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(poolTick)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
         {bettingOpen ? <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500"><Clock className="h-3.5 w-3.5" /><Countdown target={Number(market.bettingCloseTime) * 1000} /></div> : <span className="text-xs font-semibold text-zinc-500">View market</span>}

@@ -47,7 +47,7 @@ import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
 import { LEAGUE_TARGET_COINS, TARGET_COINS } from "../../../lib/targetCoins";
-import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
+import { formatPriceTargetTimeUtc, priceTargetQuestion } from "../../../lib/priceTargetQuestion";
 
 const TEMPLATE_IDS = [
   TEMPLATES.TOP_GAINER,
@@ -59,10 +59,8 @@ const TEMPLATE_IDS = [
 
 const TEMPLATE_ICONS = [Trophy, Crown, Swords, Target, BarChart3];
 
-/** "2026-09-29T15:04" in the user's local timezone. */
-function localDateTimeFromMs(ms: number) {
-  const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
-  return d.toISOString().slice(0, 16);
+function utcDateTimeFromMs(ms: number) {
+  return new Date(ms).toISOString().slice(0, 16);
 }
 
 /**
@@ -74,19 +72,15 @@ function ceilToMinute(ms: number) {
   return Math.ceil(ms / 60_000) * 60_000;
 }
 
-/** "Sep 29 → Oct 1" for a matchday window. */
 function formatRange(startMs: number, endMs: number) {
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", timeZone: "UTC" };
   const s = new Date(startMs).toLocaleDateString(undefined, opts);
   const e = new Date(endMs).toLocaleDateString(undefined, opts);
-  return s === e ? s : `${s} → ${e}`;
+  return s === e ? `${s} UTC` : `${s} → ${e} UTC`;
 }
 
-/** "Sep 29, 15:04" from a "YYYY-MM-DDTHH:mm" local string. */
-function formatDateTimeLocal(local: string) {
-  const d = new Date(local);
-  if (Number.isNaN(d.getTime())) return local;
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+function parseUtcDateTime(value: string) {
+  return new Date(`${value}Z`);
 }
 
 interface MatchdayCard {
@@ -135,9 +129,9 @@ export default function CreateMarketPage() {
   const [windowEnd, setWindowEnd] = useState("");
   const [targetTeam, setTargetTeam] = useState("0");
   const [targetPrice, setTargetPrice] = useState("");
-  const [targetMin] = useState(() => localDateTimeFromMs(ceilToMinute(Date.now() + 3_600_000)));
-  const [targetMax] = useState(() => localDateTimeFromMs(Math.min(new Date(2026, 11, 31, 23, 59).getTime(), Date.UTC(2027, 0, 1) - 60_000)));
-  const [targetTime, setTargetTime] = useState(() => localDateTimeFromMs(ceilToMinute(Date.now() + 2 * 3_600_000)));
+  const [targetMin] = useState(() => utcDateTimeFromMs(ceilToMinute(Date.now() + 3_600_000)));
+  const [targetMax] = useState(() => utcDateTimeFromMs(Date.UTC(2026, 11, 31, 23, 59)));
+  const [targetTime, setTargetTime] = useState(() => utcDateTimeFromMs(ceilToMinute(Date.now() + 2 * 3_600_000)));
   const [targetAbove, setTargetAbove] = useState(true);
   const [spreadFixture, setSpreadFixture] = useState("0");
   const [spreadPoints, setSpreadPoints] = useState("5");
@@ -359,7 +353,7 @@ export default function CreateMarketPage() {
   const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
   const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
   const previewTitle = templateId === TEMPLATES.TARGET
-    ? targetPrice ? priceTargetQuestion(selectedTeam?.name ?? "this coin", Number(targetPrice), targetAbove, new Date(targetTime)) : "Set a target price to preview the question"
+    ? targetPrice ? priceTargetQuestion(selectedTeam?.name ?? "this coin", Number(targetPrice), targetAbove, parseUtcDateTime(targetTime)) : "Set a target price to preview the question"
     : templateId === TEMPLATES.SPREAD
       ? `Will ${selectedFixture?.home?.symbol ?? "home"} cover a ${spreadPoints} goal spread against ${selectedFixture?.away?.symbol ?? "away"}?`
       : templateId === TEMPLATES.TOP_GAINER
@@ -670,7 +664,7 @@ export default function CreateMarketPage() {
             <div className="mt-4 flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2E7CF6]/15 text-[#2E7CF6]"><Target className="h-4 w-4" /></span><span className="text-xs font-bold text-zinc-500">{templateId === null ? "Choose a market format" : TEMPLATE_NAMES[templateId]}</span></div>
             <h2 className="mt-4 min-h-20 font-display text-xl font-black leading-snug">{previewTitle}</h2>
             {templateId === TEMPLATES.TARGET && liveTargetPrice && <div className="mt-2 rounded-xl bg-white/80 p-3 text-sm dark:bg-white/[.05]"><p className="text-xs text-zinc-500">Current {selectedTeam?.symbol} spot price</p><p className="font-bold tabular-nums">${liveTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</p><p className="mt-1 text-xs text-zinc-500">{priceFeedStatus === "stale" ? "Price feed stale" : "Guide only · oracle checkpoint settles"}</p></div>}
-            {templateId === TEMPLATES.TARGET && <p className="mt-3 text-xs text-zinc-500">Result checked {formatDateTimeLocal(targetTime)}. Betting closes before that checkpoint.</p>}
+            {templateId === TEMPLATES.TARGET && <p className="mt-3 text-xs text-zinc-500">Result checked {formatPriceTargetTimeUtc(parseUtcDateTime(targetTime))}. Betting closes before that checkpoint.</p>}
             {paramsError && step > 1 && <p className="mt-3 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">{paramsError}</p>}
             <div className="mt-5 border-t border-black/[.08] pt-4 text-xs text-zinc-500 dark:border-white/[.08]">Created by {myProfile?.username ? `@${myProfile.username}` : creatorName || "you"}</div>
           </div>
@@ -713,9 +707,9 @@ function encodeParams(templateId: number, v: ParamValues): `0x${string}` {
     const a = Number(v.teamA);
     const b = Number(v.teamB);
     if (a === b) throw new Error("Pick two different teams");
-    const start = Math.floor(new Date(v.windowStart).getTime() / 1000);
-    const end = Math.floor(new Date(v.windowEnd).getTime() / 1000);
-    if (!start || !end || start >= end) throw new Error("Window end must be after window start");
+    const start = Math.floor(parseUtcDateTime(v.windowStart).getTime() / 1000);
+    const end = Math.floor(parseUtcDateTime(v.windowEnd).getTime() / 1000);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new Error("Window end must be after window start");
     if (end - start > 30 * 24 * 3600) throw new Error("Window can't exceed 30 days");
     // Mirrors the contract's MIN_MARKET_LEAD guard on endTime.
     if (end <= Date.now() / 1000 + 3600) throw new Error("Window end must be at least 1 hour out");
@@ -724,8 +718,8 @@ function encodeParams(templateId: number, v: ParamValues): `0x${string}` {
   if (templateId === TEMPLATES.TARGET) {
     const price = Number(v.targetPrice);
     if (!price || price <= 0) throw new Error("Enter a target price above 0");
-    const at = Math.floor(new Date(v.targetTime).getTime() / 1000);
-    if (!at || at <= Date.now() / 1000 + 3600) throw new Error("Target time must be at least 1 hour out");
+    const at = Math.floor(parseUtcDateTime(v.targetTime).getTime() / 1000);
+    if (!Number.isFinite(at) || at <= Date.now() / 1000 + 3600) throw new Error("Target time must be at least 1 hour out");
     if (at >= Date.UTC(2027, 0, 1) / 1000) throw new Error("Target time must be before 2027 UTC");
     // Price scaled by 1e8 (PRICE_DECIMALS).
     const scaled = BigInt(Math.round(price * 1e8));
@@ -863,7 +857,7 @@ function TemplateParamsForm({
           <TeamSelect value={v.teamB} onChange={v.setTeamB} teams={teams} inputCls={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>Window start</label>
+          <label className={labelCls}>Window start (UTC)</label>
           <input
             type="datetime-local"
             value={v.windowStart}
@@ -872,7 +866,7 @@ function TemplateParamsForm({
           />
         </div>
         <div>
-          <label className={labelCls}>Window end (max 30 days after start, ≥ 1 hour out)</label>
+          <label className={labelCls}>Window end (UTC, max 30 days after start, ≥ 1 hour out)</label>
           <input
             type="datetime-local"
             value={v.windowEnd}
@@ -921,7 +915,7 @@ function TemplateParamsForm({
           {currentTargetPrice !== null && priceFeedStatus !== "stale" && <div className="mt-2 flex flex-wrap gap-2">{[-10, -5, 5, 10].map((pct) => <button key={pct} type="button" onClick={() => v.setTargetPrice(Number((currentTargetPrice * (1 + pct / 100)).toPrecision(8)).toString())} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{pct > 0 ? "+" : ""}{pct}% from spot</button>)}</div>}
         </div>
         <div>
-          <label className={labelCls}>At time <span className="font-normal text-zinc-400">(earliest {formatDateTimeLocal(targetMin)})</span></label>
+          <label className={labelCls}>At time (UTC) <span className="font-normal text-zinc-400">(earliest {formatPriceTargetTimeUtc(parseUtcDateTime(targetMin))})</span></label>
           <input
             type="datetime-local"
             value={v.targetTime}
@@ -931,15 +925,15 @@ function TemplateParamsForm({
             className={inputCls}
           />
           <p className="mt-2 text-xs text-zinc-500">
-            Defaults to 2 hours from now. Times use your local time zone. Choose a time at least 1 hour out and through the end of 2026.
+            Defaults to 2 hours from now. Enter the date and time in UTC, at least 1 hour out and through Dec 31, 2026 at 11:59 PM UTC.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {[
-              { label: "End of this month", date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59) },
-              { label: "End of next month", date: new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0, 23, 59) },
-              { label: "End of 2026", date: new Date(2026, 11, 31, 23, 59) },
+              { label: "End of this month", date: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 0, 23, 59)) },
+              { label: "End of next month", date: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 2, 0, 23, 59)) },
+              { label: "End of 2026", date: new Date(Date.UTC(2026, 11, 31, 23, 59)) },
             ].filter(({ date }) => date.getTime() > Date.now() + 3_600_000 && date.getTime() < Date.UTC(2027, 0, 1)).map(({ label, date }) => (
-              <button key={label} type="button" onClick={() => v.setTargetTime(localDateTimeFromMs(date.getTime()))} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{label}</button>
+              <button key={label} type="button" onClick={() => v.setTargetTime(utcDateTimeFromMs(date.getTime()))} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{label}</button>
             ))}
           </div>
         </div>

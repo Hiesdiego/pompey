@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
+import { formatUtcDateTime, formatUtcTime } from "../../../lib/utcTime";
 import { ShareButtons } from "../../../components/ShareButtons";
 import { StakeDialog } from "../../../components/StakeDialog";
 import { CONFIRM_THRESHOLD_TICK, LargeStakeConfirm } from "../../../components/LargeStakeConfirm";
@@ -174,12 +175,7 @@ function getSpreadInfo(
 }
 
 function formatKickoff(iso: string): string {
-  const d = new Date(iso);
-  return (
-    d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
-    ", " +
-    d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-  );
+  return formatUtcDateTime(iso);
 }
 
 /** Which coin (if any) an outcome represents — drives logos. */
@@ -980,7 +976,7 @@ function OddsBoard({
           No stakes yet. These first-staker quotes include the creation seed.
         </p>
       )}
-      <p className="mb-4 text-xs text-zinc-500">{market.state === 0 ? selectable ? `Projected payout after fees and seed, assuming one winning outcome. Quote refreshed ${quoteAsOf ? new Date(quoteAsOf).toLocaleTimeString() : "soon"}; final odds can move.` : "Betting closed. New stake quotes are unavailable." : market.state === 1 ? "Final payout multiplier for each winning outcome." : "Voided market: stakes are refundable."}</p>
+      <p className="mb-4 text-xs text-zinc-500">{market.state === 0 ? selectable ? `Projected payout after fees and seed, assuming one winning outcome. Quote refreshed ${quoteAsOf ? formatUtcTime(quoteAsOf) : "soon"}; final odds can move.` : "Betting closed. New stake quotes are unavailable." : market.state === 1 ? "Final payout multiplier for each winning outcome." : "Voided market: stakes are refundable."}</p>
       <div className="space-y-3">
         {visible.map((r) => (
           <OutcomeRow
@@ -1394,22 +1390,22 @@ function HowThisResolves({ market, teams }: { market: MarketDetail; teams: TeamR
           <span className="tabular-nums">
             {market.templateId === TEMPLATES.SPREAD
               ? "5 min before match end"
-              : new Date(Number(market.bettingCloseTime) * 1000).toLocaleString()}
+              : formatUtcDateTime(Number(market.bettingCloseTime) * 1000)}
           </span>
         </div>
         <div className="flex justify-between py-0.5">
           <span>Resolvable after</span>
-          <span className="tabular-nums">{new Date(Number(market.endTime) * 1000).toLocaleString()}</span>
+          <span className="tabular-nums">{formatUtcDateTime(Number(market.endTime) * 1000)}</span>
         </div>
         <div className="flex justify-between py-0.5">
           <span>Voidable after</span>
-          <span className="tabular-nums">{new Date(Number(market.voidAfter) * 1000).toLocaleString()}</span>
+          <span className="tabular-nums">{formatUtcDateTime(Number(market.voidAfter) * 1000)}</span>
         </div>
         {voidChallengeActive && (
           <div className="flex justify-between py-0.5 font-semibold text-amber-600 dark:text-amber-400">
             <span>Void challenge</span>
             <span className="tabular-nums">
-              {canFinalizeVoid ? "ready to finalize" : <>ends {new Date(voidFinalizeAt * 1000).toLocaleString()}</>}
+              {canFinalizeVoid ? "ready to finalize" : <>ends {formatUtcDateTime(voidFinalizeAt * 1000)}</>}
             </span>
           </div>
         )}

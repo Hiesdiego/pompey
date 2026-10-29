@@ -29,6 +29,7 @@ import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import { targetCoinById } from "../lib/targetCoins";
 import { priceTargetQuestion } from "../lib/priceTargetQuestion";
+import { formatUtcTime } from "../lib/utcTime";
 import { QuickStakeChips, QuickStakeSheet, type QuickStakeOutcome } from "../components/QuickStake";
 import { MyPicksDashboard } from "../components/MyPicksDashboard";
 import { TargetCardStatus } from "../components/TargetCardStatus";
@@ -193,7 +194,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
           </div>;
         })}
       </div>}
-      <p className="mt-3 hidden text-[10px] text-zinc-500 sm:block">Projected for 10 TICK, assuming one winner · {quoteAsOf ? `quote refreshed ${new Date(quoteAsOf).toLocaleTimeString()}` : "checking pool"} · final odds may move</p>
+      <p className="mt-3 hidden text-[10px] text-zinc-500 sm:block">Projected for 10 TICK, assuming one winner · {quoteAsOf ? `quote refreshed ${formatUtcTime(quoteAsOf)}` : "checking pool"} · final odds may move</p>
       <div className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]" style={{ marginTop: featured ? 24 : 18 }}>
         <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(poolAmount)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
         {open(market) ? <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500"><Clock3 className="h-3.5 w-3.5" /><Countdown target={closeTime} /></div> : <span className="text-xs font-semibold text-zinc-500">View market</span>}

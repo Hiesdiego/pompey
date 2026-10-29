@@ -10,6 +10,7 @@ import { getPublicClient } from "../hooks/usePublicClient";
 import { social, type SocialPrediction } from "../lib/social";
 import { CONTRACTS, PREDICTION_POOL_ABI } from "../lib/contracts";
 import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
+import { formatUtcDateTime } from "../lib/utcTime";
 import { decodeTargetTerms, formatUsd } from "../lib/targetMarket";
 import { formatTick } from "../lib/format";
 import { useWatchlist } from "../lib/watchlist";
@@ -106,7 +107,7 @@ export function MyPicksDashboard({ markets, fixtures, teams }: {
         return <Link key={prediction.marketId} href={`/markets/${prediction.marketId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]">
           <div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">{TEMPLATE_NAMES[market.templateId] ?? "Market"} #{market.id}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div>
           <p className="mt-2 font-bold">{terms && symbol ? `${symbol} ${terms.above ? "≥" : "≤"} ${formatUsd(terms.target)}` : `Your pick: outcome ${prediction.outcome + 1}`}</p>
-          <p className="mt-2 flex items-center gap-1 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Closes {new Date(market.bettingCloseTime * 1000).toLocaleString()}{staked > 0n ? ` · ${formatTick(staked)} TICK staked` : ""}</p>
+          <p className="mt-2 flex items-center gap-1 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Closes {formatUtcDateTime(market.bettingCloseTime * 1000)}{staked > 0n ? ` · ${formatTick(staked)} TICK staked` : ""}</p>
         </Link>;
       })}
       {nextFixture.slice(0, 2).map(({ fixture, stakes }) => <Link key={fixture.fixtureId} href={`/match/${fixture.fixtureId}`} className="group rounded-2xl border border-black/[.07] bg-white/80 p-4 transition hover:border-[#2E7CF6]/50 dark:border-white/[.08] dark:bg-white/[.04]"><div className="flex justify-between gap-3"><span className="text-xs font-bold text-[#2E7CF6]">Fixture #{fixture.fixtureId}</span><ArrowRight className="h-4 w-4 group-hover:translate-x-1" /></div><p className="mt-2 font-bold">{fixture.home?.symbol ?? "TBA"} vs {fixture.away?.symbol ?? "TBA"}</p><p className="mt-2 text-xs text-zinc-500">{stakes.map((s, i) => s > 0n ? `${["Home", "Draw", "Away"][i]} ${formatTick(s)} TICK` : "").filter(Boolean).join(" · ")}</p></Link>)}

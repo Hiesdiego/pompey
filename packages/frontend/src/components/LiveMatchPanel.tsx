@@ -8,6 +8,7 @@ import { cn } from "../lib/cn";
 import { useCountdown } from "./Countdown";
 import type { ApiFixture } from "../lib/api";
 import { TradingViewChart } from "./TradingViewChart";
+import { formatUtcTime } from "../lib/utcTime";
 
 export interface Snapshot {
   homeStart: bigint;
@@ -125,7 +126,7 @@ export function LiveMatchPanel({
 
       <div className="mt-5 border-t border-black/[.07] pt-4 dark:border-white/[.07]">
         <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[.18em] text-zinc-500">Projected score moments · this visit</p>
-        {moments.length ? <ol className="space-y-2">{moments.map((moment) => <li key={moment.at} className="flex items-center gap-3 rounded-xl bg-black/[.025] px-3 py-2 text-xs dark:bg-white/[.035]"><time className="shrink-0 tabular-nums text-zinc-500">{new Date(moment.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><span className="flex-1">{moment.title}</span><strong className="font-display tabular-nums">{moment.score}</strong></li>)}</ol> : <p className="text-xs text-zinc-500">Moments appear when the projected score changes while you watch.</p>}
+        {moments.length ? <ol className="space-y-2">{moments.map((moment) => <li key={moment.at} className="flex items-center gap-3 rounded-xl bg-black/[.025] px-3 py-2 text-xs dark:bg-white/[.035]"><time className="shrink-0 tabular-nums text-zinc-500">{formatUtcTime(moment.at)}</time><span className="flex-1">{moment.title}</span><strong className="font-display tabular-nums">{moment.score}</strong></li>)}</ol> : <p className="text-xs text-zinc-500">Moments appear when the projected score changes while you watch.</p>}
       </div>
       {!snapshot && <p className="mt-4 text-center text-xs text-zinc-500">Waiting for the on-chain kickoff snapshot.</p>}
       {snapshot && !pricesFresh && <p className="mt-4 text-center text-xs text-amber-600 dark:text-amber-300">Live price updates are delayed. Projected score moments are paused.</p>}

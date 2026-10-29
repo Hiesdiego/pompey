@@ -6,6 +6,7 @@ import { getPublicClient } from "../../../hooks/usePublicClient";
 import { backendUrl, siteUrl } from "../../api/social/og/_shared";
 import { targetCoinById } from "../../../lib/targetCoins";
 import { marketFromRoute } from "../../../lib/marketFactory";
+import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
 
 export const revalidate = 60;
 
@@ -39,11 +40,11 @@ async function marketQuestion(marketId: bigint, factory: `0x${string}`): Promise
       return `Will ${nm(a)} outperform ${nm(b)}?`;
     }
     if (templateId === 3) {
-      const [teamId, target, , above] = decodeAbiParameters(
+      const [teamId, target, atTime, above] = decodeAbiParameters(
         parseAbiParameters("uint16, uint256, uint64, bool"),
         params
       );
-      return `Will ${targetCoinById(Number(teamId))?.symbol ?? sym(teamId)} finish ${above ? "above" : "below"} $${(Number(target) / 1e8).toLocaleString()}?`;
+      return priceTargetQuestion(targetCoinById(Number(teamId))?.symbol ?? sym(teamId), Number(target) / 1e8, above, new Date(Number(atTime) * 1000));
     }
     if (templateId === 4) {
       const [, fixtureId, spread] = decodeAbiParameters(parseAbiParameters("uint256, uint256, int16"), params);

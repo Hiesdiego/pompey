@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { Target } from "lucide-react";
 import { useSharedPrices } from "../lib/price/useSharedPrices";
 import { decodeTargetTerms, formatUsd } from "../lib/targetMarket";
+import { formatPriceTargetTimeUtc } from "../lib/priceTargetQuestion";
+import { formatUtcTime } from "../lib/utcTime";
 import { TradingViewChart } from "./TradingViewChart";
 
 export function TargetTracker({ params, symbol, settled = false }: {
@@ -39,6 +41,6 @@ export function TargetTracker({ params, symbol, settled = false }: {
         <div className="flex flex-wrap justify-between gap-1 text-[11px] font-semibold text-zinc-500"><span>TradingView · spot market · 5-minute chart</span><span className="text-emerald-600">Target: {formatUsd(terms.target)}</span></div>
       </div>
     </details>
-    <p className="mt-3 text-sm font-semibold">{yesNow === null ? "Waiting for a fresh spot quote" : yesNow ? "Yes is currently on side" : "No is currently on side"} <span className="font-normal text-zinc-500">· The result uses the latest available hourly oracle checkpoint at or before {new Date(terms.atTime * 1000).toLocaleString()}. {symbolUpdatedAt && !settled ? `Spot updated ${new Date(symbolUpdatedAt).toLocaleTimeString()}.` : ""}</span></p>
+    <p className="mt-3 text-sm font-semibold">{yesNow === null ? "Waiting for a fresh spot quote" : yesNow ? "Yes is currently on side" : "No is currently on side"} <span className="font-normal text-zinc-500">· The result uses the latest available hourly oracle checkpoint at or before {formatPriceTargetTimeUtc(new Date(terms.atTime * 1000))}. {symbolUpdatedAt && !settled ? `Spot updated ${formatUtcTime(symbolUpdatedAt)}.` : ""}</span></p>
   </section>;
 }

@@ -19,6 +19,7 @@ import { CupFavoriteBadge } from "../../components/CupFavoriteBadge";
 import { ProfileInsights } from "../../components/ProfileInsights";
 import { formatTick, OUTCOME_SHORT, truncateAddress } from "../../lib/format";
 import { integerBigInt } from "../../lib/integerString";
+import { formatUtcDate } from "../../lib/utcTime";
 
 type Tab = "activity" | "fixtures" | "created" | "insights";
 const surface = "overflow-hidden rounded-[1.5rem] border border-black/[.08] bg-white dark:border-white/[.09] dark:bg-[#101821]";
@@ -26,8 +27,7 @@ const divider = "divide-y divide-black/[.06] dark:divide-white/[.07]";
 
 function date(value: string | null | undefined) {
   if (!value) return "Date unavailable";
-  const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) ? parsed.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "Date unavailable";
+  return formatUtcDate(value);
 }
 
 function signedTick(value: string) {

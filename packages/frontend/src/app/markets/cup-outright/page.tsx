@@ -14,6 +14,7 @@ import { useTickr } from "../../../hooks/useTickr";
 import { useTickBalance } from "../../../hooks/useTickBalance";
 import { CUP_TEAMS, cupConfigured, cupOutrightOpen, cupTeamName } from "../../../lib/cup";
 import { formatTick } from "../../../lib/format";
+import { formatUtcDateTime } from "../../../lib/utcTime";
 
 const QUESTION = "Who will win the Crypto Price World Cup?";
 
@@ -87,7 +88,7 @@ export default function CupOutrightPage() {
 
       <aside className="order-1 min-w-0 lg:order-2">
         <div className="glass relative z-20 mb-6 min-w-0 rounded-2xl p-5 lg:sticky lg:top-4"><div className="text-center"><div className="text-[11px] font-bold uppercase tracking-[.16em] text-zinc-500">{totalStaked > 0n ? "Most backed" : "Featured outcome"}</div><div className="mt-1 font-display text-4xl font-black tabular-nums text-amber-600 dark:text-amber-300">{featuredShare.toFixed(1)}%</div><div className="mt-1 flex min-w-0 items-center justify-center gap-2 text-sm font-bold"><CupTeamBadge teamId={featured.teamId} size={22} showName={false} /><span className="min-w-0 truncate">{cupTeamName(featured.teamId)} · pool share</span></div></div><button onClick={() => bettingOpen && setSelectedTeamId(featured.teamId)} disabled={!bettingOpen} className="mt-5 hidden w-full rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 py-4 font-display text-lg font-extrabold text-black shadow-[0_0_24px_rgba(251,191,36,.35)] transition-all hover:shadow-[0_0_36px_rgba(251,191,36,.5)] active:scale-[.98] disabled:opacity-40 disabled:shadow-none lg:block">{bettingOpen ? "Stake now" : settled ? "Market settled" : "Betting closed"}</button><p className="mt-3 hidden text-center text-[11px] text-zinc-500 lg:block">Choose any outcome to place your stake.</p></div>
-        <div className="glass rounded-2xl p-5"><h2 className="flex items-center gap-2 font-display text-base font-extrabold"><ShieldCheck className="h-4 w-4 text-amber-500" /> How this resolves</h2><p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">The coin that wins the final is the World Cup champion. Match results come from on-chain price performance and the tournament registry. The outright pool closes when the final kicks off.</p>{finalKickoff > 0 && <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Final kickoff: {new Date(finalKickoff).toLocaleString()}</p>}</div>
+        <div className="glass rounded-2xl p-5"><h2 className="flex items-center gap-2 font-display text-base font-extrabold"><ShieldCheck className="h-4 w-4 text-amber-500" /> How this resolves</h2><p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">The coin that wins the final is the World Cup champion. Match results come from on-chain price performance and the tournament registry. The outright pool closes when the final kicks off.</p>{finalKickoff > 0 && <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Final kickoff: {formatUtcDateTime(finalKickoff)}</p>}</div>
       </aside>
     </div>
 
