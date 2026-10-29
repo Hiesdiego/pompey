@@ -71,7 +71,7 @@ export async function GET(
 
 async function fallbackMatchCard(title: string): Promise<ImageResponse> {
   const c = OG_COLORS;
-  const final = title.match(/^(.+?)\s+(-?\d+)[–-](-?\d+)\s+(.+)$/);
+  const final = title.match(/^(.+?)\s+(-?\d+)[â€“-](-?\d+)\s+(.+)$/);
   const finalPending = title.match(/^(.+?)\s+FT\s+(.+)$/);
   const [homeName, awayName] = final ? [final[1], final[4]] : finalPending ? [finalPending[1], finalPending[2]] : title.split(/\s+vs\.?\s+/i, 2);
   const home = (homeName || title || "TICKR Match").slice(0, 42);
@@ -88,7 +88,7 @@ async function fallbackMatchCard(title: string): Promise<ImageResponse> {
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28, width: "100%" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 380 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{homeLogo ? <img src={homeLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : home.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800, textAlign: "center" }}>{home}</div></div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>{final ? `${final[2]}–${final[3]}` : finalPending ? "FT" : "VS"}</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>BACK YOUR TEAM</span></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#22d3ee", fontSize: 44, fontWeight: 900, gap: 16 }}><span>{final ? `${final[2]}â€“${final[3]}` : finalPending ? "FT" : "VS"}</span><span style={{ color: "#94a3b8", fontSize: 17, fontWeight: 500 }}>BACK YOUR TEAM</span></div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, width: 300 }}><div style={{ width: 118, height: 118, borderRadius: 999, background: "linear-gradient(145deg,#164e63,#0f2934)", border: "1px solid #22d3ee", display: "flex", alignItems: "center", justifyContent: "center", color: "#67e8f9", fontSize: 42, fontWeight: 800 }}>{awayLogo ? <img src={awayLogo} width={118} height={118} style={{ borderRadius: 999, background: "#fff" }} /> : away.slice(0, 1).toUpperCase()}</div><div style={{ fontSize: 34, fontWeight: 800 }}>{away}</div></div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", color: "#8ca3ad", fontSize: 18, borderTop: "1px solid #18343b", paddingTop: 18, width: "100%" }}><span>â—‰  Back your team. Climb the table.</span><span>tickrbase.top</span></div>

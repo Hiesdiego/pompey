@@ -32,9 +32,9 @@ export async function generateMetadata({
       if (f?.home && f?.away) {
         title = `${f.home.name} vs ${f.away.name} â€” TICKR`;
         const score = f.settled ? await leagueScore(id, f.seasonId ?? SEASON_ID) : null;
-        if (f.settled) title = `${f.home.name} ${score ? `${score[0]}–${score[1]}` : "FT"} ${f.away.name} — TICKR`;
+        if (f.settled) title = `${f.home.name} ${score ? `${score[0]}â€“${score[1]}` : "FT"} ${f.away.name} â€” TICKR`;
         description = f.settled
-          ? `Full-time result: ${title.replace(/ — TICKR$/, "")}.`
+          ? `Full-time result: ${title.replace(/ â€” TICKR$/, "")}.`
           : `${f.home.name} take on ${f.away.name} on TICKR â€” back your team and climb the table.`;
       }
     }

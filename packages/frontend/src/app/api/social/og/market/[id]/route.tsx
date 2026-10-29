@@ -193,7 +193,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const ranked = totals.every(t => t !== null) ? totals.map((total, i) => ({ total: total!, i })).sort((a, b) => a.total > b.total ? -1 : a.total < b.total ? 1 : a.i - b.i).slice(0, 3).map(t => t.i) : [];
     const coins = await artwork(market.templateId, market.params, ranked);
     const winners = labels.filter((_, i) => (market.winnerBitmap & (1n << BigInt(i))) !== 0n);
-    const outcome = market.state === 2 ? "Market voided · stakes returned" : market.state === 1 ? `Result: ${winners.join(" · ") || "No winning outcome"}` : undefined;
+    const outcome = market.state === 2 ? "Market voided Â· stakes returned" : market.state === 1 ? `Result: ${winners.join(" Â· ") || "No winning outcome"}` : undefined;
     card = await marketCard(title, market.state === 1 ? "RESOLVED" : market.state === 2 ? "VOIDED" : TEMPLATE_NAMES[market.templateId].toUpperCase(), coins, outcome);
   } catch (error) {
     console.error("Market OG data unavailable", error);
