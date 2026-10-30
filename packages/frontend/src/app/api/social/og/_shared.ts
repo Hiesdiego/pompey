@@ -94,16 +94,24 @@ export async function handleForAddress(address: string): Promise<string> {
 }
 
 
-export async function logoDataUrl(cmcId: number | null | undefined): Promise<string | null> {
-  if (typeof cmcId !== "number" || cmcId <= 0) return null;
+export async function imageDataUrl(url: string): Promise<string | null> {
   try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || ![
+      "s2.coinmarketcap.com",
+      "assets.coingecko.com",
+      "coin-images.coingecko.com",
+      "assets.coincap.io",
+    ].includes(parsed.hostname)) return null;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(`https://s2.coinmarketcap.com/static/img/coins/64x64/${cmcId}.png`, {
+    const res = await fetch(url, {
       signal: ctrl.signal,
     });
     clearTimeout(timer);
     if (!res.ok) return null;
+    const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    if (contentType !== "image/png" && contentType !== "image/jpeg") return null;
     const buf = await res.arrayBuffer();
     if (buf.byteLength === 0 || buf.byteLength > 200_000) return null;
     const bytes = new Uint8Array(buf);
@@ -112,8 +120,13 @@ export async function logoDataUrl(cmcId: number | null | undefined): Promise<str
     for (let i = 0; i < bytes.length; i += CHUNK) {
       binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
     }
-    return `data:image/png;base64,${btoa(binary)}`;
+    return `data:${contentType};base64,${btoa(binary)}`;
   } catch {
     return null;
   }
+}
+
+export async function logoDataUrl(cmcId: number | null | undefined): Promise<string | null> {
+  if (typeof cmcId !== "number" || cmcId <= 0) return null;
+  return imageDataUrl(`https://s2.coinmarketcap.com/static/img/coins/64x64/${cmcId}.png`);
 }

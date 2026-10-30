@@ -109,6 +109,8 @@ services:
         value: "200"
       - key: LEADERBOARD_SCAN_START_BLOCK
         value: "47283463"
+      - key: RESULT_SCAN_START_BLOCK
+        value: "47283463"
 
       # --- social layer (optional; leave unset to disable) --------------------
       - key: SUPABASE_URL

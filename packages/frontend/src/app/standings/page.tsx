@@ -20,16 +20,22 @@ export default function StandingsPage() {
 
   useEffect(() => {
     let alive = true;
-    api
-      .table()
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = () => api.table()
       .then((t) => {
-        if (alive) setTable(t);
+        if (!alive) return;
+        setTable(t);
+        if (t.some((row) => row.goalsFor === null || row.goalsAgainst === null)) {
+          retry = setTimeout(load, 5_000);
+        }
       })
       .catch((e: Error) => {
         if (alive) setError(e.message);
       });
+    void load();
     return () => {
       alive = false;
+      if (retry) clearTimeout(retry);
     };
   }, []);
 
@@ -58,6 +64,11 @@ export default function StandingsPage() {
         <Table2 className="h-4 w-4 text-[#2E7CF6]" />
         {SEASON_DISPLAY_NAME} · ordered by points, then goal difference, goals scored, wins, fewest losses
       </p>
+      {table.some((row) => row.goalsFor === null || row.goalsAgainst === null) && (
+        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400" role="status">
+          Goal totals are syncing from the chain. GF and GA will appear when the full season is counted.
+        </p>
+      )}
 
       {table.length === 0 ? (
         <p className="glass rounded-2xl p-6 text-center text-sm text-zinc-500 dark:text-zinc-500">

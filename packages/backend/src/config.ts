@@ -228,6 +228,11 @@ export const config = {
     scanStartBlock: optionalBigInt("LEADERBOARD_SCAN_START_BLOCK", "47283463"),
   },
 
+  results: {
+    /** Block at or before the first ResultEngine result for every served season. */
+    scanStartBlock: optionalBigInt("RESULT_SCAN_START_BLOCK", "47283463"),
+  },
+
   /** Supabase sink for indexing MarketFactory social data. */
   social: {
     supabaseUrl: optional("SUPABASE_URL", ""),

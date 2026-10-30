@@ -25,7 +25,7 @@ export function Coins({ coins, gold = false }: { coins: CoinArt[]; gold?: boolea
         {coin.logo ? <img src={coin.logo} width={coins.length === 1 ? 170 : 88} height={coins.length === 1 ? 170 : 88} style={{ borderRadius: 999 }} alt={coin.symbol} /> : <span>{coin.symbol.slice(0, 5)}</span>}
       </div>
       <span style={{ fontSize: 23, fontWeight: 800 }}>{coin.symbol}</span>
-      {coin.detail && <span style={{ fontSize: 18, color: "#9ac2ff" }}>{coin.detail}</span>}
+      {coin.detail && <span style={{ width: 220, textAlign: "center", fontSize: 18, color: gold ? "#f5d58a" : "#9ac2ff" }}>{coin.detail}</span>}
     </div>)}
   </div>;
 }

@@ -74,8 +74,8 @@ export interface ApiTableRow {
   lost: number;
   points: number;
   goalDifference: number;
-  goalsFor: number;
-  goalsAgainst: number;
+  goalsFor: number | null;
+  goalsAgainst: number | null;
 }
 
 export interface ApiPlayer {

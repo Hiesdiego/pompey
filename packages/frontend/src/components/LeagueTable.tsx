@@ -100,10 +100,10 @@ export function LeagueTable({
                       {row.lost}
                     </td>
                     <td className="hidden px-2 py-2.5 text-center tabular-nums text-zinc-500 md:table-cell dark:text-zinc-400">
-                      {row.goalsFor}
+                      {row.goalsFor ?? "—"}
                     </td>
                     <td className="hidden px-2 py-2.5 text-center tabular-nums text-zinc-500 md:table-cell dark:text-zinc-400">
-                      {row.goalsAgainst}
+                      {row.goalsAgainst ?? "—"}
                     </td>
                   </>
                 )}

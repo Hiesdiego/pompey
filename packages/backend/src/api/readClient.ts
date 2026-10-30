@@ -114,8 +114,8 @@ export interface TableRow {
   lost: number;
   points: number;
   goalDifference: number;
-  goalsFor: number;
-  goalsAgainst: number;
+  goalsFor: number | null;
+  goalsAgainst: number | null;
 }
 
 export interface RecentFormEntry {
@@ -185,14 +185,6 @@ const PRICE_ORACLE_SNAPSHOT_ABI = [{
     { name: "startSubmitted", type: "bool" }, { name: "endSubmitted", type: "bool" },
   ] }],
 }] as const;
-
-function resultScanStartBlock(seasonId: bigint): bigint {
-  // The current season's factory is deployed before its fixtures can settle.
-  // Its deployment block avoids replaying every prior season on restart.
-  return seasonId === config.seasonId && config.social.marketFactoryDeployBlock
-    ? BigInt(config.social.marketFactoryDeployBlock)
-    : config.leaderboard.scanStartBlock;
-}
 
 export class ChainReader {
   private readonly publicClient: PublicClient;
@@ -282,13 +274,7 @@ export class ChainReader {
   }
 
   async getLeagueTable(seasonId: bigint): Promise<TableRow[]> {
-    try {
-      this.refreshResultEventsInBackground(seasonId);
-    } catch (err) {
-      logger.warn("[ChainReader] ResultRecorded scan failed — serving table without GF/GA", {
-        error: String(err),
-      });
-    }
+    this.refreshResultEventsInBackground(seasonId);
 
     const results = (await this.publicClient.multicall({
       contracts: TICKR_TEAMS.map((team) => ({
@@ -300,7 +286,7 @@ export class ChainReader {
       allowFailure: true,
     })) as Array<{ status: "success"; result: unknown } | { status: "failure"; error: unknown }>;
 
-    const rows = results.map((result, index) => {
+    const rows: TableRow[] = results.map((result, index) => {
       const team = TICKR_TEAMS[index];
       if (result.status !== "success") {
         throw new Error(`Failed to read team record for ${team.symbol}: ${String(result.error)}`);
@@ -339,11 +325,23 @@ export class ChainReader {
       } satisfies TableRow;
     });
 
+    const recordedMatches = rows.reduce((total, row) => total + row.played, 0) / 2;
+    const goalsComplete = this.resultHistoryReady && this.goalsSeasonId === seasonId &&
+      this.resultsByFixture.size === recordedMatches &&
+      rows.every((row) => row.goalsFor !== null && row.goalsAgainst !== null &&
+        row.goalsFor - row.goalsAgainst === row.goalDifference);
+    if (!goalsComplete) {
+      for (const row of rows) {
+        row.goalsFor = null;
+        row.goalsAgainst = null;
+      }
+    }
+
     rows.sort(
       (a, b) =>
         b.points - a.points ||
         b.goalDifference - a.goalDifference ||
-        b.goalsFor - a.goalsFor ||
+        (b.goalsFor ?? 0) - (a.goalsFor ?? 0) ||
         b.won - a.won ||
         a.lost - b.lost
     );
@@ -353,7 +351,12 @@ export class ChainReader {
   private refreshResultEventsInBackground(seasonId: bigint): void {
     if (this.resultScanPromise) return;
     this.resultScanPromise = new Promise<void>((resolve) => setTimeout(resolve, 0))
-      .then(() => this.scanNewResultEvents(seasonId))
+      .then(async () => {
+        do {
+          await this.scanNewResultEvents(seasonId);
+          if (!this.resultHistoryReady) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        } while (!this.resultHistoryReady);
+      })
       .catch((err) => {
         logger.warn("[ChainReader] ResultRecorded scan failed - serving table without GF/GA", {
           error: String(err),
@@ -374,7 +377,7 @@ export class ChainReader {
     }
     const latest = await this.publicClient.getBlockNumber();
     let from =
-      this.resultsScannedTo !== null ? this.resultsScannedTo + 1n : resultScanStartBlock(seasonId);
+      this.resultsScannedTo !== null ? this.resultsScannedTo + 1n : config.results.scanStartBlock;
     if (from > latest) {
       if (this.resultsScannedTo === null) this.resultsScannedTo = latest;
       this.resultHistoryReady = true;
