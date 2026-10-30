@@ -783,7 +783,7 @@ export default function MarketDetailPage() {
       {/* Desktop keeps the in-flow sticky sidebar CTA; on mobile this fixed
           bottom bar keeps "Stake" one tap away without scrolling back up. */}
       {bettingOpen && stakeSel === null && (
-        <div className="fixed inset-x-0 bottom-0 z-40 lg:hidden">
+        <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 md:bottom-0 lg:hidden">
           <div className="border-t border-black/10 bg-white/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur dark:border-white/10 dark:bg-[#101722]/95">
             <div className="mx-auto flex max-w-5xl items-center gap-3 px-4">
               <div className="min-w-0 flex-1">

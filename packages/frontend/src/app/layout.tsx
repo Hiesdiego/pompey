@@ -4,6 +4,7 @@ import "./globals.css";
 import Providers from "./providers";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { Header } from "../components/Header";
+import { MobileBottomNav } from "../components/MobileBottomNav";
 import { Footer } from "../components/Footer";
 import { OnboardingGate } from "../components/OnboardingGate";
 import { PwaRegister } from "../components/PwaRegister";
@@ -107,7 +108,7 @@ export default function RootLayout({
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
       </head>
       <body
-        className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-white font-sans text-zinc-900 antialiased transition-colors duration-300 dark:bg-black dark:text-zinc-100`}
+        className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] font-sans text-zinc-900 antialiased transition-colors duration-300 md:pb-0 dark:bg-black dark:text-zinc-100`}
       >
         <ThemeProvider>
           <PwaRegister />
@@ -117,6 +118,7 @@ export default function RootLayout({
               {children}
             </main>
             <Footer />
+            <MobileBottomNav />
             <OnboardingGate />
             <ToastViewport />
             <WatchAlertMonitor />

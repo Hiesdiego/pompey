@@ -164,6 +164,12 @@ function WalletAddressButton() {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const openMenu = () => setOpen(true);
+    window.addEventListener("tickr:open-account-menu", openMenu);
+    return () => window.removeEventListener("tickr:open-account-menu", openMenu);
+  }, []);
+
   if (!authenticated) return null;
 
   async function copyAddress() {
@@ -325,8 +331,8 @@ export function Header() {
           )}
         </div>
       </div>
-      <nav className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
-        {NAV.map((n) => (
+      <nav aria-label="More destinations" className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
+        {[{ href: "/#trending", label: "Trending" }, ...NAV.filter((n) => !["/", "/markets"].includes(n.href))].map((n) => (
           <Link
             key={n.href}
             href={n.href}
