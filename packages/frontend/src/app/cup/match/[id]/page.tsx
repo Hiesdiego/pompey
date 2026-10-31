@@ -18,6 +18,9 @@ import { CUP_FEE_BPS, CUP_ROUNDS, CUP_TBD, cupRoundOf, cupTeamName } from "../..
 import { EmptyState, ErrorState } from "../../../../components/States";
 import { formatTick } from "../../../../lib/format";
 import { ShareButtons } from "../../../../components/ShareButtons";
+import { CupCommentaryFeed } from "../../../../components/CupCommentaryFeed";
+import { CupLiveAnalyzer } from "../../../../components/CupLiveAnalyzer";
+import { useCupLiveMatch } from "../../../../hooks/useCupLiveMatch";
 
 export default function CupMatchPage() {
   const params = useParams<{ id: string }>();
@@ -29,6 +32,9 @@ export default function CupMatchPage() {
   const [now, setNow] = useState(() => Date.now());
   const [stakeOpen, setStakeOpen] = useState(false);
   const [chartsOpen, setChartsOpen] = useState(false);
+  const currentMatch = matches?.[matchId];
+  const live = !!currentMatch && cupMatchStatus(currentMatch, now) === "live";
+  const liveMatch = useCupLiveMatch(matchId, currentMatch?.teamA, currentMatch?.teamB, live);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   if (!Number.isInteger(matchId) || matchId < 0 || matchId > 62) return <EmptyState title="Match not found" message="Choose a World Cup match from the bracket." />;
   if (error) return <ErrorState message={error} onRetry={() => void reload()} />;
@@ -57,11 +63,14 @@ export default function CupMatchPage() {
       </div>
       <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-8">
         <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:text-left"><CupTeamBadge key={match.teamA} teamId={match.teamA} size={56} showName={false} /><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold sm:text-lg">{cupTeamName(match.teamA)}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">HOME</p></div></div>
-        <div className="min-w-[112px] rounded-2xl border border-amber-400/30 bg-amber-500/[.08] px-4 py-3 text-center shadow-inner dark:border-amber-400/20 dark:bg-amber-500/[.1] sm:min-w-[160px] sm:px-6 sm:py-4"><p className="font-display text-4xl font-black tabular-nums text-amber-700 dark:text-amber-300 sm:text-6xl">{status === "settled" ? `${match.goalsA}–${match.goalsB}` : status === "live" ? "– : –" : "VS"}</p><p className="mt-1 text-[9px] font-extrabold uppercase tracking-[.22em] text-amber-700 dark:text-amber-300">{status === "settled" ? "Final score" : status === "live" ? "Score pending" : "Kickoff soon"}</p></div>
+        <div className="min-w-[112px] rounded-2xl border border-amber-400/30 bg-amber-500/[.08] px-4 py-3 text-center shadow-inner dark:border-amber-400/20 dark:bg-amber-500/[.1] sm:min-w-[160px] sm:px-6 sm:py-4"><p className="font-display text-4xl font-black tabular-nums text-amber-700 dark:text-amber-300 sm:text-6xl">{status === "settled" ? `${match.goalsA}–${match.goalsB}` : status === "live" ? liveMatch.score ? `${liveMatch.score[0]}–${liveMatch.score[1]}` : "– : –" : "VS"}</p><p className="mt-1 text-[9px] font-extrabold uppercase tracking-[.22em] text-amber-700 dark:text-amber-300">{status === "settled" ? "Final score" : status === "live" ? "PLS" : "Kickoff soon"}</p></div>
         <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:justify-end sm:text-right"><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold sm:text-lg">{cupTeamName(match.teamB)}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">AWAY</p></div><CupTeamBadge key={match.teamB} teamId={match.teamB} size={56} showName={false} /></div>
       </div>
-      <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10"><span>Real price performance</span><span>Crypto Price World Cup</span></div>
+      <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10"><span>Real price performance</span><span>{status === "live" && liveMatch.moves ? `${liveMatch.moves[0].toFixed(2)}% · ${liveMatch.moves[1].toFixed(2)}%` : "Crypto Price World Cup"}</span></div>
     </div>
+    {status === "live" && <p className="mb-4 text-center text-[11px] text-zinc-500">PLS means projected live score. It can change until the final oracle result.</p>}
+    {status === "live" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupLiveAnalyzer matchId={matchId} teamA={match.teamA} teamB={match.teamB} {...liveMatch} />}
+    {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupCommentaryFeed matchId={matchId} phase={status} />}
     {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <details className="glass group mb-6 rounded-2xl p-5" onToggle={(event) => setChartsOpen(event.currentTarget.open)}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span className="flex items-center gap-2"><Activity className="h-4 w-4 text-amber-600" /> Recent price movements</span><span className="text-xs font-semibold text-amber-700 group-open:hidden dark:text-amber-300">Show charts</span><span className="hidden text-xs font-semibold text-amber-700 group-open:inline dark:text-amber-300">Hide charts</span></summary>
       <div className="mt-5 grid gap-5 md:grid-cols-2">

@@ -25,6 +25,7 @@ export interface ValidatedPrice {
 
   scaled: bigint;
   source: PriceSource;
+  receivedAtMs: number;
   coinbasePrice: string | null;
   binancePrice: string | null;
   coingeckoPrice: string | null;
@@ -115,16 +116,18 @@ export class PriceFeed {
     const now = Date.now();
 
     let coinbasePrice: string | null = null;
+    let coinbaseAtMs = 0;
     if (def.coinbasePair) {
       const tick = this.coinbase.getLatest(def.coinbasePair);
       if (tick && now - tick.receivedAtMs <= this.coinbaseStaleAfterMs) {
         coinbasePrice = tick.price;
+        coinbaseAtMs = tick.receivedAtMs;
       }
     }
 
     let binancePrice: string | null = null;
+    let binanceAtMs = 0;
     if (def.binanceSymbol) {
-      let binanceAtMs = 0;
       for (const feed of this.binancePrimaries) {
         const tick = feed.getLatest(def.binanceSymbol);
         if (tick && tick.receivedAtMs > binanceAtMs) {
@@ -141,10 +144,10 @@ export class PriceFeed {
     const coingeckoPrice =
       cg != null && now - cg.receivedAtMs <= this.coingeckoStaleAfterMs ? cg.priceUsd : null;
 
-    const candidates: Array<{ source: PriceSource; price: string | null }> = [
-      { source: "coinbase", price: coinbasePrice },
-      { source: "binance", price: binancePrice },
-      { source: "coingecko-fallback", price: coingeckoPrice },
+    const candidates: Array<{ source: PriceSource; price: string | null; receivedAtMs: number }> = [
+      { source: "coinbase", price: coinbasePrice, receivedAtMs: coinbaseAtMs },
+      { source: "binance", price: binancePrice, receivedAtMs: binanceAtMs },
+      { source: "coingecko-fallback", price: coingeckoPrice, receivedAtMs: cg?.receivedAtMs ?? 0 },
     ];
     let chosen = candidates.find((c) => c.price !== null);
     if (preferredSource) {
@@ -206,6 +209,7 @@ export class PriceFeed {
       teamId,
       scaled: primaryScaled,
       source: chosen.source,
+      receivedAtMs: chosen.receivedAtMs,
       coinbasePrice,
       binancePrice,
       coingeckoPrice,

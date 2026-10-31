@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChartNoAxesCombined, House, Plus, Trophy, UserRound } from "lucide-react";
+import { CalendarDays, ChartNoAxesCombined, House, Plus, UserRound } from "lucide-react";
 import { useTickr } from "../hooks/useTickr";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { cn } from "../lib/cn";
 
 const items = [
   { href: "/", label: "Home", icon: House },
-  { href: "/standings", label: "League", icon: Trophy },
+  { href: "/fixtures", label: "Fixtures", icon: CalendarDays },
   { href: "/markets", label: "Markets", icon: ChartNoAxesCombined },
 ];
 

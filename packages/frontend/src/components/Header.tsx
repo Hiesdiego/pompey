@@ -332,7 +332,7 @@ export function Header() {
         </div>
       </div>
       <nav aria-label="More destinations" className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
-        {[{ href: "/#trending", label: "Trending" }, ...NAV.filter((n) => !["/", "/markets"].includes(n.href))].map((n) => (
+        {[{ href: "/#trending", label: "Trending" }, { href: "/standings", label: "League" }, ...NAV.filter((n) => !["/", "/markets", "/fixtures"].includes(n.href))].map((n) => (
           <Link
             key={n.href}
             href={n.href}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { PrivyProvider, useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
+import { PrivyProvider, dataSuffix, useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { baseSepolia, baseMainnet } from "@tickr/shared/chains";
@@ -9,6 +9,14 @@ import { queryClient } from "../lib/query/queryClient";
 import { LoginModalProvider } from "../components/LoginModal";
 import { LegalGate } from "../components/LegalGate";
 import { initMatchDuration } from "../lib/matchConfig";
+import { ACTIVE_CHAIN } from "../lib/contracts";
+import { toHex } from "viem";
+
+const builderCode = process.env.NEXT_PUBLIC_BASE_BUILDER_CODE?.trim();
+const builderCodeHex = builderCode ? toHex(builderCode) : null;
+const builderCodeSuffix = builderCodeHex && builderCodeHex.length <= 512
+  ? `${builderCodeHex}${toHex((builderCodeHex.length - 2) / 2, { size: 1 }).slice(2)}0080218021802180218021802180218021` as `0x${string}`
+  : null;
 
 function EnsureEmbeddedWallet() {
   const { ready, authenticated, user } = usePrivy();
@@ -87,8 +95,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         embeddedWallets: {
           ethereum: { createOnLogin: "all-users" },
         },
-        defaultChain: baseSepolia,
+        defaultChain: ACTIVE_CHAIN,
         supportedChains: [baseSepolia, baseMainnet],
+        ...(builderCodeSuffix ? { plugins: [dataSuffix(builderCodeSuffix)] as unknown as NonNullable<NonNullable<React.ComponentProps<typeof PrivyProvider>["config"]>["plugins"]> } : {}),
       }}
     >
       <SmartWalletsProvider>

@@ -39,6 +39,7 @@ import { MatchLifecycle } from "./services/matchLifecycle.js";
 import { CUP_TEAM_PRICE_MAP } from "./services/cupTeams.js";
 import { CupSubmitter } from "./services/cupSubmitter.js";
 import { CupLifecycle } from "./services/cupLifecycle.js";
+import { CupCommentary } from "./services/cupCommentary.js";
 import { CheckpointSubmitter } from "./services/checkpointSubmitter.js";
 import { FactoryKeeper } from "./services/factoryKeeper.js";
 import { ChainCache } from "./services/chainCache.js";
@@ -123,6 +124,7 @@ async function main(): Promise<void> {
   const cupLifecycle = cupConfigured ? new CupLifecycle(cupPriceFeed, new CupSubmitter()) : null;
   const checkpointSubmitter = new CheckpointSubmitter(priceFeed, cupPriceFeed);
   const db = createSocialDb();
+  const cupCommentary = cupLifecycle ? new CupCommentary(cupLifecycle, cupPriceFeed, db) : null;
   const factoryKeeper = new FactoryKeeper(db);
   const previousFactoryKeeper = config.contracts.previousMarketFactory &&
     config.contracts.previousMarketFactory.toLowerCase() !== config.contracts.marketFactory.toLowerCase()
@@ -228,6 +230,20 @@ async function main(): Promise<void> {
   });
   app.use(express.json());
   app.use(buildRouter({ reader, lifecycle, priceFeed, cupPriceFeed, coingecko, chainCache, health: buildHealth }));
+  app.get("/api/cup/matches/:id/commentary", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 0 || id > 62) { res.status(400).json({ error: "Invalid World Cup match" }); return; }
+    if (!cupCommentary || !db) { res.status(503).json({ error: "World Cup commentary unavailable" }); return; }
+    try {
+      const lines = await cupCommentary.getLines(id);
+      const tag = `W/"${id}-${lines.length}-${lines.at(-1)?.id ?? "empty"}"`;
+      res.setHeader("ETag", tag);
+      res.setHeader("Cache-Control", lines.some((line) => line.eventType === "ft") ? "public, max-age=3600" : "public, max-age=5, must-revalidate");
+      if (req.headers["if-none-match"] === tag) { res.status(304).end(); return; }
+      res.json({ lines });
+    }
+    catch (error) { logger.error("[CupCommentary] read failed", { id, error: String(error) }); res.status(503).json({ error: "Commentary temporarily unavailable" }); }
+  });
 
   app.use(
     (
@@ -262,6 +278,10 @@ async function main(): Promise<void> {
         logger.error("[backend] cup lifecycle failed to start", { error: String(err) });
       }
     }
+    if (cupCommentary) {
+      try { await cupCommentary.start(); }
+      catch (err) { logger.error("[backend] cup commentary failed to start", { error: String(err) }); }
+    }
     try {
       checkpointSubmitter.start();
     } catch (err) {
@@ -287,6 +307,7 @@ async function main(): Promise<void> {
     liveWs.stop();
     lifecycle.stop();
     cupLifecycle?.stop();
+    cupCommentary?.stop();
     checkpointSubmitter.stop();
     factoryKeeper.stop();
     previousFactoryKeeper?.stop();
