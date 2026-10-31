@@ -81,10 +81,13 @@ Market creators earn a **revenue share** of their markets' fees.
 
 **CTF Season 1** · 380 fixtures · Base Sepolia · all pools seeded
 
+### League contracts
+
 | Contract | Address |
 |---|---|
 | MatchRegistry | [`0xd5b0d27bb9c523ed777f355191a9dd2dcbee0c62`](https://sepolia.basescan.org/address/0xd5b0d27bb9c523ed777f355191a9dd2dcbee0c62) |
 | TeamRegistry | [`0x352e6fce9c07de4bf3e187ce93a0120db05d2ea8`](https://sepolia.basescan.org/address/0x352e6fce9c07de4bf3e187ce93a0120db05d2ea8) |
+| PlayerStats | [`0x6d48c38c2036b3d31328b48bd8b72785ab2d15a9`](https://sepolia.basescan.org/address/0x6d48c38c2036b3d31328b48bd8b72785ab2d15a9) |
 | MarketFactory (existing markets) | [`0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1`](https://sepolia.basescan.org/address/0x915c36ffb6fe3cd65780fcafa2b489ce6eafdca1) |
 | MarketFactory (previous markets) | [`0xac04f4ff8b2e71984cb25e75456915c81075acdc`](https://sepolia.basescan.org/address/0xac04f4ff8b2e71984cb25e75456915c81075acdc) |
 | MarketFactory (new markets) | [`0x7ead4c6b3cc884adb82b60e9c34ef2d59604bfc2`](https://sepolia.basescan.org/address/0x7ead4c6b3cc884adb82b60e9c34ef2d59604bfc2) |
@@ -93,6 +96,17 @@ Market creators earn a **revenue share** of their markets' fees.
 | PriceOracle | [`0x2814bd64f7774eccd5dc11a792f15fecdfebdf90`](https://sepolia.basescan.org/address/0x2814bd64f7774eccd5dc11a792f15fecdfebdf90) |
 | TickToken (TICK) | [`0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b`](https://sepolia.basescan.org/address/0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b) |
 | SeasonRegistry | [`0xe6f2c8a55a3f4f34a7abd833afece63d9789c260`](https://sepolia.basescan.org/address/0xe6f2c8a55a3f4f34a7abd833afece63d9789c260) |
+
+### World Cup contracts
+
+The World Cup uses the same TICK token and its own registry, scoring engine, dispute ballot, and staking pool on Base Sepolia.
+
+| Contract | Address |
+|---|---|
+| CupRegistry | [`0x45b8f0ef96b919184659bee98c7503834d167238`](https://sepolia.basescan.org/address/0x45b8f0ef96b919184659bee98c7503834d167238) |
+| CupEngine | [`0xe22c3b9bd80ae591d8ef3da6f208b05b2913752f`](https://sepolia.basescan.org/address/0xe22c3b9bd80ae591d8ef3da6f208b05b2913752f) |
+| DisputeBallot | [`0x5649588288c98abdca6bcb7eb767a1611ca32179`](https://sepolia.basescan.org/address/0x5649588288c98abdca6bcb7eb767a1611ca32179) |
+| CupPool | [`0x9b2527c88f806fe34c166edb4784f60483b0864b`](https://sepolia.basescan.org/address/0x9b2527c88f806fe34c166edb4784f60483b0864b) |
 
 Every settlement emits on-chain events — anyone can recompute any scoreline independently. That's the point.
 
