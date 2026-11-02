@@ -30,7 +30,7 @@ const banned = /\b(manipulat(?:ion|ed|e)|rigged|insider|guaranteed|kalshi|polyma
 // football words ("long ball", "short on luck"). Financial-advice protection
 // lives in the LLM system prompt and in the number grounding below.
 
-type TemplateFacts = { teamA: string; teamB: string; scoreA: number; scoreB: number; minute: number; winner?: string; tie?: boolean };
+type TemplateFacts = { teamA: string; teamB: string; scoreA: number; scoreB: number; minute: number; winner?: string; tie?: boolean; reply?: boolean };
 const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
 // Every variant carries the exact score and minute, so the score parsed back
 // from a line in observe() stays correct and the Producer grounding holds.
@@ -41,16 +41,25 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
   const at = `in minute ${f.minute}`;
   switch (kind) {
     case "kickoff":
+      if (voice === "witty") {
+        return pick([
+          `Dee, I'm watching the charts and keeping my predictions to myself. ${score} ${at}.`,
+          `You set the scene, Dee; I'll keep an eye on the scoreboard. ${score} ${at}.`,
+          `Glad to be in the booth, Dee. ${score} ${at}; let's see which chart blinks first.`,
+          `Dee, the teams are ready and so is my running commentary. ${score} ${at}.`,
+        ]);
+      }
       if (f.minute > 0) {
         return pick([
-          `Joining the match. ${score} ${at}.`,
-          `Joining the match late. ${score} ${at}.`,
+          `We're joining ${f.teamA} and ${f.teamB} ${at}, with ${score}. Rekt, what catches your eye?`,
+          `Welcome to the booth. ${score} ${at}. Rekt, you're just in time to weigh in.`,
         ]);
       }
       return pick([
-        `Kickoff. ${score} ${at}.`,
-        `${score} ${at}. We are under way.`,
-        `Kickoff. ${score}. The price action decides from here.`,
+        `Welcome to ${f.teamA} against ${f.teamB}. ${score} ${at}. Rekt, what are you watching?`,
+        `We're under way: ${score} ${at}. Rekt, take us into the action.`,
+        `The booth is open for ${f.teamA} versus ${f.teamB}. ${score} ${at}. Rekt, your first impression?`,
+        `Here we go: ${score} ${at}. Rekt, what could make this one interesting?`,
       ]);
     case "ht":
       return pick([
@@ -67,6 +76,7 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
     }
     case "goal":
       if (voice === "witty") {
+        if (f.reply) return pick([`Dee, that chart found the net before I found a comeback. ${score} ${at}.`, `You called it, Dee; the scoreboard moved. ${score} ${at}.`]);
         return pick([
           `The chart has spoken. ${score} ${at}.`,
           `Somebody check on the other chart. ${score} ${at}.`,
@@ -74,6 +84,7 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
           `The price moved and the scoreboard noticed. ${score} ${at}.`,
         ]);
       }
+      if (f.reply) return pick([`Rekt, the score confirms it. ${score} ${at}.`, `And there it is, Rekt. ${score} ${at}.`]);
       return pick([
         `GOAL. ${score} ${at}.`,
         `GOAL. ${score} ${at}. The move pays off.`,
@@ -81,6 +92,7 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
       ]);
     case "chalked-off":
       if (voice === "witty") {
+        if (f.reply) return pick([`Dee, that celebration had a short shelf life. ${score} ${at}.`, `That's a quick reversal, Dee. ${score} ${at}.`]);
         return pick([
           `The market took that goal back. ${score} ${at}.`,
           `Never mind. The price changed its mind. ${score} ${at}.`,
@@ -88,6 +100,7 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
           `Blink and the scoreboard changes. ${score} ${at}.`,
         ]);
       }
+      if (f.reply) return pick([`Rekt, the score has been revised. ${score} ${at}.`, `You're right to pause, Rekt. ${score} ${at}; that goal is gone.`]);
       return pick([
         `Score revised after a price retrace. ${score} ${at}.`,
         `That goal is chalked off. ${score} ${at}.`,
@@ -196,7 +209,13 @@ export class CupCommentary {
     this.states.set(match.matchId, state);
     const names = [CUP_TEAM_SYMBOLS[match.teamA], CUP_TEAM_SYMBOLS[match.teamB]];
     const facts = { matchId: match.matchId, minute, teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, moveA: score.moveA, moveB: score.moveB };
-    if (!existing.length) await this.publish(match, "kickoff", "professional", facts, templateFor("kickoff", "professional", { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute }), 0);
+    const kickoffFacts = { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute };
+    if (!existing.some((line) => line.eventType === "kickoff" && line.voice === "professional")) {
+      await this.publish(match, "kickoff", "professional", facts, templateFor("kickoff", "professional", kickoffFacts), 0);
+    }
+    if (existing.some((line) => line.eventType === "kickoff" && line.voice === "professional") && !existing.some((line) => line.eventType === "kickoff" && line.voice === "witty")) {
+      await this.publish(match, "kickoff", "witty", facts, templateFor("kickoff", "witty", kickoffFacts), 0);
+    }
     if (!state.half && minute >= 30 && !snapshot.endSubmitted) {
       state.half = await this.publish(match, "ht", "professional", facts, templateFor("ht", "professional", { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute }), 0);
     }
@@ -206,7 +225,7 @@ export class CupCommentary {
         const tie = score.scoreA === score.scoreB;
         const expected = tie ? cupTieWinner(match.teamA, match.teamB, snapshot.startA, snapshot.startB, priceA, priceB) : score.scoreA > score.scoreB ? match.teamA : match.teamB;
         if (expected !== match.winner) throw new Error("Settled winner differs from snapshot score");
-        await this.publish(match, "ft", "professional", { ...facts, minute: 60 }, templateFor("ft", "professional", { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute: 60, winner, tie }), 0);
+        await this.publish(match, "ft", "professional", { ...facts, minute: 60, winner, tieBreak: tie ? "price-performance tie-break" : "none" }, templateFor("ft", "professional", { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute: 60, winner, tie }), 0);
       }
       return;
     }
@@ -219,7 +238,7 @@ export class CupCommentary {
       const tf = { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute };
       const published = await this.publish(match, kind, lead, facts, templateFor(kind, lead, tf), 0);
       if (published) { state.scoreA = score.scoreA; state.scoreB = score.scoreB; state.near = ""; }
-      if (published && Math.random() < 0.5) await this.publish(match, kind, other, facts, templateFor(kind, other, tf), 1);
+      if (published && Math.random() < 0.5) await this.publish(match, kind, other, facts, templateFor(kind, other, { ...tf, reply: true }), 1);
     } else if (minute > state.lastMinute && minute < 60 && minute - state.lastMood >= 5) {
       const close = Math.max(Math.abs(score.moveA * 2 - Math.round(score.moveA * 2)), Math.abs(score.moveB * 2 - Math.round(score.moveB * 2)));
       const kind: Kind = close > 0.35 ? "near-miss" : Math.abs(score.moveA - score.moveB) >= 0.3 ? "pressure" : "stalemate";
@@ -252,15 +271,27 @@ export class CupCommentary {
         const timeout = setTimeout(() => controller.abort(), 5_000);
         try {
           const model = voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MODEL : process.env.COMMENTARY_LLM_WITTY_MODEL;
+          const previous = lines.at(-1);
+          const replyTo = previous && previous.voice !== voice && previous.eventType === kind && (kind === "kickoff" || previous.minute === minute)
+            ? { speaker: previous.voice === "professional" ? "Dee" : "Rekt", text: previous.text }
+            : null;
           const system = voice === "professional"
-            ? "You are Dee, the precise lead commentator for TICKR's Crypto Price World Cup. Write one short sentence. State what happened, the exact score, and the minute, plus one concrete detail from the facts. Use only supplied facts. Never repeat the previous line. Scores before full-time are live. Never give financial advice or invent news, prices, events, or winners. Never mention AI."
-            : "You are Rekt, the witty, dry colour commentator for TICKR's Crypto Price World Cup. Write one short sentence with a sharp, sarcastic observation about the price action. Include the exact score and the minute. Be funny, not flat: vary your sentence shape, use a fresh image, and never repeat the previous line or write the same sentence twice. Use only supplied facts. Scores before full-time are live. Never give financial advice or invent news, prices, events, or winners. Never mention AI.";
-          const response = await fetch(`${process.env.COMMENTARY_LLM_BASE_URL || "https://api.groq.com/openai/v1"}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model, max_tokens: 60, temperature: voice === "witty" ? 0.8 : 0.3, messages: [
+            ? "You are Dee, the lively but precise lead commentator for TICKR's Crypto Price World Cup. Keep the booth conversational. State the exact score and minute, and use only supplied match facts. Vary your openings. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI."
+            : "You are Rekt, the witty, dry colour commentator for TICKR's Crypto Price World Cup. Keep the booth conversational, sharp and varied. State the exact score and minute, and use only supplied match facts. A joke may be an opinion about the match, never a claim about real news or your finances. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI.";
+          const direction = kind === "kickoff" && voice === "professional"
+            ? "Open the broadcast by introducing both teams, then hand over to Rekt with a natural question. Use a different approach from previous openings."
+            : replyTo
+              ? `Respond to ${replyTo.speaker}'s actual remark, addressing them naturally. Add a fresh observation rather than repeating their words.`
+              : "Call the match naturally. You may address the other commentator when it fits, but do not force a handoff on every line.";
+          const recentOpenings = kind === "kickoff" && voice === "professional"
+            ? [...this.lines.entries()].filter(([id]) => id !== match.matchId).flatMap(([, matchLines]) => matchLines.filter((line) => line.eventType === "kickoff" && line.voice === "professional").map((line) => line.text)).slice(-3)
+            : [];
+          const response = await fetch(`${process.env.COMMENTARY_LLM_BASE_URL || "https://api.groq.com/openai/v1"}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model, max_tokens: kind === "kickoff" ? 100 : 70, temperature: voice === "witty" ? 0.8 : 0.5, messages: [
             { role: "system", content: system },
             // No fallback template is sent here. The model must write fresh, or
             // the template ships. Sending the fallback is what made the model
             // parrot the template verbatim.
-            { role: "user", content: JSON.stringify({ event: kind, facts, previousLines: lines.slice(-2).map((line) => line.text) }) },
+            { role: "user", content: JSON.stringify({ event: kind, facts, direction, replyTo, previousLines: lines.slice(-2).map((line) => ({ speaker: line.voice === "professional" ? "Dee" : "Rekt", text: line.text })), recentOpeningsToAvoid: recentOpenings }) },
           ] }) });
           if (!response.ok) {
             this.llmBackoffUntil.set(voice, Date.now() + (response.status === 429 ? 120_000 : response.status >= 500 ? 30_000 : 15 * 60_000));
@@ -271,6 +302,7 @@ export class CupCommentary {
             tokensUsed = body.usage?.total_tokens ?? 300;
             const allowedNumbers = new Set(Object.values(facts).filter((value) => typeof value === "number").flatMap((value) => String(value).match(/\d+(?:\.\d+)?/g) ?? []));
             const candidateNumbers = candidate?.match(/\d+(?:\.\d+)?/g) ?? [];
+            const requiredAddress = kind === "kickoff" ? (voice === "professional" ? "Rekt" : "Dee") : replyTo?.speaker;
             // The minute may appear as "16", "16th", or "16'". Kickoff, half-time,
             // and full-time lines do not need a minute: the score and the event
             // carry the meaning, and forcing one dropped good lines.
@@ -280,6 +312,7 @@ export class CupCommentary {
               : banned.test(candidate) ? "banned-word"
               : !candidate.includes(`${facts.scoreA}-${facts.scoreB}`) ? "missing-score"
               : !minuteOk ? "missing-minute"
+              : requiredAddress && !new RegExp(`\\b${requiredAddress}\\b`, "i").test(candidate) ? "missing-reply"
               : candidateNumbers.some((number) => !allowedNumbers.has(number)) ? "ungrounded-number"
               : null;
             if (candidate && !rejectReason) {
