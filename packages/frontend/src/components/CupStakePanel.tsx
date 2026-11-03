@@ -142,7 +142,11 @@ export function CupMatchStakePanel({
   const seed = pool?.seed ?? 0n;
   const totalPool = totals[0] + totals[1] + seed;
 
-  const resolvedWinner = match.state === CUP_STATE.Settled ? match.winner : pool?.winner;
+  const resolvedWinner = match.state === CUP_STATE.Settled
+    ? match.winner
+    : pool?.settled ? pool.winner : undefined;
+  const validWinner = resolvedWinner !== undefined && resolvedWinner !== CUP_TBD &&
+    (resolvedWinner === match.teamA || resolvedWinner === match.teamB);
   const iWon = settled &&
     ((resolvedWinner === match.teamA && (myStakeA ?? 0n) > 0n) ||
       (resolvedWinner === match.teamB && (myStakeB ?? 0n) > 0n));
@@ -331,8 +335,8 @@ export function CupMatchStakePanel({
             </>
           ) : (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {pool?.winner !== undefined && pool.winner !== CUP_TBD
-                ? `${CUP_TEAM_SYMBOLS[pool.winner] ?? "TBA"} won this match.`
+              {validWinner
+                ? `${CUP_TEAM_SYMBOLS[resolvedWinner!] ?? "TBA"} won this match.`
                 : "Match settled."}
             </p>
           )}

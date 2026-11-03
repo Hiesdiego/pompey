@@ -7,6 +7,7 @@ import { getPublicClient } from "./usePublicClient";
 import { CONTRACTS, globalFixtureId, PREDICTION_POOL_ABI } from "../lib/contracts";
 import { api } from "../lib/api";
 import { scanMarketClaims } from "../lib/marketClaims";
+import { scanCupClaims } from "../lib/cupClaims";
 
 export function useOpenClaimCount(): number {
   const { authenticated, playerAddress } = useTickr();
@@ -58,8 +59,10 @@ export function useOpenClaimCount(): number {
           }
         });
       }
-      const marketClaims = await scanMarketClaims(playerAddress);
-      setCount(open + marketClaims.length);
+      const [marketClaims, cupClaims] = await Promise.all([
+        scanMarketClaims(playerAddress), scanCupClaims(playerAddress),
+      ]);
+      setCount(open + marketClaims.length + cupClaims.length);
     } catch {
 
     }

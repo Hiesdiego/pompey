@@ -23,6 +23,8 @@ import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../compon
 import { TeamBadge } from "../../components/TeamBadge";
 import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, TEMPLATE_NAMES } from "../../lib/marketFactory";
 import { scanMarketClaims, type ClaimableMarket } from "../../lib/marketClaims";
+import { scanCupClaims, type ClaimableCupMatch } from "../../lib/cupClaims";
+import { CUP_POOL_ABI, cupTeamName } from "../../lib/cup";
 
 interface ClaimableMatch {
   kind: "match";
@@ -32,7 +34,7 @@ interface ClaimableMatch {
   voided: boolean;
 }
 
-type Claimable = ClaimableMatch | ClaimableMarket;
+type Claimable = ClaimableMatch | ClaimableMarket | ClaimableCupMatch;
 
 const CHUNK = 25;
 
@@ -119,12 +121,13 @@ export default function ClaimsPage() {
     setError(null);
     if (showLoading) setDone(false);
     try {
-      const [matches, markets, stats] = await Promise.all([
+      const [matches, markets, cups, stats] = await Promise.all([
         scanClaimable(playerAddress),
         scanMarketClaims(playerAddress),
+        scanCupClaims(playerAddress),
         api.player(playerAddress).catch(() => null),
       ]);
-      if (!claimingRef.current) setItems([...matches, ...markets]);
+      if (!claimingRef.current) setItems([...matches, ...markets, ...cups]);
       setPlayerStats(stats ? {
         totalStakedTick: stats.totalStakedTick,
         totalWonTick: stats.totalWonTick,
@@ -170,6 +173,14 @@ export default function ClaimsPage() {
             functionName: "claim",
             args: [BigInt(c.market.id)],
             label: `Claim market ${c.market.id}`,
+          });
+        } else if (c.kind === "cup") {
+          await write({
+            to: c.poolAddress,
+            abi: CUP_POOL_ABI,
+            functionName: "claimMatch",
+            args: [c.matchId],
+            label: `Claim cup match ${c.matchId + 1}`,
           });
         } else {
           if (!CONTRACTS.predictionPool) throw new Error("PredictionPool address not configured.");
@@ -358,6 +369,24 @@ export default function ClaimsPage() {
                 </div>
                 <span className="shrink-0 rounded-full bg-[#1D9E75]/12 px-3 py-1 text-xs font-bold text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]">
                   {c.market.state === 2 ? "Claim refund" : "Claim winnings"}
+                </span>
+              </Link>
+            ) : c.kind === "cup" ? (
+              <Link
+                key={`cup-${c.poolAddress}-${c.matchId}`}
+                href={`/cup/match/${c.matchId}`}
+                className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
+              >
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    {cupTeamName(c.teamA)} vs {cupTeamName(c.teamB)}
+                  </span>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Cup match {c.matchId + 1} · Winnings · {formatTick(c.amount)} TICK
+                  </span>
+                </div>
+                <span className="shrink-0 rounded-full bg-[#1D9E75]/12 px-3 py-1 text-xs font-bold text-[#0f7a55] dark:text-[#7fe0bd]">
+                  Claim winnings
                 </span>
               </Link>
             ) : (

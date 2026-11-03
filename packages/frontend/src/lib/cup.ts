@@ -243,6 +243,11 @@ export const CUP_REGISTRY_ABI = [
 
 /** CupPool reads + writes used by the UI. */
 export const CUP_POOL_ABI = [
+  { type: "error", name: "AlreadyClaimed", inputs: [] },
+  {
+    type: "function", name: "platformFeeBps", stateMutability: "view",
+    inputs: [], outputs: [{ type: "uint256" }],
+  },
   {
     type: "function",
     name: "liveMatchStakingEnabled",
