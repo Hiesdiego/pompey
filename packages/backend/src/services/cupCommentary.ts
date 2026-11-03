@@ -7,6 +7,7 @@ import type { PriceFeed } from "./priceFeed.js";
 import type { CupLifecycle, CupMatchView } from "./cupLifecycle.js";
 import { CUP_TEAM_SYMBOLS } from "./cupTeams.js";
 import { cupLiveScore, cupTieWinner } from "./cupCommentaryMath.js";
+import { commentaryCompletion, prepareCommentary } from "./cupCommentaryGeneration.js";
 
 type Voice = "professional" | "witty";
 type Kind = "kickoff" | "goal" | "chalked-off" | "pressure" | "stalemate" | "near-miss" | "ht" | "ft";
@@ -79,8 +80,8 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
       if (voice === "witty") {
         if (f.reply) return pick([`Dee, that chart found the net before I found a comeback. ${score} ${at}.`, `You called it, Dee; the scoreboard moved. ${score} ${at}.`]);
         return pick([
-          `The chart has spoken. ${score} ${at}.`,
-          `Somebody check on the other chart. ${score} ${at}.`,
+          `That defence has the structural integrity of a wet whitepaper. ${score} ${at}.`,
+          `The keeper is still waiting for transaction confirmation. ${score} ${at}.`,
           `That one counted, for now. ${score} ${at}.`,
           `The price moved and the scoreboard noticed. ${score} ${at}.`,
         ]);
@@ -96,8 +97,8 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
         if (f.reply) return pick([`Dee, that celebration had a short shelf life. ${score} ${at}.`, `That's a quick reversal, Dee. ${score} ${at}.`]);
         return pick([
           `The market took that goal back. ${score} ${at}.`,
-          `Never mind. The price changed its mind. ${score} ${at}.`,
-          `That goal has left the building. ${score} ${at}.`,
+          `They celebrated like it was final. Rookie mistake in this stadium. ${score} ${at}.`,
+          `Goal recalled. Apparently the celebration was on a free trial. ${score} ${at}.`,
           `Blink and the scoreboard changes. ${score} ${at}.`,
         ]);
       }
@@ -121,9 +122,9 @@ function templateFor(kind: Kind, voice: Voice, f: TemplateFacts): string {
       ]);
     case "stalemate":
       return pick([
-        `${score} ${at}. Both charts are making the booth work for it.`,
+        `${score} ${at}. I've seen more attacking intent in a loading screen.`,
         `${score} ${at}. A staring contest with a scoreboard.`,
-        `${score} ${at}. Neither chart is blinking.`,
+        `${score} ${at}. Both teams have read access. Neither has write access.`,
       ]);
   }
 }
@@ -224,7 +225,7 @@ export class CupCommentary {
     const state = this.states.get(match.matchId) ?? { scoreA: prior ? Number(prior.text.match(/\b(\d+)-(\d+)\b/)?.[1] ?? 0) : 0, scoreB: prior ? Number(prior.text.match(/\b(\d+)-(\d+)\b/)?.[2] ?? 0) : 0, lastMinute: -1, half: existing.some((line) => line.eventType === "ht"), lastMood: -10, lastWitty: -10, near: "", lastLine: 0 };
     this.states.set(match.matchId, state);
     const names = [CUP_TEAM_SYMBOLS[match.teamA], CUP_TEAM_SYMBOLS[match.teamB]];
-    const facts = { matchId: match.matchId, minute, teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, moveA: score.moveA, moveB: score.moveB };
+    const facts = { matchId: match.matchId, minute, teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, moveA: score.moveA, moveB: score.moveB, previousScore: `${state.scoreA}-${state.scoreB}` };
     const kickoffFacts = { teamA: names[0], teamB: names[1], scoreA: score.scoreA, scoreB: score.scoreB, minute };
     if (!existing.some((line) => line.eventType === "kickoff" && line.voice === "professional")) {
       await this.publish(match, "kickoff", "professional", facts, templateFor("kickoff", "professional", kickoffFacts), 0);
@@ -279,21 +280,24 @@ export class CupCommentary {
     const key = voice === "professional"
       ? process.env.COMMENTARY_LLM_PRO_API_KEY
       : process.env.COMMENTARY_LLM_WITTY_API_KEY;
+    const model = (voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MODEL : process.env.COMMENTARY_LLM_WITTY_MODEL) || (voice === "professional" ? "openai/gpt-oss-120b" : "openai/gpt-oss-20b");
+    const completion = commentaryCompletion(model, voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MAX_COMPLETION_TOKENS : process.env.COMMENTARY_LLM_WITTY_MAX_COMPLETION_TOKENS);
+    // Reserve context plus completion, including reasoning, before making a paid request.
+    const tokenReserve = completion.max_completion_tokens + 1200;
     const matchTokens = lines.reduce((total, line) => total + line.tokensUsed, 0);
-    if (process.env.COMMENTARY_ENABLED === "true" && key && !this.llmAttemptedEvents.has(eventId) && Date.now() >= (this.llmBackoffUntil.get(voice) ?? 0) && this.dailyTokens + 500 <= Number(process.env.COMMENTARY_DAILY_TOKEN_BUDGET || 30_000) && matchTokens + 500 <= Number(process.env.COMMENTARY_MATCH_TOKEN_BUDGET || 5_000)) {
+    if (process.env.COMMENTARY_ENABLED === "true" && key && !this.llmAttemptedEvents.has(eventId) && Date.now() >= (this.llmBackoffUntil.get(voice) ?? 0) && this.dailyTokens + tokenReserve <= Number(process.env.COMMENTARY_DAILY_TOKEN_BUDGET || 30_000) && matchTokens + tokenReserve <= Number(process.env.COMMENTARY_MATCH_TOKEN_BUDGET || 5_000)) {
       this.llmAttemptedEvents.add(eventId);
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5_000);
+        const timeout = setTimeout(() => controller.abort(), 12_000);
         try {
-          const model = voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MODEL : process.env.COMMENTARY_LLM_WITTY_MODEL;
           const previous = lines.at(-1);
           const replyTo = previous && previous.voice !== voice && previous.eventType === kind && (kind === "kickoff" || previous.minute === minute)
             ? { speaker: previous.voice === "professional" ? "Dee" : "Rekt", text: previous.text }
             : null;
           const system = voice === "professional"
-            ? "You are Dee, the lively but precise lead commentator for TICKR's Crypto Price World Cup. Keep the booth conversational. State the exact score and minute, and use only supplied match facts. Vary your openings. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI."
-            : "You are Rekt, the witty, dry colour commentator for TICKR's Crypto Price World Cup. Keep the booth conversational, sharp and varied. State the exact score and minute, and use only supplied match facts. A joke may be an opinion about the match, never a claim about real news or your finances. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI.";
+            ? "You are Dee, the lively but precise lead commentator for TICKR's Crypto Price World Cup. Keep the booth conversational. Write one or two short sentences, at most 160 characters. Use only supplied match facts. The producer appends the exact score and minute if omitted. Vary your openings. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI."
+            : "You are Rekt, the witty, dry colour commentator for TICKR's Crypto Price World Cup. Be a quick, mischievous football pundit with crypto-native humour: a specific setup and a surprising punchline about THIS match. Roast the performance, never the audience. Use contrasts, callbacks, understatements or absurd football imagery; vary the device. Avoid generic chart-has-spoken filler. Do not explain the joke. Write one or two short sentences, at most 160 characters. Use only supplied match facts. The producer appends the exact score and minute if omitted. A joke may be an opinion about the match, never a claim about real news or your finances. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI.";
           const direction = kind === "kickoff" && voice === "professional"
             ? "Open the broadcast by introducing both teams, then hand over to Rekt with a natural question. Use a different approach from previous openings."
             : replyTo
@@ -302,39 +306,35 @@ export class CupCommentary {
           const recentOpenings = kind === "kickoff" && voice === "professional"
             ? [...this.lines.entries()].filter(([id]) => id !== match.matchId).flatMap(([, matchLines]) => matchLines.filter((line) => line.eventType === "kickoff" && line.voice === "professional").map((line) => line.text)).slice(-3)
             : [];
-          const response = await fetch(`${process.env.COMMENTARY_LLM_BASE_URL || "https://api.groq.com/openai/v1"}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model, max_tokens: kind === "kickoff" ? 100 : 70, temperature: voice === "witty" ? 0.8 : 0.5, messages: [
+          const response = await fetch(`${process.env.COMMENTARY_LLM_BASE_URL || "https://api.groq.com/openai/v1"}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model, ...completion, temperature: voice === "witty" ? 1 : 0.7, messages: [
             { role: "system", content: system },
             // No fallback template is sent here. The model must write fresh, or
             // the template ships. Sending the fallback is what made the model
             // parrot the template verbatim.
-            { role: "user", content: JSON.stringify({ event: kind, facts, direction, replyTo, previousLines: lines.slice(-2).map((line) => ({ speaker: line.voice === "professional" ? "Dee" : "Rekt", text: line.text })), recentOpeningsToAvoid: recentOpenings }) },
+            { role: "user", content: JSON.stringify({ event: kind, facts, direction, replyTo, previousLines: lines.slice(-4).map((line) => ({ speaker: line.voice === "professional" ? "Dee" : "Rekt", text: line.text })), recentOpeningsToAvoid: recentOpenings }) },
           ] }) });
           if (!response.ok) {
+            logger.warn("[CupCommentary] LLM HTTP fallback", { matchId: match.matchId, voice, model, status: response.status });
             this.llmBackoffUntil.set(voice, Date.now() + (response.status === 429 ? 120_000 : response.status >= 500 ? 30_000 : 15 * 60_000));
           }
           if (response.ok) {
-            const body = await response.json() as { choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: number } };
-            const candidate = body.choices?.[0]?.message?.content?.trim().replace(/[“”]/g, "").replace(/[—–]/g, ",");
-            tokensUsed = body.usage?.total_tokens ?? 300;
+            const body = await response.json() as { choices?: { finish_reason?: string; message?: { content?: string } }[]; usage?: { total_tokens?: number } };
+            const raw = body.choices?.[0]?.message?.content?.trim();
+            const candidate = raw ? prepareCommentary(raw, facts) : null;
+            tokensUsed = body.usage?.total_tokens ?? tokenReserve;
             const allowedNumbers = new Set(Object.values(facts).filter((value) => typeof value === "number").flatMap((value) => String(value).match(/\d+(?:\.\d+)?/g) ?? []));
             const candidateNumbers = candidate?.match(/\d+(?:\.\d+)?/g) ?? [];
-            const requiredAddress = kind === "kickoff" ? (voice === "professional" ? "Rekt" : "Dee") : replyTo?.speaker;
-            // The minute may appear as "16", "16th", or "16'". Kickoff, half-time,
-            // and full-time lines do not need a minute: the score and the event
-            // carry the meaning, and forcing one dropped good lines.
-            const minuteOk = kind === "kickoff" || kind === "ht" || kind === "ft" || new RegExp(`\\b${minute}(?:th|st|nd|rd|'|′)?\\b`).test(candidate ?? "");
-            const rejectReason = !candidate ? "empty"
-              : candidate.length > 280 ? "too-long"
+            const rejectReason = body.choices?.[0]?.finish_reason === "length" ? "truncated"
+              : !raw ? "empty"
+              : !candidate ? "invalid-score-or-length"
               : banned.test(candidate) ? "banned-word"
-              : !candidate.includes(`${facts.scoreA}-${facts.scoreB}`) ? "missing-score"
-              : !minuteOk ? "missing-minute"
-              : requiredAddress && !new RegExp(`\\b${requiredAddress}\\b`, "i").test(candidate) ? "missing-reply"
               : candidateNumbers.some((number) => !allowedNumbers.has(number)) ? "ungrounded-number"
+              : lines.slice(-6).some((line) => line.text === candidate) ? "repeated-line"
               : null;
             if (candidate && !rejectReason) {
               text = candidate;
             } else {
-              logger.warn("[CupCommentary] LLM line rejected", { matchId: match.matchId, eventId, reason: rejectReason ?? "empty", candidate: candidate?.slice(0, 120) });
+              logger.warn("[CupCommentary] LLM line rejected", { matchId: match.matchId, eventId, voice, model, tokensUsed, finishReason: body.choices?.[0]?.finish_reason, reason: rejectReason ?? "empty", candidate: candidate?.slice(0, 120) });
             }
           }
         } finally { clearTimeout(timeout); }
@@ -342,6 +342,11 @@ export class CupCommentary {
         this.llmBackoffUntil.set(voice, Date.now() + 60_000);
         logger.warn("[CupCommentary] LLM fallback", { matchId: match.matchId, error: String(error) });
       }
+    } else {
+      const reason = process.env.COMMENTARY_ENABLED !== "true" ? "disabled" : !key ? "missing-key"
+        : Date.now() < (this.llmBackoffUntil.get(voice) ?? 0) ? "provider-backoff"
+        : this.llmAttemptedEvents.has(eventId) ? "already-attempted" : "token-budget";
+      logger.info("[CupCommentary] template fallback", { matchId: match.matchId, voice, reason, dailyTokens: this.dailyTokens, matchTokens, tokenReserve });
     }
     this.dailyTokens += tokensUsed;
     const { data, error } = await this.db!.from("cup_commentary_lines").insert({ match_id: String(match.matchId), minute, voice, text, event_type: kind, event_id: eventId, tokens_used: tokensUsed }).select("id,created_at").single();

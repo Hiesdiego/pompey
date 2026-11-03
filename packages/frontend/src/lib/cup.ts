@@ -13,13 +13,19 @@ function envAddress(value: string | undefined): Address | "" {
   return v === "" ? "" : (v as Address);
 }
 
+const LIVE_CUP_REGISTRY = "0x45b8f0ef96b919184659bee98c7503834d167238";
+const LIVE_MATCH_POOL: Address = "0x871d9d44296f1bd09db0c096e69a130c33d7bc48";
+const configuredRegistry = envAddress(process.env.NEXT_PUBLIC_CUP_REGISTRY_ADDRESS);
+const configuredPool = envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS);
+
 export const CUP_CONTRACTS = {
   tickToken: envAddress(process.env.NEXT_PUBLIC_CUP_TICK_TOKEN_ADDRESS),
-  registry: envAddress(process.env.NEXT_PUBLIC_CUP_REGISTRY_ADDRESS),
+  registry: configuredRegistry,
   engine: envAddress(process.env.NEXT_PUBLIC_CUP_ENGINE_ADDRESS),
   ballot: envAddress(process.env.NEXT_PUBLIC_CUP_BALLOT_ADDRESS),
-  pool: envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS),
-  matchPool: envAddress(process.env.NEXT_PUBLIC_CUP_MATCH_POOL_ADDRESS) || envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS),
+  pool: configuredPool,
+  matchPool: envAddress(process.env.NEXT_PUBLIC_CUP_MATCH_POOL_ADDRESS) ||
+    (configuredRegistry.toLowerCase() === LIVE_CUP_REGISTRY ? LIVE_MATCH_POOL : configuredPool),
 } as const;
 
 /** The 2026 Crypto Price World Cup runs Nov 1 through Nov 15 (UTC). */

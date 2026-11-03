@@ -171,7 +171,8 @@ export const config = {
     registry: optional("CUP_REGISTRY_ADDRESS", "") as `0x${string}`,
     engine: optional("CUP_ENGINE_ADDRESS", "") as `0x${string}`,
     pool: optional("CUP_POOL_ADDRESS", "") as `0x${string}`,
-    matchPool: optional("CUP_MATCH_POOL_ADDRESS", optional("CUP_POOL_ADDRESS", "")) as `0x${string}`,
+    matchPool: optional("CUP_MATCH_POOL_ADDRESS", optional("CUP_REGISTRY_ADDRESS", "").toLowerCase() === "0x45b8f0ef96b919184659bee98c7503834d167238"
+      ? "0x871d9d44296f1bd09db0c096e69a130c33d7bc48" : optional("CUP_POOL_ADDRESS", "")) as `0x${string}`,
     ballot: optional("CUP_BALLOT_ADDRESS", "") as `0x${string}`,
     tickIntervalMs: 30_000,
     r64StartDate: optional("CUP_R64_START_DATE", "2026-11-01"),

@@ -19,14 +19,38 @@ export interface CupLeaderboardRow {
 export const getCupLeaderboard = unstable_cache(async (): Promise<CupLeaderboardRow[]> => {
   const db = getSupabase();
   if (!db || !CUP_CONTRACTS.pool) throw new Error("Cup leaderboard is not configured");
-  const raw: Array<Record<string, string | number>> = [];
   const pageSize = 500;
-  for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await db.rpc("cup_leaderboard", { p_chain_id: ACTIVE_CHAIN_ID, p_pool_address: CUP_CONTRACTS.pool.toLowerCase(), p_match_pool_address: CUP_CONTRACTS.matchPool.toLowerCase() }).range(offset, offset + pageSize - 1);
-    if (error) throw new Error(`Cup leaderboard query failed: ${error.message}`);
-    const page = (data ?? []) as Array<Record<string, string | number>>;
-    raw.push(...page);
-    if (page.length < pageSize) break;
+  const oldPool = CUP_CONTRACTS.pool.toLowerCase();
+  const matchPool = CUP_CONTRACTS.matchPool.toLowerCase();
+  async function readRows(args: { p_chain_id: number; p_pool_address: string; p_match_pool_address?: string }) {
+    const rows: Array<Record<string, string | number>> = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await db!.rpc("cup_leaderboard", args).range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      const page = (data ?? []) as Array<Record<string, string | number>>;
+      rows.push(...page);
+      if (page.length < pageSize) return rows;
+    }
+  }
+  let raw: Array<Record<string, string | number>>;
+  try {
+    raw = await readRows({ p_chain_id: ACTIVE_CHAIN_ID, p_pool_address: oldPool, p_match_pool_address: matchPool });
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "PGRST202")) throw error;
+    const pools = oldPool === matchPool ? [oldPool] : [oldPool, matchPool];
+    const perPool = await Promise.all(pools.map((pool) => readRows({ p_chain_id: ACTIVE_CHAIN_ID, p_pool_address: pool })));
+    const merged = new Map<string, Record<string, string | number>>();
+    for (const rows of perPool) for (const row of rows) {
+      const wallet = String(row.wallet_address).toLowerCase();
+      const existing = merged.get(wallet);
+      const metrics = ["points", "correct", "predictions", "stake_bonus", "conviction_bonus", "x_bonus"] as const;
+      const next = existing ?? { ...row };
+      if (existing) for (const metric of metrics) next[metric] = Number(existing[metric]) + (metric === "predictions" && Number(row.points) === 0 ? 0 : Number(row[metric]));
+      // The original SQL counted a null left-join row as one prediction.
+      if (!existing && Number(next.points) === 0) next.predictions = 0;
+      merged.set(wallet, next);
+    }
+    raw = [...merged.values()].sort((a, b) => Number(b.points) - Number(a.points) || Number(b.correct) - Number(a.correct) || Number(b.predictions) - Number(a.predictions) || String(a.wallet_address).localeCompare(String(b.wallet_address)));
   }
   let previous = -1;
   let rank = 0;
