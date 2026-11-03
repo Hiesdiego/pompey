@@ -11,3 +11,15 @@ create table if not exists cup_commentary_lines (
 );
 create index if not exists cup_commentary_lines_match_idx on cup_commentary_lines (match_id, created_at);
 alter table cup_commentary_lines enable row level security;
+
+create table if not exists cup_momentum_samples (
+  match_id text not null,
+  minute smallint not null check (minute between 0 and 60),
+  recorded_at timestamptz not null,
+  move_a double precision not null,
+  move_b double precision not null,
+  score_a integer not null,
+  score_b integer not null,
+  primary key (match_id, minute)
+);
+alter table cup_momentum_samples enable row level security;

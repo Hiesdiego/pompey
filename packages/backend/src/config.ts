@@ -171,6 +171,7 @@ export const config = {
     registry: optional("CUP_REGISTRY_ADDRESS", "") as `0x${string}`,
     engine: optional("CUP_ENGINE_ADDRESS", "") as `0x${string}`,
     pool: optional("CUP_POOL_ADDRESS", "") as `0x${string}`,
+    matchPool: optional("CUP_MATCH_POOL_ADDRESS", optional("CUP_POOL_ADDRESS", "")) as `0x${string}`,
     ballot: optional("CUP_BALLOT_ADDRESS", "") as `0x${string}`,
     tickIntervalMs: 30_000,
     r64StartDate: optional("CUP_R64_START_DATE", "2026-11-01"),

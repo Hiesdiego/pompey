@@ -30,6 +30,7 @@ export interface SocialProfile {
   username: string;
   favouriteTeamId: number;
   cupFavouriteTeamId: number | null;
+  wcPoints: number | null;
   bio: string;
   stats: SocialProfileStats;
   seasonId: number;

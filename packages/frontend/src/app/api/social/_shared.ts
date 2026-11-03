@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabaseServer";
 import { currentSeasonId } from "@/lib/seasonServer";
 import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
+import { getCupLeaderboard } from "@/lib/cupLeaderboardServer";
 
 /** Returns { db } or { response } (503 when Supabase isn't configured). */
 export function dbOr503(): { db: SupabaseClient } | { response: Response } {
@@ -21,6 +22,7 @@ export interface ProfileDto {
   username: string;
   favouriteTeamId: number;
   cupFavouriteTeamId: number | null;
+  wcPoints: number | null;
   bio: string;
   stats: {
     marketsBacked: number;
@@ -94,6 +96,13 @@ export async function profileWithStats(
     .eq("creator", wallet);
   if (marketsError) throw new Error(`profile markets query failed: ${marketsError.message}`);
   const stateValues = [...states.values()];
+  let wcPoints: number | null = null;
+  try {
+    const cupScores = await getCupLeaderboard();
+    wcPoints = cupScores.find((score) => score.walletAddress === wallet)?.points ?? 0;
+  } catch (error) {
+    console.error("[social] WC points unavailable:", error);
+  }
 
   return {
     dto: {
@@ -101,6 +110,7 @@ export async function profileWithStats(
       username: row.username,
       favouriteTeamId: row.favourite_team_id,
       cupFavouriteTeamId: cupRow?.cup_favourite_team_id ?? null,
+      wcPoints,
       bio: row.bio ?? "",
       stats: {
         marketsBacked: states.size,

@@ -9,8 +9,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { CalendarDays, Gavel, ShieldCheck, Swords, Trophy, Users, X } from "lucide-react";
 import { useCupBracket } from "../../hooks/useCupBracket";
+import { useCupLiveStaking } from "../../hooks/useCupLiveStaking";
 import { CupMatchCard } from "../../components/CupMatchCard";
 import { Countdown } from "../../components/Countdown";
 import { CupFavoritePicker } from "../../components/CupFavoritePicker";
@@ -32,6 +34,7 @@ const ROUND_DATES = ["Nov 1–6", "Nov 7–9", "Nov 10–11", "Nov 12", "Nov 13"
 
 export default function CupPage() {
   const { matches, status, error, reload } = useCupBracket(true);
+  const liveStakingEnabled = useCupLiveStaking();
   const { authenticated, login, playerAddress } = useTickr();
   const { balance, refresh } = useTickBalance(playerAddress);
   const [round, setRound] = useState(0);
@@ -93,6 +96,7 @@ export default function CupPage() {
           <h1 className="font-display text-3xl font-black tracking-tight text-zinc-900 dark:text-white sm:text-5xl">
             Crypto Price <span className="bg-gradient-to-b from-amber-300 to-amber-600 bg-clip-text text-transparent">World Cup</span>
           </h1>
+          <Link href="/leaderboard" className="mt-4 inline-flex rounded-full border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-400/20 dark:text-amber-300">View WC leaderboard →</Link>
           <p className="mt-3 max-w-2xl text-sm text-zinc-600 dark:text-zinc-300 sm:text-base">
             64 cryptocurrencies. 63 knockout ties. One-hour matches decided by price
             performance — 1 goal per 0.5% move. Back match winners or call the
@@ -187,6 +191,7 @@ export default function CupPage() {
                   key={m.matchId}
                   match={m}
                   now={now}
+                  liveStakingEnabled={liveStakingEnabled}
                   onStake={(side) => setStakePick({ matchId: m.matchId, side })}
                 />
               ))}
@@ -206,7 +211,7 @@ export default function CupPage() {
           <li><strong className="text-zinc-900 dark:text-white">Scoring.</strong> 1 goal per 0.5% price move over the 1-hour match, half-up rounding. Negative moves count for the opponent — every tie produces a winner.</li>
           <li><strong className="text-zinc-900 dark:text-white">Tiebreak.</strong> Level on goals? The better raw price move advances (best-mover rule).</li>
           <li><strong className="text-zinc-900 dark:text-white">Pools.</strong> Parimutuel pools. Min stake 10 TICK.</li>
-          <li><strong className="text-zinc-900 dark:text-white">Staking windows.</strong> Match pools open once both teams are known and close at kickoff. The outright champion pool stays open until the final kicks off.</li>
+          <li><strong className="text-zinc-900 dark:text-white">Staking windows.</strong> Match pools open once both teams are known and close {liveStakingEnabled ? "five minutes before full time" : "at kickoff"}. The outright champion pool stays open until the final kicks off.</li>
           <li><strong className="text-zinc-900 dark:text-white">Circuit breaker.</strong> A ±30% raw price spike by either team inside the match window pauses settlement — scorelines alone never trigger it.</li>
           <li><strong className="text-zinc-900 dark:text-white">DAO disputes — full disclosure.</strong> When the breaker trips, ANYONE may open a 24-hour ballot (100 TICK fee to the treasury, one vote per wallet). Quorum is 5 votes; simple majority decides; a tie or no quorum means the result stands. A manipulated verdict disqualifies the offender and the opponent advances. The tournament owner cannot vote, cannot veto, and cannot decide — manipulation calls are DAO-only.</li>
         </ul>

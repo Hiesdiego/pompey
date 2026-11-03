@@ -21,6 +21,7 @@ import {
   CUP_TBD,
   CUP_TEAMS,
   CUP_TEAM_SYMBOLS,
+  cupMatchBettingOpen,
   cupTeamName,
   TICK_TOKEN_ABI,
 } from "../lib/cup";
@@ -30,6 +31,7 @@ import { formatTick, parseTickInput } from "../lib/format";
 import { cn } from "../lib/cn";
 import { getPublicClient } from "../hooks/usePublicClient";
 import { useContractWrite } from "../hooks/useContractWrite";
+import { useCupLiveStaking } from "../hooks/useCupLiveStaking";
 import { CupTeamBadge } from "./CupTeamBadge";
 
 type Step = "idle" | "approving" | "staking" | "claiming" | "done";
@@ -108,6 +110,8 @@ export function CupMatchStakePanel({
   onLogin,
   onStaked,
   bare = false,
+  poolAddress = CUP_CONTRACTS.matchPool,
+  claimOnly = false,
 }: {
   match: CupMatch;
   initialSide?: 0 | 1;
@@ -117,34 +121,31 @@ export function CupMatchStakePanel({
   onLogin: () => void;
   onStaked: () => void;
   bare?: boolean;
+  poolAddress?: Address | "";
+  claimOnly?: boolean;
 }) {
   const [side, setSide] = useState<0 | 1>(initialSide);
   const [amountStr, setAmountStr] = useState("10");
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const { write } = useContractWrite();
-  const { pool, myStakeA, myStakeB, reload } = useCupMatchPool(match.matchId, playerAddress);
-  const allowance = useTickAllowance(playerAddress, CUP_CONTRACTS.pool, step);
+  const liveStakingEnabled = useCupLiveStaking();
+  const { pool, myStakeA, myStakeB, reload } = useCupMatchPool(match.matchId, playerAddress, poolAddress);
+  const allowance = useTickAllowance(playerAddress, poolAddress, step);
 
   const amount = useMemo(() => parseTickInput(amountStr), [amountStr]);
   const now = Date.now();
-  const bettingOpen =
-    match.teamA !== CUP_TBD &&
-    match.teamB !== CUP_TBD &&
-    (match.state === CUP_STATE.Created || match.state === CUP_STATE.Open) &&
-    (match.kickoffMs === 0 || now < match.kickoffMs);
+  const bettingOpen = !claimOnly && cupMatchBettingOpen(match, now, liveStakingEnabled);
   const settled = match.state === CUP_STATE.Settled || pool?.settled;
 
   const totals: [bigint, bigint] = pool ? [pool.totalA, pool.totalB] : [0n, 0n];
   const seed = pool?.seed ?? 0n;
   const totalPool = totals[0] + totals[1] + seed;
 
-  const iWon =
-    settled &&
-    pool?.winner !== undefined &&
-    pool.winner !== CUP_TBD &&
-    ((pool.winner === match.teamA && (myStakeA ?? 0n) > 0n) ||
-      (pool.winner === match.teamB && (myStakeB ?? 0n) > 0n));
+  const resolvedWinner = match.state === CUP_STATE.Settled ? match.winner : pool?.winner;
+  const iWon = settled &&
+    ((resolvedWinner === match.teamA && (myStakeA ?? 0n) > 0n) ||
+      (resolvedWinner === match.teamB && (myStakeB ?? 0n) > 0n));
 
   const needsApproval = amount !== null && (allowance === null || allowance < amount);
   const balanceOk = amount !== null && balance !== null && balance >= amount;
@@ -152,8 +153,9 @@ export function CupMatchStakePanel({
 
   const handleStake = async () => {
     setError(null);
+    if (!cupMatchBettingOpen(match, Date.now(), liveStakingEnabled)) return setError(liveStakingEnabled ? "Staking closed five minutes before full time." : "Staking closed at kickoff.");
     if (!playerAddress) return setError("Connect your wallet first.");
-    if (!CUP_CONTRACTS.tickToken || !CUP_CONTRACTS.pool)
+    if (!CUP_CONTRACTS.tickToken || !poolAddress)
       return setError("Cup contracts not configured.");
     if (!amount) return setError("Enter a valid stake amount.");
     if (amount < BigInt(CUP_MIN_STAKE_TICK) * 10n ** 18n)
@@ -166,13 +168,13 @@ export function CupMatchStakePanel({
           to: CUP_CONTRACTS.tickToken,
           abi: TICK_TOKEN_ABI,
           functionName: "approve",
-          args: [CUP_CONTRACTS.pool, amount],
+          args: [poolAddress, amount],
           label: "TICK approval",
         });
       }
       setStep("staking");
       await write({
-        to: CUP_CONTRACTS.pool,
+        to: poolAddress,
         abi: CUP_POOL_ABI,
         functionName: "stakeMatch",
         args: [match.matchId, side, amount],
@@ -189,11 +191,11 @@ export function CupMatchStakePanel({
 
   const handleClaim = async () => {
     setError(null);
-    if (!CUP_CONTRACTS.pool) return;
+    if (!poolAddress) return;
     try {
       setStep("claiming");
       await write({
-        to: CUP_CONTRACTS.pool,
+        to: poolAddress,
         abi: CUP_POOL_ABI,
         functionName: "claimMatch",
         args: [match.matchId],
@@ -218,7 +220,7 @@ export function CupMatchStakePanel({
   return (
     <div className={bare ? "" : "glass rounded-2xl p-5"}>
       <h3 className="mb-1 font-display text-base font-bold text-zinc-900 dark:text-white">
-        Back a winner
+        {claimOnly ? "Existing cup position" : "Back a winner"}
       </h3>
 
       {bettingOpen && (
@@ -293,11 +295,11 @@ export function CupMatchStakePanel({
         </>
       )}
 
-      {!bettingOpen && !settled && match.state !== CUP_STATE.Disputed && (
+      {!claimOnly && !bettingOpen && !settled && match.state !== CUP_STATE.Disputed && (
         <p className="rounded-xl bg-black/5 p-4 text-center text-sm text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
           {match.teamA === CUP_TBD || match.teamB === CUP_TBD
             ? "Staking opens once both teams are known."
-            : "Staking closed — kickoff reached."}
+            : liveStakingEnabled ? "Staking closed — less than five minutes remain." : "Staking closed at kickoff."}
         </p>
       )}
 

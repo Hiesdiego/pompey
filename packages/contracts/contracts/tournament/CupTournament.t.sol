@@ -417,6 +417,42 @@ contract CupTournamentTest is Test {
         require(pool.getMatchStake(3, alice, 0) == 1_000 * 1e18, "stake not recorded");
     }
 
+    function test_MatchStakingClosesFiveMinutesBeforeFullTime() public {
+        _draw();
+        _reveal(0);
+        CupRegistry.CupMatch memory matchInfo = registry.getMatch(0);
+        vm.startPrank(alice);
+        tick.approve(address(pool), 10_000 * 1e18);
+        vm.warp(matchInfo.endTimestamp - 5 minutes - 1);
+        pool.stakeMatch(0, 0, 1_000 * 1e18);
+        vm.warp(matchInfo.endTimestamp - 5 minutes);
+        vm.expectRevert();
+        pool.stakeMatch(0, 0, 1_000 * 1e18);
+        vm.stopPrank();
+    }
+
+    function test_SidecarPoolClaimsAgainstExistingRegistry() public {
+        _draw();
+        _reveal(0);
+        vm.prank(owner);
+        CupPool sidecar = new CupPool(owner, address(tick), address(registry), treasury);
+        vm.startPrank(alice);
+        tick.approve(address(sidecar), 100 * 1e18);
+        sidecar.stakeMatch(0, 0, 100 * 1e18);
+        vm.stopPrank();
+        vm.startPrank(bob);
+        tick.approve(address(sidecar), 100 * 1e18);
+        sidecar.stakeMatch(0, 1, 100 * 1e18);
+        vm.stopPrank();
+        _submitAndSettle(0, 1012 * 1e7, 1001 * 1e7);
+        require(!sidecar.getMatchPool(0).settled, "sidecar settled by old engine");
+        uint256 beforeClaim = tick.balanceOf(alice);
+        vm.prank(alice);
+        sidecar.claimMatch(0);
+        require(sidecar.getMatchPool(0).settled, "sidecar not settled on claim");
+        require(tick.balanceOf(alice) > beforeClaim, "sidecar winner not paid");
+    }
+
     function test_CannotStakeLaterRoundUntilBothTeamsKnown() public {
         _draw();
         vm.startPrank(alice);

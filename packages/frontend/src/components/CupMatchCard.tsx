@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Clock } from "lucide-react";
 import type { CupMatch } from "../hooks/useCupBracket";
-import { CUP_STATE, CUP_TBD, cupRoundOf, CUP_ROUNDS, cupTeamName, cupScheduledKickoff } from "../lib/cup";
+import { CUP_STATE, cupMatchBettingOpen, cupRoundOf, CUP_ROUNDS, cupTeamName, cupScheduledKickoff } from "../lib/cup";
 import { Countdown } from "./Countdown";
 import { CupTeamBadge } from "./CupTeamBadge";
 
@@ -14,10 +14,10 @@ export function cupMatchStatus(match: CupMatch, now: number): "upcoming" | "live
   return "upcoming";
 }
 
-export function CupMatchCard({ match, now, onStake }: { match: CupMatch; now: number; onStake?: (side: 0 | 1) => void }) {
+export function CupMatchCard({ match, now, onStake, liveStakingEnabled = false }: { match: CupMatch; now: number; onStake?: (side: 0 | 1) => void; liveStakingEnabled?: boolean }) {
   const status = cupMatchStatus(match, now);
   const scored = status === "settled" || status === "live";
-  const stakable = status === "upcoming" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD;
+  const stakable = cupMatchBettingOpen(match, now, liveStakingEnabled);
   const scheduledKickoff = match.kickoffMs || cupScheduledKickoff(match.matchId);
   return <div className="group flex h-full flex-col"><Link href={`/cup/match/${match.matchId}`} className={`glass block flex-1 rounded-2xl !border-amber-400/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:!border-amber-400/60 hover:shadow-[0_12px_40px_rgba(251,191,36,.18)] ${status === "live" ? "!border-amber-400/60 shadow-[0_0_24px_rgba(251,191,36,.18)]" : ""}`}>
     <div className="mb-3 flex items-center justify-between">

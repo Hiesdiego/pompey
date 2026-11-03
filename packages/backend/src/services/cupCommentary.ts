@@ -20,6 +20,7 @@ export interface CommentaryLine {
   tokensUsed: number;
   createdAt: string;
 }
+export type CupMomentumSample = { minute: number; at: string; a: number; b: number; score: [number, number] };
 type State = { scoreA: number; scoreB: number; lastMinute: number; half: boolean; lastMood: number; lastWitty: number; near: string; lastLine: number };
 type Snapshot = { startA: bigint; startB: bigint; endA: bigint; endB: bigint; startSubmitted: boolean; endSubmitted: boolean };
 const snapshotAbi = [{ type: "function", name: "getSnapshot", stateMutability: "view", inputs: [{ name: "matchId", type: "uint16" }], outputs: [{ type: "tuple", components: [
@@ -138,6 +139,7 @@ export class CupCommentary {
   private busy = false;
   private dailyTokens = 0;
   private day = "";
+  private momentumReady = false;
 
   constructor(private readonly lifecycle: CupLifecycle, private readonly feed: PriceFeed, private readonly db: SupabaseClient | null) {}
 
@@ -145,6 +147,9 @@ export class CupCommentary {
     if (!this.db) { logger.warn("[CupCommentary] Supabase required; commentary disabled"); return; }
     const { error } = await this.db.from("cup_commentary_lines").select("id").limit(1);
     if (error) { logger.error("[CupCommentary] table unavailable; run backend/sql/cup-commentary.sql", { error: error.message }); return; }
+    const momentum = await this.db.from("cup_momentum_samples").select("match_id").limit(1);
+    this.momentumReady = !momentum.error;
+    if (momentum.error) logger.warn("[CupCommentary] momentum archive unavailable; run backend/sql/cup-commentary.sql", { error: momentum.error.message });
     await this.refreshDailyTokens();
     this.timer = setInterval(() => void this.tick(), 30_000);
     this.timer.unref?.();
@@ -169,6 +174,13 @@ export class CupCommentary {
     this.lines.set(matchId, lines);
     this.lineCacheAt.set(matchId, Date.now());
     return lines;
+  }
+
+  async getMomentum(matchId: number): Promise<CupMomentumSample[]> {
+    if (!this.db || !this.momentumReady) return [];
+    const { data, error } = await this.db.from("cup_momentum_samples").select("minute,recorded_at,move_a,move_b,score_a,score_b").eq("match_id", String(matchId)).order("minute", { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map((row) => ({ minute: row.minute, at: row.recorded_at, a: row.move_a, b: row.move_b, score: [row.score_a, row.score_b] }));
   }
 
   private async tick() {
@@ -204,6 +216,10 @@ export class CupCommentary {
       priceB = quoteB.scaled;
     }
     const score = cupLiveScore(snapshot.startA, snapshot.startB, priceA, priceB);
+    if (this.momentumReady) {
+      const { error } = await this.db!.from("cup_momentum_samples").insert({ match_id: String(match.matchId), minute, recorded_at: new Date(snapshot.endSubmitted ? match.kickoffMs + 60 * 60_000 : now).toISOString(), move_a: score.moveA, move_b: score.moveB, score_a: score.scoreA, score_b: score.scoreB });
+      if (error && error.code !== "23505") logger.warn("[CupCommentary] momentum archive write failed", { matchId: match.matchId, minute, error: error.message });
+    }
     const prior = [...existing].reverse().find((line) => line.eventType === "goal" || line.eventType === "chalked-off" || line.eventType === "kickoff");
     const state = this.states.get(match.matchId) ?? { scoreA: prior ? Number(prior.text.match(/\b(\d+)-(\d+)\b/)?.[1] ?? 0) : 0, scoreB: prior ? Number(prior.text.match(/\b(\d+)-(\d+)\b/)?.[2] ?? 0) : 0, lastMinute: -1, half: existing.some((line) => line.eventType === "ht"), lastMood: -10, lastWitty: -10, near: "", lastLine: 0 };
     this.states.set(match.matchId, state);

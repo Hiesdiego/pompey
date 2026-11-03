@@ -22,6 +22,15 @@ Coins are the teams. Price moves are the goals. You call the result, stake TICK,
 
 ---
 
+## 📊 Community snapshot · 31 October 2026
+
+| Metric | Today |
+|:--|--:|
+| **Testers (TU)** | **147** |
+| **Daily active users (DAU)** | **16** |
+
+---
+
 ## Documentation
 
 Read the [Tickr documentation](https://docs.tickrbase.top) for the rules, price sources, settlement and contracts. Its source lives in [`packages/docs`](packages/docs); run it locally with `pnpm --filter @tickr/docs dev`.

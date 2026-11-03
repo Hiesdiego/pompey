@@ -27,11 +27,10 @@ import { CupRegistry } from "./CupRegistry.sol";
 /// stakers, the ENTIRE pool goes to the Tickr treasury — no refunds. Swept
 /// atomically at settlement.
 ///
-/// Staking windows: the outright pool opens at deployment (closes at the
-/// draw). Per-match and spread pools open the moment both teams are known —
-/// right after the draw for R64, as soon as both winners advance for later
-/// rounds — and close at kickoff. No staking on a later-round match until
-/// its two teams are complete.
+/// Staking windows: the outright pool closes when the final kicks off.
+/// Per-match and spread pools open once both teams are known, including
+/// before kickoff is revealed. Match staking closes five minutes before
+/// full time; spread staking closes at kickoff.
 contract CupPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -170,8 +169,13 @@ contract CupPool is Ownable, ReentrancyGuard {
     // Per-match staking
     // ---------------------------------------------------------------------
 
+    /// @notice Lets clients distinguish this window from older pools that close at kickoff.
+    function liveMatchStakingEnabled() external pure returns (bool) {
+        return true;
+    }
+
     /// @notice Stake on side 0 (teamA) or side 1 (teamB). Open once both
-    /// teams are known and until kickoff arrives.
+    /// teams are known and until five minutes before full time.
     function stakeMatch(uint16 matchId, uint8 side, uint256 amount) external nonReentrant {
         if (amount < MIN_STAKE) revert StakeTooLow(amount, MIN_STAKE);
         if (side > 1) revert InvalidSide(side);
@@ -340,7 +344,18 @@ contract CupPool is Ownable, ReentrancyGuard {
     /// a DAO dispute resolves (pools then settle on the corrected result).
     function onMatchSettled(uint16 matchId, uint16 winner, int16 goalsA, int16 goalsB) external onlyEngine {
         CupRegistry.CupMatch memory m = registry.getMatch(matchId);
+        _settleMatch(matchId, winner, goalsA, goalsB, m);
+    }
 
+    /// @notice Sidecar pools can settle against the existing tournament registry.
+    /// The original engine remains wired to the original pool.
+    function settleMatchFromRegistry(uint16 matchId) external nonReentrant {
+        CupRegistry.CupMatch memory m = registry.getMatch(matchId);
+        if (m.state != CupRegistry.MatchState.Settled) revert NotSettled(matchId);
+        _settleMatch(matchId, m.winner, m.goalsA, m.goalsB, m);
+    }
+
+    function _settleMatch(uint16 matchId, uint16 winner, int16 goalsA, int16 goalsB, CupRegistry.CupMatch memory m) private {
         // Per-match pool.
         MatchPool storage p = _matchPools[matchId];
         if (!p.settled) {
@@ -385,7 +400,11 @@ contract CupPool is Ownable, ReentrancyGuard {
 
     function claimMatch(uint16 matchId) external nonReentrant {
         MatchPool storage p = _matchPools[matchId];
-        if (!p.settled) revert NotSettled(matchId);
+        if (!p.settled) {
+            CupRegistry.CupMatch memory result = registry.getMatch(matchId);
+            if (result.state != CupRegistry.MatchState.Settled) revert NotSettled(matchId);
+            _settleMatch(matchId, result.winner, result.goalsA, result.goalsB, result);
+        }
         if (_matchClaimed[matchId][msg.sender]) revert AlreadyClaimed();
 
         CupRegistry.CupMatch memory m = registry.getMatch(matchId);
@@ -482,8 +501,8 @@ contract CupPool is Ownable, ReentrancyGuard {
 
     /// @notice A match is stakable once both teams are known (right after
     /// the draw for R64; once both winners have advanced for later rounds)
-    /// and before its kickoff arrives. Kickoff reveal is NOT required —
-    /// this mirrors the league, where betting is open before reveal.
+    /// and before the final five minutes. Kickoff reveal is not required
+    /// for pre-match staking.
     function _bettingOpen(uint16 matchId) private view returns (bool) {
         if (!registry.drawExecuted()) return false;
         CupRegistry.CupMatch memory m = registry.getMatch(matchId);
@@ -491,7 +510,7 @@ contract CupPool is Ownable, ReentrancyGuard {
         if (m.state != CupRegistry.MatchState.Created && m.state != CupRegistry.MatchState.Open) {
             return false;
         }
-        return m.kickoffTimestamp == 0 || block.timestamp < m.kickoffTimestamp;
+        return m.endTimestamp == 0 || block.timestamp < m.endTimestamp - 5 minutes;
     }
 
     // ---------------------------------------------------------------------

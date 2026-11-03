@@ -8,6 +8,7 @@ import { CupTeamBadge } from "../../../components/CupTeamBadge";
 import { Countdown } from "../../../components/Countdown";
 import { StakeDialog } from "../../../components/StakeDialog";
 import { ShareButtons } from "../../../components/ShareButtons";
+import { CupXShare } from "../../../components/CupXShare";
 import { useCupBracket } from "../../../hooks/useCupBracket";
 import { useCupOutrightTotals } from "../../../hooks/useCupPool";
 import { useTickr } from "../../../hooks/useTickr";
@@ -46,6 +47,7 @@ export default function CupOutrightPage() {
   if (!cupConfigured) return <div className="mx-auto max-w-5xl py-10"><h1 className="font-display text-2xl font-black">World Cup market unavailable</h1><p className="mt-2 text-sm text-zinc-500">The Cup contracts are not configured on this network.</p></div>;
 
   return <div className="mx-auto min-w-0 max-w-5xl pb-28 lg:pb-0">
+    {playerAddress && <CupXShare walletAddress={playerAddress} marketKind="outright" marketId={0} />}
     <div className="mb-4 flex items-center justify-between gap-3"><Link href="/markets" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-amber-600"><ArrowLeft className="h-4 w-4" /> All markets</Link><ShareButtons path="/markets/cup-outright" text={`${QUESTION} — predict on TICKR`} compact /></div>
 
     <section className="relative mb-6 overflow-hidden rounded-[1.5rem] border border-black/[.08] bg-white p-5 text-zinc-900 shadow-[0_24px_80px_rgba(0,0,0,.12)] dark:border-white/10 dark:bg-[#0c111b] dark:text-white dark:shadow-[0_24px_80px_rgba(0,0,0,.28)] sm:rounded-[2rem] sm:p-9">

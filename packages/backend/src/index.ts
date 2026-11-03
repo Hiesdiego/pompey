@@ -48,6 +48,7 @@ import { buildRouter, type HealthReport } from "./api/routes.js";
 import { LiveWsServer } from "./api/wsServer.js";
 import { createSocialDb } from "./lib/supabase.js";
 import { SocialIndexer } from "./services/socialIndexer.js";
+import { CupLeaderboardIndexer } from "./services/cupLeaderboardIndexer.js";
 
 async function main(): Promise<void> {
 
@@ -139,6 +140,9 @@ async function main(): Promise<void> {
   const reader = new ChainReader();
   const chainCache = new ChainCache();
   const socialIndexer = new SocialIndexer(db, (marketId) => chainCache.markMarketDirty(marketId));
+  const cupLeaderboardIndexer = new CupLeaderboardIndexer(db);
+  const liveCupLeaderboardIndexer = config.cup.matchPool.toLowerCase() !== config.cup.pool.toLowerCase()
+    ? new CupLeaderboardIndexer(db, config.cup.matchPool) : null;
   chainCache.startWarmer();
 
 
@@ -244,6 +248,19 @@ async function main(): Promise<void> {
     }
     catch (error) { logger.error("[CupCommentary] read failed", { id, error: String(error) }); res.status(503).json({ error: "Commentary temporarily unavailable" }); }
   });
+  app.get("/api/cup/matches/:id/momentum", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 0 || id > 62) { res.status(400).json({ error: "Invalid World Cup match" }); return; }
+    if (!cupCommentary || !db) { res.status(503).json({ error: "World Cup momentum unavailable" }); return; }
+    try {
+      const samples = await cupCommentary.getMomentum(id);
+      res.setHeader("Cache-Control", "public, max-age=15, must-revalidate");
+      res.json({ samples });
+    } catch (error) {
+      logger.error("[CupCommentary] momentum read failed", { id, error: String(error) });
+      res.status(503).json({ error: "World Cup momentum temporarily unavailable" });
+    }
+  });
 
   app.use(
     (
@@ -299,6 +316,12 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error("[backend] social indexer failed to start", { error: String(err) });
     }
+    try {
+      await cupLeaderboardIndexer.start();
+      await liveCupLeaderboardIndexer?.start();
+    } catch (err) {
+      logger.error("[backend] cup leaderboard indexer failed to start", { error: String(err) });
+    }
   });
 
 
@@ -313,6 +336,8 @@ async function main(): Promise<void> {
     previousFactoryKeeper?.stop();
     newFactoryKeeper?.stop();
     socialIndexer.stop();
+    cupLeaderboardIndexer.stop();
+    liveCupLeaderboardIndexer?.stop();
     chainCache.stop();
     coinbase.stop();
     priceHeartbeat.stop();

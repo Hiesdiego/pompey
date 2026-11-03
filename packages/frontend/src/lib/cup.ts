@@ -19,6 +19,7 @@ export const CUP_CONTRACTS = {
   engine: envAddress(process.env.NEXT_PUBLIC_CUP_ENGINE_ADDRESS),
   ballot: envAddress(process.env.NEXT_PUBLIC_CUP_BALLOT_ADDRESS),
   pool: envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS),
+  matchPool: envAddress(process.env.NEXT_PUBLIC_CUP_MATCH_POOL_ADDRESS) || envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS),
 } as const;
 
 /** The 2026 Crypto Price World Cup runs Nov 1 through Nov 15 (UTC). */
@@ -44,6 +45,12 @@ export const CUP_TBD = 65535;
 
 /** Match states: 0=Created, 1=Open, 2=Settled, 3=Disputed. */
 export const CUP_STATE = { Created: 0, Open: 1, Settled: 2, Disputed: 3 } as const;
+
+export function cupMatchBettingOpen(match: { teamA: number; teamB: number; state: number; kickoffMs: number; endMs: number }, now: number, liveStakingEnabled: boolean): boolean {
+  return match.teamA !== CUP_TBD && match.teamB !== CUP_TBD
+    && (match.state === CUP_STATE.Created || match.state === CUP_STATE.Open)
+    && (liveStakingEnabled ? match.endMs === 0 || now < match.endMs - 5 * 60_000 : match.kickoffMs === 0 || now < match.kickoffMs);
+}
 
 export const CUP_MIN_STAKE_TICK = 10;
 export const CUP_FEE_BPS = 700;
@@ -230,6 +237,13 @@ export const CUP_REGISTRY_ABI = [
 
 /** CupPool reads + writes used by the UI. */
 export const CUP_POOL_ABI = [
+  {
+    type: "function",
+    name: "liveMatchStakingEnabled",
+    stateMutability: "pure",
+    inputs: [],
+    outputs: [{ type: "bool" }],
+  },
   {
     type: "function",
     name: "getMatchPool",

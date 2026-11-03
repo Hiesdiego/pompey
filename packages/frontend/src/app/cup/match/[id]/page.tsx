@@ -14,43 +14,51 @@ import { TradingViewChart } from "../../../../components/TradingViewChart";
 import { Countdown } from "../../../../components/Countdown";
 import { StakeDialog } from "../../../../components/StakeDialog";
 import { cupMatchStatus } from "../../../../components/CupMatchCard";
-import { CUP_FEE_BPS, CUP_ROUNDS, CUP_TBD, cupRoundOf, cupTeamName } from "../../../../lib/cup";
+import { CUP_CONTRACTS, CUP_FEE_BPS, CUP_ROUNDS, CUP_TBD, cupMatchBettingOpen, cupRoundOf, cupTeamName } from "../../../../lib/cup";
 import { EmptyState, ErrorState } from "../../../../components/States";
 import { formatTick } from "../../../../lib/format";
 import { ShareButtons } from "../../../../components/ShareButtons";
 import { CupCommentaryFeed } from "../../../../components/CupCommentaryFeed";
 import { CupLiveAnalyzer } from "../../../../components/CupLiveAnalyzer";
+import { CupXShare } from "../../../../components/CupXShare";
+import { CupOracleAuditCard } from "../../../../components/CupOracleAuditCard";
 import { useCupLiveMatch } from "../../../../hooks/useCupLiveMatch";
+import { useCupLiveStaking } from "../../../../hooks/useCupLiveStaking";
 
 export default function CupMatchPage() {
   const params = useParams<{ id: string }>();
   const matchId = Number(params.id);
   const { matches, error, reload } = useCupBracket(true);
+  const liveStakingEnabled = useCupLiveStaking();
   const { playerAddress, authenticated, login } = useTickr();
   const { balance, refresh } = useTickBalance(playerAddress);
   const { pool, myStakeA, myStakeB, reload: reloadPool } = useCupMatchPool(Number.isInteger(matchId) && matchId >= 0 && matchId <= 62 ? matchId : null, playerAddress);
+  const { myStakeA: oldStakeA, myStakeB: oldStakeB, reload: reloadOldPool } = useCupMatchPool(Number.isInteger(matchId) && matchId >= 0 && matchId <= 62 ? matchId : null, playerAddress, CUP_CONTRACTS.pool);
   const [now, setNow] = useState(() => Date.now());
   const [stakeOpen, setStakeOpen] = useState(false);
+  const [oldStakeOpen, setOldStakeOpen] = useState(false);
   const [chartsOpen, setChartsOpen] = useState(false);
   const currentMatch = matches?.[matchId];
-  const live = !!currentMatch && cupMatchStatus(currentMatch, now) === "live";
-  const liveMatch = useCupLiveMatch(matchId, currentMatch?.teamA, currentMatch?.teamB, live);
+  const currentStatus = currentMatch ? cupMatchStatus(currentMatch, now) : "upcoming";
+  const liveMatch = useCupLiveMatch(matchId, currentMatch?.teamA, currentMatch?.teamB, currentStatus);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   if (!Number.isInteger(matchId) || matchId < 0 || matchId > 62) return <EmptyState title="Match not found" message="Choose a World Cup match from the bracket." />;
   if (error) return <ErrorState message={error} onRetry={() => void reload()} />;
   const match = matches?.[matchId];
   if (!match) return <div className="glass h-64 animate-pulse rounded-3xl" />;
-  const status = cupMatchStatus(match, now);
-  const stakable = status === "upcoming" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD;
-  const onStaked = () => { void reload(); void reloadPool(); void refresh(); setStakeOpen(false); };
+  const status = currentStatus;
+  const stakable = cupMatchBettingOpen(match, now, liveStakingEnabled);
+  const onStaked = () => { void reload(); void reloadPool(); void reloadOldPool(); void refresh(); setStakeOpen(false); setOldStakeOpen(false); };
   const stakeA = myStakeA ?? 0n;
   const stakeB = myStakeB ?? 0n;
   const myTotal = stakeA + stakeB;
+  const oldTotal = (oldStakeA ?? 0n) + (oldStakeB ?? 0n);
   const poolTotal = pool ? pool.totalA + pool.totalB + pool.seed : 0n;
   const projected = (stake: bigint, sideTotal: bigint) => stake > 0n && sideTotal > 0n && poolTotal > 0n
     ? stake * (poolTotal * BigInt(10_000 - CUP_FEE_BPS) / 10_000n) / sideTotal : 0n;
   return <div>
     <Link href="/cup" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-amber-600"><ArrowLeft className="h-4 w-4" /> World Cup</Link>
+    {playerAddress && (myTotal > 0n || oldTotal > 0n) && <CupXShare walletAddress={playerAddress} marketKind="match" marketId={matchId} />}
     <div className="mb-4 flex items-center justify-between gap-3">
       <h1 className="font-display text-xl font-extrabold">{CUP_ROUNDS[cupRoundOf(matchId)].name} · Match {matchId + 1}</h1>
       {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <ShareButtons path={`/cup/match/${match.matchId}`} text={`${cupTeamName(match.teamA)} vs ${cupTeamName(match.teamB)} — Crypto Price World Cup on TICKR`} compact />}
@@ -69,7 +77,8 @@ export default function CupMatchPage() {
       <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10"><span>Real price performance</span><span>{status === "live" && liveMatch.moves ? `${liveMatch.moves[0].toFixed(2)}% · ${liveMatch.moves[1].toFixed(2)}%` : "Crypto Price World Cup"}</span></div>
     </div>
     {status === "live" && <p className="mb-4 text-center text-[11px] text-zinc-500">PLS means projected live score. It can change until the final oracle result.</p>}
-    {status === "live" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupLiveAnalyzer matchId={matchId} teamA={match.teamA} teamB={match.teamB} {...liveMatch} />}
+    {status !== "upcoming" && match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupLiveAnalyzer matchId={matchId} teamA={match.teamA} teamB={match.teamB} kickoffMs={match.kickoffMs} endMs={match.endMs} {...liveMatch} />}
+    {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupOracleAuditCard match={match} snapshot={liveMatch.snapshot} />}
     {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <CupCommentaryFeed matchId={matchId} phase={status} />}
     {match.teamA !== CUP_TBD && match.teamB !== CUP_TBD && <details className="glass group mb-6 rounded-2xl p-5" onToggle={(event) => setChartsOpen(event.currentTarget.open)}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-display text-sm font-bold marker:hidden"><span className="flex items-center gap-2"><Activity className="h-4 w-4 text-amber-600" /> Recent price movements</span><span className="text-xs font-semibold text-amber-700 group-open:hidden dark:text-amber-300">Show charts</span><span className="hidden text-xs font-semibold text-amber-700 group-open:inline dark:text-amber-300">Hide charts</span></summary>
@@ -78,7 +87,8 @@ export default function CupMatchPage() {
         <div><p className="mb-2 text-xs font-bold">{cupTeamName(match.teamB)}</p>{chartsOpen && <TradingViewChart teamId={match.teamB} cup />}</div>
       </div>
     </details>}
-    {stakable && <button onClick={() => setStakeOpen(true)} className="mb-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-3.5 font-display text-base font-extrabold text-black shadow-[0_0_28px_rgba(251,191,36,.4)]">Stake on this match</button>}
+    {stakable && <button onClick={() => setStakeOpen(true)} className="mb-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-3.5 font-display text-base font-extrabold text-black shadow-[0_0_28px_rgba(251,191,36,.4)]">Stake on this match · closes {liveStakingEnabled ? "5 minutes before full time" : "at kickoff"}</button>}
+    {CUP_CONTRACTS.matchPool !== CUP_CONTRACTS.pool && playerAddress && oldTotal > 0n && <button onClick={() => setOldStakeOpen(true)} className="mb-6 w-full rounded-2xl border border-amber-400/40 p-4 text-left font-semibold">Original pool position: {formatTick(oldTotal)} TICK · View and claim</button>}
     {playerAddress && myTotal > 0n && <section className="glass mb-6 rounded-2xl p-5 sm:p-6">
       <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-amber-700 dark:text-amber-300">Stake tracker</p><h2 className="mt-1 font-display text-lg font-extrabold">Your position</h2></div><div className="text-right"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Total staked</p><p className="font-display text-lg font-extrabold tabular-nums">{formatTick(myTotal)} TICK</p></div></div>
       <div className="grid gap-3 sm:grid-cols-2">{([0, 1] as const).map((side) => {
@@ -93,5 +103,6 @@ export default function CupMatchPage() {
     {status === "settled" && <div className="glass mb-6 rounded-2xl border-amber-400/25 p-5 text-center"><Trophy className="mx-auto mb-2 h-5 w-5 text-amber-500" /><p className="font-bold">{cupTeamName(match.winner)} wins</p><button onClick={() => setStakeOpen(true)} className="mt-3 text-sm font-semibold text-amber-700 dark:text-amber-300">View your stake and claim</button></div>}
     {status === "disputed" && <p className="glass rounded-2xl p-5 text-sm">This match is under DAO review. Settlement is paused until the ballot resolves.</p>}
     {stakeOpen && <StakeDialog title={`${cupTeamName(match.teamA)} vs ${cupTeamName(match.teamB)}`} onClose={() => setStakeOpen(false)}><div className="mb-4 flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-amber-700 dark:text-amber-300">Your prediction</p><h3 className="mt-1 truncate font-display text-lg font-extrabold">{cupTeamName(match.teamA)} vs {cupTeamName(match.teamB)}</h3></div><button onClick={() => setStakeOpen(false)} aria-label="Close" className="shrink-0 rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-black/5 dark:hover:bg-white/10"><X className="h-5 w-5" /></button></div><CupMatchStakePanel match={match} bare playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={() => { setStakeOpen(false); login(); }} onStaked={onStaked} /></StakeDialog>}
+    {oldStakeOpen && <StakeDialog title="Original pool position" onClose={() => setOldStakeOpen(false)}><CupMatchStakePanel match={match} bare claimOnly poolAddress={CUP_CONTRACTS.pool} playerAddress={playerAddress} balance={balance} authenticated={authenticated} onLogin={() => { setOldStakeOpen(false); login(); }} onStaked={onStaked} /></StakeDialog>}
   </div>;
 }

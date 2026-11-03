@@ -20,18 +20,18 @@ export interface CupMatchPool {
 
 const POLL_MS = 30_000;
 
-export function useCupMatchPool(matchId: number | null, playerAddress: Address | null) {
+export function useCupMatchPool(matchId: number | null, playerAddress: Address | null, poolAddress: Address | "" = CUP_CONTRACTS.matchPool) {
   const [pool, setPool] = useState<CupMatchPool | null>(null);
   const [myStakeA, setMyStakeA] = useState<bigint | null>(null);
   const [myStakeB, setMyStakeB] = useState<bigint | null>(null);
   const aliveRef = useRef(true);
 
   const load = useCallback(async () => {
-    if (!cupConfigured || matchId === null) return;
+    if (!cupConfigured || matchId === null || !poolAddress) return;
     try {
       const client = getPublicClient();
       const p = (await client.readContract({
-        address: CUP_CONTRACTS.pool as `0x${string}`,
+        address: poolAddress,
         abi: CUP_POOL_ABI,
         functionName: "getMatchPool",
         args: [matchId],
@@ -53,13 +53,13 @@ export function useCupMatchPool(matchId: number | null, playerAddress: Address |
       if (playerAddress) {
         const [a, b] = await Promise.all([
           client.readContract({
-            address: CUP_CONTRACTS.pool as `0x${string}`,
+            address: poolAddress,
             abi: CUP_POOL_ABI,
             functionName: "getMatchStake",
             args: [matchId, playerAddress, 0],
           }),
           client.readContract({
-            address: CUP_CONTRACTS.pool as `0x${string}`,
+            address: poolAddress,
             abi: CUP_POOL_ABI,
             functionName: "getMatchStake",
             args: [matchId, playerAddress, 1],
@@ -75,7 +75,7 @@ export function useCupMatchPool(matchId: number | null, playerAddress: Address |
     } catch {
       // Pool may not exist yet (not seeded) — leave as null.
     }
-  }, [matchId, playerAddress]);
+  }, [matchId, playerAddress, poolAddress]);
 
   useEffect(() => {
     aliveRef.current = true;
