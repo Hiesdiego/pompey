@@ -58,7 +58,7 @@ No casino vibes. No isolated yes/no questions. A season you can belong to.
 
 ```mermaid
 flowchart LR
-    A[⛽ Binance prices] --> B[📸 Snapshots at kickoff & FT]
+    A[Coinbase prices - primary] --> B[📸 Snapshots at kickoff & FT]
     B --> C[⚽ Price moves → goals]
     C --> D[⛓️ Result settled on-chain]
     D --> E[🏆 League table updates]
@@ -73,6 +73,28 @@ flowchart LR
 5. **The table moves.** 3 points for a win, 1 for a draw — just like football.
 
 Full scoring math, worked examples, and the audit guide live on the [About page](https://tickrbase.top/about).
+
+## Price data: Coinbase first
+
+Coinbase Exchange is the primary price source for configured teams. The default order is **Coinbase, then Binance, then CoinGecko**. Binance supplies a fallback when a fresh Coinbase quote is unavailable or the team has no configured Coinbase pair; CoinGecko is the final fallback. The current backend polls Coinbase and Binance through REST.
+
+Every candidate must pass its freshness limit. The selected price is checked against every other fresh source, including Binance as a cross-check; excessive disagreement blocks the snapshot. If no fresh price is available, the backend retries rather than inventing one. League end snapshots can prefer the source used at kickoff for consistency, falling back to the default order if that source is unavailable.
+
+See [Price sources](https://docs.tickrbase.top/price-sources) and the [feed implementation](packages/backend/src/services/priceFeed.ts).
+
+## AI agentic commentators: DEE and REKT
+
+The Crypto Price World Cup has an automated two-voice commentary booth. **DEE** leads with match analysis; **REKT** brings blunt verdicts, crypto humour, and self-roasts. Both use supplied match facts, full coin names or nicknames, and the same standards for either team.
+
+- **Before kickoff:** previews begin within the final five minutes. DEE sets up the encounter and asks REKT for his take. They can weigh tournament form and offer tentative predictions.
+- **During play:** kickoff, goals, score reversals, pressure, near misses, half-time, and full-time follow validated prices and snapshot-based scores.
+- **After settlement:** DEE and REKT review the result against their actual earlier previews. They recognize each round from the Round of 64 through the Final, where the winner becomes champion.
+- **News context:** an optional trusted editorial feed supplies recent headlines with source links. Without a configured feed, previews use tournament form. Possible price effects are discussed conditionally.
+- **Share the booth:** individual lines have permanent links and downloadable PNG cards, with sharing to X. Post-match commentary also promotes TICKR on X.
+
+Commentary is entertainment and analysis; official results and payouts come from the contracts. Language-model generation uses separate voice settings, token budgets, timeouts, and provider backoff. Templates keep commentary running when generation is disabled or unavailable, provided the commentary database is configured.
+
+For setup, apply [cup-commentary.sql](packages/backend/sql/cup-commentary.sql), configure Supabase and the `COMMENTARY_*` variables in [the backend environment example](packages/backend/.env.example), and restart the backend. Existing databases also need the SQL update permitting longer previews and verdicts. See [AI commentators](https://docs.tickrbase.top/ai-commentators) and [Commentary setup](https://docs.tickrbase.top/commentary-setup).
 
 ## 🏟 Markets beyond fixtures
 
@@ -141,8 +163,9 @@ flowchart TB
 | Package | What it is |
 |---|---|
 | [`packages/frontend`](packages/frontend) | Next.js app — fixtures, staking, markets, profiles, leaderboards. Privy embedded wallets, gasless transactions. |
-| [`packages/backend`](packages/backend) | Price engine + settlement bot. Binance WS primary, CoinGecko fallback. Submits kickoff/FT snapshots, settles fixtures. |
+| [`packages/backend`](packages/backend) | Price engine, settlement bot, and AI agentic Cup commentators. Coinbase primary, Binance fallback, then CoinGecko. Submits kickoff/FT snapshots and settles fixtures. |
 | [`packages/contracts`](packages/contracts) | Solidity — registries, scoring engine, pools, market factory. Hardhat + Ignition. |
+| [`packages/docs`](packages/docs) | Documentation app covering rules, price sources, settlement, World Cup, and AI commentary. |
 | [`packages/shared`](packages/shared) | Team lists, chain config, constants shared across the monorepo. |
 
 ## 🚀 Run it locally
@@ -183,6 +206,9 @@ Full whitepaper version: [tickrbase.top/roadmap](https://tickrbase.top/roadmap)
 
 Contact: [contact@tickrbase.top](mailto:contact@tickrbase.top)
 
+- [Price sources](https://docs.tickrbase.top/price-sources) - Coinbase priority, fallbacks, and validation
+- [AI commentators](https://docs.tickrbase.top/ai-commentators) - DEE and REKT, previews, verdicts, and sharing
+- [Commentary setup](https://docs.tickrbase.top/commentary-setup) - database, models, budgets, and news feed
 - [How to play](https://tickrbase.top/how-to-play) — the player's guide
 - [About TICKR](https://tickrbase.top/about) — scoring math, leaderboards, audits, decentralization
 - [Build spec](tickr-build-spec%20(1).md) — the original v0.1 spec
