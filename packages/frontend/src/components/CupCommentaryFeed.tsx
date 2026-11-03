@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { Activity, ArrowDown, Mic2, Radio, RefreshCw, Sparkles } from "lucide-react";
+import { CupCommentaryShare } from "./CupCommentaryShare";
 import { BACKEND_API_URL } from "../lib/contracts";
 
 type Line = { id: string; minute: number; voice: "professional" | "witty"; text: string; eventType: string; createdAt: string };
-const LABELS: Record<string, string> = { kickoff: "Kickoff", goal: "Goal", "chalked-off": "Score revised", "near-miss": "Close call", pressure: "Pressure", stalemate: "Stalemate", ht: "Half-time", ft: "Full-time" };
+const LABELS: Record<string, string> = { preview: "Pre-match preview", review: "Post-match verdict", kickoff: "Kickoff", goal: "Goal", "chalked-off": "Score revised", "near-miss": "Close call", pressure: "Pressure", stalemate: "Stalemate", ht: "Half-time", ft: "Full-time" };
 type Phase = "upcoming" | "live" | "awaiting" | "settled" | "disputed";
 
 export function CupCommentaryFeed({ matchId, phase }: { matchId: number; phase: Phase }) {
-  const active = phase === "live" || phase === "awaiting" || phase === "disputed";
-  const pollMs = phase === "live" ? 30_000 : phase === "awaiting" ? 60_000 : 300_000;
+  const active = true;
+  const pollMs = phase === "live" || phase === "upcoming" ? 30_000 : 60_000;
   const [lines, setLines] = useState<Line[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [refresh, setRefresh] = useState(0);
@@ -79,11 +80,11 @@ export function CupCommentaryFeed({ matchId, phase }: { matchId: number; phase: 
     <div className="px-5 py-5 sm:px-7 sm:py-6">
       {status === "loading" && !lines.length ? <div className="space-y-4" aria-label="Loading commentary"><div className="h-4 w-1/3 animate-pulse rounded bg-amber-500/10" /><div className="h-16 animate-pulse rounded-xl bg-black/[.04] dark:bg-white/[.04]" /></div>
         : status === "error" && !lines.length ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/20 bg-amber-500/[.05] p-4"><p className="text-sm text-zinc-600 dark:text-zinc-300">The booth is temporarily out of reach.</p><button type="button" onClick={() => setRefresh((value) => value + 1)} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 hover:underline dark:text-amber-300"><RefreshCw className="h-3.5 w-3.5" /> Try again</button></div>
-        : !lines.length ? <div className="flex items-start gap-3 rounded-xl border border-dashed border-amber-400/30 bg-amber-500/[.04] p-5"><Mic2 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" /><div><p className="text-sm font-bold">{phase === "upcoming" ? "The booth opens at kickoff" : "Commentary is on its way"}</p><p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Updates appear here as the World Cup match unfolds.</p></div></div>
+        : !lines.length ? <div className="flex items-start gap-3 rounded-xl border border-dashed border-amber-400/30 bg-amber-500/[.04] p-5"><Mic2 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" /><div><p className="text-sm font-bold">{phase === "upcoming" ? "Previews begin five minutes before kickoff" : "Commentary is on its way"}</p><p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Updates appear here as the World Cup match unfolds.</p></div></div>
         : <ol className="relative ml-4 border-l border-amber-400/30 pl-6 sm:ml-5 sm:pl-8">{lines.map((line) => {
           const pro = line.voice === "professional";
           const major = line.eventType === "goal" || line.eventType === "chalked-off" || line.eventType === "ft";
-          return <li key={line.id} className="relative pb-5 last:pb-0"><span className={`absolute -left-[31px] top-3 h-3 w-3 rounded-full border-2 border-white dark:border-[#17130b] sm:-left-[39px] ${major ? "bg-amber-500 ring-4 ring-amber-500/15" : pro ? "bg-blue-500" : "bg-violet-500"}`} /><article className={`rounded-2xl border px-4 py-3.5 sm:px-5 ${major ? "border-amber-400/30 bg-amber-500/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.08] dark:bg-white/[.025]"}`}><div className="mb-2 flex flex-wrap items-center gap-2"><span className="font-display text-xs font-black tabular-nums text-amber-700 dark:text-amber-300">{line.minute}&prime;</span><span className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${pro ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-violet-500/10 text-violet-700 dark:text-violet-300"}`}>{pro ? "Dee · Lead" : "Rekt · Colour"}</span><span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">{LABELS[line.eventType] ?? "Match update"}</span>{!pro && <Sparkles className="h-3 w-3 text-violet-500" />}</div><p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-100 sm:text-[15px]">{line.text}</p></article></li>;
+          return <li key={line.id} className="relative pb-5 last:pb-0"><span className={`absolute -left-[31px] top-3 h-3 w-3 rounded-full border-2 border-white dark:border-[#17130b] sm:-left-[39px] ${major ? "bg-amber-500 ring-4 ring-amber-500/15" : pro ? "bg-blue-500" : "bg-violet-500"}`} /><article className={`group rounded-2xl border px-4 py-3.5 sm:px-5 ${major ? "border-amber-400/30 bg-amber-500/[.07]" : "border-black/[.06] bg-black/[.02] dark:border-white/[.08] dark:bg-white/[.025]"}`}><div className="mb-2 flex flex-wrap items-center gap-2"><span className="font-display text-xs font-black tabular-nums text-amber-700 dark:text-amber-300">{line.eventType === "preview" ? "PRE" : line.eventType === "review" ? "POST" : `${line.minute} min`}</span><span className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${pro ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-violet-500/10 text-violet-700 dark:text-violet-300"}`}>{pro ? "Dee · Lead" : "Rekt · Colour"}</span><span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">{LABELS[line.eventType] ?? "Match update"}</span>{!pro && <Sparkles className="h-3 w-3 text-violet-500" />}<CupCommentaryShare matchId={matchId} line={line} /></div><p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-100 sm:text-[15px]">{line.text}</p></article></li>;
         })}</ol>}
       {status === "error" && lines.length > 0 && <p className="mt-4 text-xs text-amber-700 dark:text-amber-300">Showing the latest available commentary. Updates will resume when the connection returns.</p>}
     </div>

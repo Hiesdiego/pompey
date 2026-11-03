@@ -92,3 +92,23 @@ export const CUP_TEAM_PRICE_MAP: TeamPriceMap[] = DEFS.map((d) => ({
 export const CUP_TEAM_SYMBOLS: Record<number, string> = Object.fromEntries(
   DEFS.map((d) => [d.teamId, d.symbol])
 );
+
+// Broadcast identities are independent of exchange tickers and price routing.
+export const CUP_TEAM_NAMES = [
+  "Bitcoin", "Ethereum", "BNB", "XRP", "Solana", "Tron", "Hyperliquid", "Zcash",
+  "Dogecoin", "Chainlink", "Cardano", "NEAR Protocol", "Litecoin", "Avalanche", "Shiba Inu", "Official Trump",
+  "Stellar", "Uniswap", "Bitcoin Cash", "Walrus", "Hedera", "Sui", "Toncoin", "Bittensor",
+  "Tether Gold", "Pump.fun", "Worldcoin", "Ethena", "Quant", "Aave", "Ondo Finance", "Polkadot",
+  "Aster", "World Liberty Financial", "Arbitrum", "Internet Computer", "Pepe", "Sky", "Ore", "Filecoin",
+  "Ethereum Classic", "JUST", "Jupiter", "Algorand", "Raydium", "Polygon", "Render", "Cosmos",
+  "Injective", "Toshi", "Midnight", "PancakeSwap", "Virtuals Protocol", "Pyth Network", "Dash", "Curve DAO",
+  "Optimism", "Celestia", "VeChain", "Starknet", "Pudgy Penguins", "Sei", "Axie Infinity", "Immutable",
+] as const;
+export const CUP_TEAM_NICKNAMES: Record<number, string> = {
+  0: "the original heavyweight", 1: "the smart-contract heavyweight", 4: "the speedster",
+  8: "the original meme dog", 14: "the Shiba pack", 36: "the frog", 60: "the penguins",
+};
+export function cupRoundName(matchId: number): string {
+  return matchId < 32 ? "Round of 64" : matchId < 48 ? "Round of 32" : matchId < 56 ? "Round of 16"
+    : matchId < 60 ? "Quarter-final" : matchId < 62 ? "Semi-final" : "Final";
+}

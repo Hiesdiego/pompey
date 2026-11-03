@@ -37,6 +37,8 @@ create unique index if not exists cup_x_shares_post_idx on cup_x_shares (chain_i
 
 -- One score per wallet and market. Repeated stakes increase size, never the
 -- participation count. A market with multiple outcomes cannot earn conviction.
+-- Start from every profile and LEFT JOIN scores so accounts without any Cup
+-- activity remain on the leaderboard with zero points.
 create or replace function cup_leaderboard(p_chain_id bigint, p_pool_address text, p_match_pool_address text)
 returns table (wallet_address text, username text, points bigint, correct bigint, predictions bigint,
   stake_bonus bigint, conviction_bonus bigint, x_bonus bigint)

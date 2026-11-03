@@ -23,3 +23,7 @@ create table if not exists cup_momentum_samples (
   primary key (match_id, minute)
 );
 alter table cup_momentum_samples enable row level security;
+
+-- Preview uses minute 0; longer exchanges support sourced context and verdicts.
+alter table cup_commentary_lines drop constraint if exists cup_commentary_lines_text_check;
+alter table cup_commentary_lines add constraint cup_commentary_lines_text_check check (char_length(text) <= 700);

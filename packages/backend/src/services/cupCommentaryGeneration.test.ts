@@ -20,3 +20,17 @@ test("accepts normal score punctuation without changing match facts", () => {
   assert.equal(prepareCommentary("BTC lead 3-0 in the 16th minute.", facts), null);
   assert.equal(prepareCommentary("x".repeat(280), facts), null);
 });
+
+
+test("previews do not acquire a live score or accept invented score predictions", () => {
+  assert.equal(prepareCommentary("Bitcoin gets my tentative vote. REKT?", { teamA: "Bitcoin", teamB: "Ethereum", minute: 0 }, "preview"), "Bitcoin gets my tentative vote. REKT?");
+  assert.equal(prepareCommentary("Bitcoin wins 3-0.", facts, "preview"), null);
+});
+
+test("reviews allow fuller analysis but reject conflicting results and oversized text", () => {
+  const verdict = "I overhyped the favourite. ".repeat(12);
+  assert.equal(prepareCommentary(verdict, facts, "review"), verdict.trim());
+  assert.equal(prepareCommentary("It ended 3-0.", facts, "review"), null);
+  assert.equal(prepareCommentary("It ended 2-0.", facts, "review"), "It ended 2-0.");
+  assert.equal(prepareCommentary("x".repeat(701), facts, "review"), null);
+});

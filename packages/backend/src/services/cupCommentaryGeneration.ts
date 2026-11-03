@@ -6,7 +6,14 @@ export function commentaryCompletion(model: string, configured?: string) {
   return { max_completion_tokens: limit, ...(reasoning ? { reasoning_effort: "low" } : {}) };
 }
 
-export function prepareCommentary(candidate: string, facts: Record<string, string | number>): string | null {
+export function prepareCommentary(candidate: string, facts: Record<string, string | number>, kind = "live"): string | null {
+  if (kind === "preview" || kind === "review") {
+    const text = candidate.trim();
+    if (text.length > 700) return null;
+    if (kind === "preview" && /\b\d+\s*-\s*\d+\b/.test(text)) return null;
+    if (kind === "review" && (text.match(/\b\d+\s*-\s*\d+\b/g) ?? []).some((score) => score.replace(/\s/g, "") !== `${facts.scoreA}-${facts.scoreB}`)) return null;
+    return text;
+  }
   const score = `${facts.scoreA}-${facts.scoreB}`;
   let text = candidate.trim().replace(/[“”]/g, '"').replace(/[–—]/g, "-");
   // Reject conflicting scores rather than quietly correcting a hallucination.
