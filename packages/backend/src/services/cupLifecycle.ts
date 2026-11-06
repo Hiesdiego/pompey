@@ -10,8 +10,8 @@
  *   2. REVEAL — R64 (matches 0–31): deterministic staggered kickoffs across
  *      Nov 1–6, revealed as soon as the draw is detected. Later rounds:
  *      revealed only when BOTH feeder matches are Settled (the contract
- *      enforces this too), kickoff = now + lead, clamped into the round's
- *      date window so the published schedule holds.
+ *      enforces this too), with a deterministic per-match slot and a
+ *      collision-free fallback when a slot has passed.
  *   3. START — now >= kickoff and no start snapshot: validate both teams'
  *      prices → CupEngine.submitStartPrice.
  *   4. END — now >= kickoff + 1h: CupEngine.submitEndPrice. Late-start
@@ -201,6 +201,41 @@ const R64_DAY_OFFSETS: number[] = [
   5, 5, 5, 5, 5,
 ];
 
+// First matchId of each round, by roundOf() index: R64, R32, R16, QF, SF, Final.
+const ROUND_START: number[] = [0, 32, 48, 56, 60, 62];
+
+// Fixed UTC kickoffs, indexed by matchId - ROUND_START[round]. Matches are
+// revealed only after both feeders settle, and only use their slot when the
+// configured lead time still fits. R32 is included for future cups; its
+// already-revealed matches in the current tournament remain unchanged.
+//
+// R32 (32–47): 6 matches Nov 7, then 5 each Nov 8 and 9.
+// R16 (48–55): 4 per day Nov 10–11. QF: Nov 12. SF: Nov 13. Final: Nov 15.
+const LATER_ROUND_SLOTS: { day: number; hour: number }[][] = [
+  [], // R64: uses R64_DAY_OFFSETS, not this table
+  [
+    { day: 6, hour: 10 }, { day: 6, hour: 12 }, { day: 6, hour: 14 },
+    { day: 6, hour: 16 }, { day: 6, hour: 18 }, { day: 6, hour: 20 },
+    { day: 7, hour: 10 }, { day: 7, hour: 12 }, { day: 7, hour: 14 },
+    { day: 7, hour: 16 }, { day: 7, hour: 18 },
+    { day: 8, hour: 10 }, { day: 8, hour: 12 }, { day: 8, hour: 14 },
+    { day: 8, hour: 16 }, { day: 8, hour: 18 },
+  ],
+  [
+    { day: 9, hour: 10 }, { day: 9, hour: 12 }, { day: 9, hour: 14 }, { day: 9, hour: 16 },
+    { day: 10, hour: 10 }, { day: 10, hour: 12 }, { day: 10, hour: 14 }, { day: 10, hour: 16 },
+  ],
+  [
+    { day: 11, hour: 10 }, { day: 11, hour: 12 }, { day: 11, hour: 14 }, { day: 11, hour: 16 },
+  ],
+  [
+    { day: 12, hour: 10 }, { day: 12, hour: 12 },
+  ],
+  [
+    { day: 14, hour: 10 },
+  ],
+];
+
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 
@@ -346,36 +381,56 @@ export class CupLifecycle {
   }
 
   /**
-   * Later rounds: kickoff = now + lead, clamped into the round's date
-   * window (never before the window opens; never so late the 1h contract
-   * lead-time would break). A blown window logs an overrun and keeps the
-   * lead-time schedule — a late match beats a doomed tx.
+   * Later rounds use a stable per-match slot when it preserves the configured
+   * lead. If that slot passed or conflicts with a kickoff already revealed in
+   * the round, allocate the next free even UTC hour. If the round window is
+   * exhausted, keep the legal lead and spacing and log the overrun rather
+   * than collapsing matches onto a shared window edge.
    */
   private laterRoundKickoff(matchId: number, now: number): number {
-    const w = ROUND_WINDOWS[roundOf(matchId)];
+    const round = roundOf(matchId);
+    const w = ROUND_WINDOWS[round];
     const windowStartMs = this.r64StartMs + w.start * 86_400_000;
     const windowEndMs = this.r64StartMs + (w.end + 1) * 86_400_000 - 1000;
     const earliestLegal = now + 65 * 60_000;
-    let kickoff = Math.max(now + this.leadMs, windowStartMs, earliestLegal);
     const latestSane = windowEndMs - 70 * 60_000;
-    if (kickoff > latestSane) {
-      if (latestSane >= earliestLegal) {
-        kickoff = latestSane;
-        logger.warn("[CupLifecycle] later-round kickoff clamped to round window edge", {
-          matchId,
-          kickoff: new Date(kickoff).toISOString(),
-        });
-      } else {
-        kickoff = now + this.leadMs;
-        logger.error("[CupLifecycle] ROUND WINDOW OVERRUN — manual review", {
-          matchId,
-          round: roundOf(matchId),
-          kickoff: new Date(kickoff).toISOString(),
-          windowEnd: new Date(windowEndMs).toISOString(),
-        });
-      }
+    const sameRound = this.cache
+      .all()
+      .filter((x) => roundOf(x.matchId) === round && x.matchId !== matchId && x.kickoffMs !== 0);
+
+    const slot = LATER_ROUND_SLOTS[round]?.[matchId - ROUND_START[round]];
+    if (slot) {
+      const scheduled = this.r64StartMs + slot.day * 86_400_000 + slot.hour * 3_600_000;
+      const enoughLead = scheduled >= Math.max(earliestLegal, now + this.leadMs);
+      const slotIsFree = !sameRound.some((x) => Math.abs(x.kickoffMs - scheduled) < 90 * 60_000);
+      if (enoughLead && slotIsFree) return scheduled;
+
+      logger.warn("[CupLifecycle] later-round slot unavailable - using staggered fallback", {
+        matchId,
+        round,
+        scheduled: new Date(scheduled).toISOString(),
+        reason: enoughLead ? "slot conflicts with a revealed match" : "slot does not preserve lead time",
+      });
     }
-    return kickoff;
+
+    const hourMs = 3_600_000;
+    let candidate = Math.max(now + this.leadMs, windowStartMs, earliestLegal);
+    candidate = Math.ceil(candidate / hourMs) * hourMs;
+    if ((candidate / hourMs) % 2 !== 0) candidate += hourMs;
+
+    while (sameRound.some((x) => Math.abs(x.kickoffMs - candidate) < 90 * 60_000)) {
+      candidate += 2 * hourMs;
+    }
+
+    if (candidate > latestSane) {
+      logger.error("[CupLifecycle] ROUND WINDOW OVERRUN - keeping staggered lead-time schedule", {
+        matchId,
+        round,
+        kickoff: new Date(candidate).toISOString(),
+        windowEnd: new Date(windowEndMs).toISOString(),
+      });
+    }
+    return candidate;
   }
 
   // ------------------------------------------------------------- live matches
