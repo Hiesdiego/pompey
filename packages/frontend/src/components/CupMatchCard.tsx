@@ -6,12 +6,18 @@ import type { CupMatch } from "../hooks/useCupBracket";
 import { CUP_STATE, cupMatchBettingOpen, cupRoundOf, CUP_ROUNDS, cupTeamName, cupScheduledKickoff } from "../lib/cup";
 import { Countdown } from "./Countdown";
 import { CupTeamBadge } from "./CupTeamBadge";
+import { useCupLiveMatch } from "../hooks/useCupLiveMatch";
 
 export function cupMatchStatus(match: CupMatch, now: number): "upcoming" | "live" | "awaiting" | "settled" | "disputed" {
   if (match.state === CUP_STATE.Disputed) return "disputed";
   if (match.state === CUP_STATE.Settled) return "settled";
   if (match.kickoffMs && now >= match.kickoffMs) return match.endMs && now >= match.endMs ? "awaiting" : "live";
   return "upcoming";
+}
+
+function LiveCupScore({ match }: { match: CupMatch }) {
+  const { score } = useCupLiveMatch(match.matchId, match.teamA, match.teamB, "live");
+  return <span>{score ? `${score[0]}–${score[1]}` : "0–0"}</span>;
 }
 
 export function CupMatchCard({ match, now, onStake, liveStakingEnabled = false }: { match: CupMatch; now: number; onStake?: (side: 0 | 1) => void; liveStakingEnabled?: boolean }) {
@@ -31,7 +37,7 @@ export function CupMatchCard({ match, now, onStake, liveStakingEnabled = false }
     </div>
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-1">
       <div className="flex min-w-0 flex-col items-center gap-1 text-center"><CupTeamBadge key={match.teamA} teamId={match.teamA} showName={false} /><span className="w-full truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">{cupTeamName(match.teamA)}</span></div>
-      <span className={`font-display font-extrabold tabular-nums ${scored ? "text-xl text-zinc-950 dark:text-white" : "text-[11px] uppercase tracking-[.18em] text-zinc-400"}`}>{status === "settled" ? `${match.goalsA}–${match.goalsB}` : status === "live" ? "– : –" : "VS"}</span>
+      <span className={`font-display font-extrabold tabular-nums ${scored ? "text-xl text-zinc-950 dark:text-white" : "text-[11px] uppercase tracking-[.18em] text-zinc-400"}`}>{status === "settled" ? `${match.goalsA}–${match.goalsB}` : status === "live" ? <LiveCupScore match={match} /> : "VS"}</span>
       <div className="flex min-w-0 flex-col items-center gap-1 text-center"><CupTeamBadge key={match.teamB} teamId={match.teamB} showName={false} /><span className="w-full truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">{cupTeamName(match.teamB)}</span></div>
     </div>
   </Link>{stakable && onStake && <div className="relative mt-2 flex flex-wrap gap-1.5 px-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">{([0, 1] as const).map((side) => <button key={side} onClick={() => onStake(side)} className="rounded-full border border-amber-500/30 bg-amber-500/[.08] px-2.5 py-1 text-[11px] font-bold text-amber-700 hover:border-amber-500 dark:text-amber-300">{side === 0 ? cupTeamName(match.teamA) : cupTeamName(match.teamB)} · Pick</button>)}</div>}</div>;
