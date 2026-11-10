@@ -35,6 +35,17 @@ create table if not exists cup_x_shares (
 );
 create unique index if not exists cup_x_shares_post_idx on cup_x_shares (chain_id, pool_address, post_url);
 
+-- Explicit operator-managed adjustments. Positive or negative values can be
+-- used to correct a wallet's displayed total without changing indexed activity.
+create table if not exists cup_manual_points (
+  chain_id bigint not null,
+  pool_address text not null,
+  wallet_address text not null,
+  points bigint not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (chain_id, pool_address, wallet_address)
+);
+
 -- One score per wallet and market. Repeated stakes increase size, never the
 -- participation count. A market with multiple outcomes cannot earn conviction.
 -- Start from every profile and LEFT JOIN scores so accounts without any Cup
@@ -64,7 +75,8 @@ language sql stable security definer set search_path = public as $$
     (count(p.market_id) + 5 * count(*) filter (where p.won)
       + 2 * count(*) filter (where p.stake_rank <= ceil(p.participants / 4.0))
       + count(*) filter (where p.outcome_count = 1 and p.total_stake >= 10 * 10^18)
-      + count(s.post_url))::bigint as points,
+      + count(s.post_url)
+      + coalesce(max(mp.points), 0))::bigint as points,
     count(*) filter (where p.won)::bigint as correct,
     count(p.market_id)::bigint as predictions,
     (2 * count(*) filter (where p.stake_rank <= ceil(p.participants / 4.0)))::bigint as stake_bonus,
@@ -74,6 +86,9 @@ language sql stable security definer set search_path = public as $$
   left join ranked p on p.wallet_address = lower(pr.wallet_address)
   left join cup_x_shares s on s.chain_id = p_chain_id and s.pool_address = p.pool_address
     and s.wallet_address = p.wallet_address and s.market_kind = p.market_kind and s.market_id = p.market_id
+  left join cup_manual_points mp on mp.chain_id = p_chain_id
+    and mp.pool_address = lower(p_pool_address)
+    and mp.wallet_address = lower(pr.wallet_address)
   group by pr.wallet_address, pr.username
   order by points desc, correct desc, predictions desc, pr.wallet_address;
 $$;
@@ -81,6 +96,7 @@ $$;
 alter table cup_prediction_events enable row level security;
 alter table cup_prediction_results enable row level security;
 alter table cup_x_shares enable row level security;
-revoke all on cup_prediction_events, cup_prediction_results, cup_x_shares from anon, authenticated;
+alter table cup_manual_points enable row level security;
+revoke all on cup_prediction_events, cup_prediction_results, cup_x_shares, cup_manual_points from anon, authenticated;
 revoke all on function cup_leaderboard(bigint,text,text) from public;
 grant execute on function cup_leaderboard(bigint,text,text) to service_role;

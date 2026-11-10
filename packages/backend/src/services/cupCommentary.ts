@@ -194,6 +194,22 @@ export class CupCommentary {
         if (match.teamA === 65535 || match.teamB === 65535 || !match.kickoffMs || Date.now() < match.kickoffMs - 5 * 60_000 || match.state === 0) continue;
         try { if (Date.now() < match.kickoffMs) await this.preview(match); else await this.observe(match); } catch (error) { logger.warn("[CupCommentary] match observation failed", { matchId: match.matchId, error: String(error) }); }
       }
+      // Post-match sweep. The review used to live or die with the full-time
+      // block, and a missed review stayed missed forever. Every tick, repair
+      // any settled match that has a full-time line but no witty review, using
+      // the on-chain settled score (not a recomputed snapshot). This also
+      // backfills the reviews missing on matches settled before this fix.
+      for (const match of this.lifecycle.getMatches()) {
+        if (match.state !== 2 || match.teamA === 65535 || match.teamB === 65535) continue;
+        try {
+          const lines = this.lines.get(match.matchId) ?? await this.getLines(match.matchId);
+          this.lines.set(match.matchId, lines);
+          if (!lines.some((line) => line.eventType === "ft")) continue;
+          if (lines.some((line) => line.eventType === "review" && line.voice === "witty")) continue;
+          const winner = CUP_TEAM_NAMES[match.winner];
+          await this.review(match, { ...this.broadcastFacts(match), matchId: match.matchId, minute: 60, teamA: CUP_TEAM_NAMES[match.teamA], teamB: CUP_TEAM_NAMES[match.teamB], scoreA: match.goalsA, scoreB: match.goalsB, winner });
+        } catch (error) { logger.warn("[CupCommentary] review sweep failed", { matchId: match.matchId, error: String(error) }); }
+      }
     } finally { this.busy = false; }
   }
 
@@ -242,14 +258,27 @@ export class CupCommentary {
     const round = cupRoundName(match.matchId);
     const verdict = match.matchId === 62 ? `${facts.winner} is crowned champion` : `${facts.winner} advances`;
     const previews = this.lines.get(match.matchId)?.filter((line) => line.eventType === "preview") ?? [];
+    // Review templates must fit 280 characters by construction. The deployed
+    // table still enforces the original 280-char check (the 700-char
+    // migration in backend/sql/cup-commentary.sql was never run there:
+    // 1,421 live lines, none over 280). The old 240-char preview quote made
+    // this template ~390 chars, so its insert failed, publish() returned
+    // false, and the witty review never ran (it only runs when the
+    // professional one lands). That is why settled matches went quiet after
+    // full-time. An 80-char quote keeps the longest possible review under
+    // 280 even for the longest team names.
     const callback = (voice: Voice) => {
       const earlier = previews.find((line) => line.voice === voice);
-      return earlier ? `Before kickoff I said: "${earlier.text.slice(0, 240)}". ` : "";
+      return earlier ? `Before kickoff I said: "${earlier.text.slice(0, 80)}". ` : "";
     };
     const first = await this.publish(match, "review", "professional", facts,
       `${callback("professional")}${round} ends: ${facts.teamA} ${facts.scoreA}-${facts.scoreB} ${facts.teamB}. ${verdict}. Results outrank reputations. REKT, your honest verdict?`, 0);
-    if (first) await this.publish(match, "review", "witty", facts,
-      `DEE, ${callback("witty")}${facts.winner} delivered. The scoreboard has no loyalty programme; hype earns nothing in this ${round}. Follow TICKR on X: x.com/tickrbase.top`, 0);
+    if (!first) logger.warn("[CupCommentary] professional review failed to publish", { matchId: match.matchId });
+    if (first) {
+      const second = await this.publish(match, "review", "witty", facts,
+        `DEE, ${callback("witty")}${facts.winner} delivered. Hype earns nothing here. Follow TICKR on X: x.com/tickrbase.top`, 0);
+      if (!second) logger.warn("[CupCommentary] witty review failed to publish", { matchId: match.matchId });
+    }
   }
 
   private async observe(match: CupMatchView) {
@@ -338,8 +367,16 @@ export class CupCommentary {
       : process.env.COMMENTARY_LLM_WITTY_API_KEY;
     const model = (voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MODEL : process.env.COMMENTARY_LLM_WITTY_MODEL) || (voice === "professional" ? "openai/gpt-oss-120b" : "openai/gpt-oss-20b");
     const completion = commentaryCompletion(model, voice === "professional" ? process.env.COMMENTARY_LLM_PRO_MAX_COMPLETION_TOKENS : process.env.COMMENTARY_LLM_WITTY_MAX_COMPLETION_TOKENS);
-    // Reserve context plus completion, including reasoning, before making a paid request.
-    const tokenReserve = completion.max_completion_tokens + 2200;
+    // Reserve enough for one more call before making a paid request. Observed
+    // Groq total_tokens per call is about 880 (prompt plus completion, reasoning
+    // included), so a 1,000-token reserve covers it with headroom. The old
+    // reserve (max_completion_tokens + 2200 = 2,968) blocked the next call once
+    // matchTokens passed 9,032, capping every match at 10-11 LLM lines even
+    // though COMMENTARY_MATCH_TOKEN_BUDGET is 12,000. Keep the budget raise
+    // (20,000 match / 120,000 daily on Render) alongside this fix: with a
+    // 1,000 reserve the effective per-match cap is 19,000, about 19-21 calls,
+    // which covers a full match. Env override: COMMENTARY_TOKEN_RESERVE.
+    const tokenReserve = Number(process.env.COMMENTARY_TOKEN_RESERVE || 1000);
     const matchTokens = lines.reduce((total, line) => total + line.tokensUsed, 0);
     if (process.env.COMMENTARY_ENABLED === "true" && key && !this.llmAttemptedEvents.has(eventId) && Date.now() >= (this.llmBackoffUntil.get(voice) ?? 0) && this.dailyTokens + tokenReserve <= Number(process.env.COMMENTARY_DAILY_TOKEN_BUDGET || 30_000) && matchTokens + tokenReserve <= Number(process.env.COMMENTARY_MATCH_TOKEN_BUDGET || 5_000)) {
       this.llmAttemptedEvents.add(eventId);
@@ -358,6 +395,8 @@ export class CupCommentary {
             ? "Give a balanced pre-match preview using tournament form and supplied sourced news only. You may predict a winner as a tentative opinion, never a settled result or exact score. DEE speaks first and asks REKT for his take; REKT responds and may disagree. Explain uncertainty."
             : kind === "review"
             ? "Give your brutally honest post-match verdict. Compare the result with your own actual preview in previewLines; admit an overhyped pick or mistaken expectation only if you made it. If no preview exists, say what the result shows without inventing an earlier prediction. DEE hands over to REKT. REKT may roast his own punditry fiercely. In the Final say crowned champion, never advances. End REKT's review with: Follow TICKR on X: x.com/tickrbase.top"
+            : kind === "ft"
+            ? "This is full-time. The match has ended. State the final score, say Full-time, and name the team that advances. In the Final say crowned champion, never advances. Never describe play as ongoing and never ask for a comeback."
             : kind === "kickoff" && voice === "professional"
             ? "Open the broadcast by introducing both teams, then hand over to Rekt with a natural question. Use a different approach from previous openings."
             : replyTo
@@ -391,6 +430,11 @@ export class CupCommentary {
               : !candidate ? "invalid-score-or-length"
               : banned.test(candidate) ? "banned-word"
               : candidateNumbers.some((number) => !allowedNumbers.has(number)) ? "ungrounded-number"
+              // Full-time must read as full-time: without this the model writes
+              // a live minute-60 line ("clings to a 2-1 lead, Aster pressing
+              // hard") and the feed never says who advances.
+              : kind === "ft" && !/full-time/i.test(candidate) ? "missing-full-time"
+              : kind === "review" && typeof facts.winner === "string" && !candidate.includes(facts.winner) && !/advances|goes through|crowned champion/i.test(candidate) ? "missing-winner"
               : lines.slice(-6).some((line) => line.text === candidate) ? "repeated-line"
               : null;
             if (candidate && !rejectReason) {
@@ -409,6 +453,21 @@ export class CupCommentary {
         : Date.now() < (this.llmBackoffUntil.get(voice) ?? 0) ? "provider-backoff"
         : this.llmAttemptedEvents.has(eventId) ? "already-attempted" : "token-budget";
       logger.info("[CupCommentary] template fallback", { matchId: match.matchId, voice, reason, dailyTokens: this.dailyTokens, matchTokens, tokenReserve });
+    }
+    // The deployed table may still enforce the original 280-character check
+    // (backend/sql/cup-commentary.sql raised it to 700, but that migration
+    // was never run there: 1,421 live lines, none over 280). An over-long
+    // line fails its insert and publish() returns false, which silently
+    // kills the review chain. Never let one reach the DB: fall back to the
+    // short template, which fits by construction. The cap is env-configurable
+    // so longer lines are one setting away: first raise the database check
+    // (run the 700-char migration), then set COMMENTARY_MAX_LINE_CHARS to
+    // match (400, 700, whatever you pick). The database check must be at
+    // least as large as this value, or inserts fail again.
+    const maxChars = Number(process.env.COMMENTARY_MAX_LINE_CHARS || 280);
+    if (text.length > maxChars) {
+      logger.warn("[CupCommentary] line over char cap, using template", { matchId: match.matchId, kind, voice, length: text.length, maxChars });
+      text = template.length <= maxChars ? template : template.slice(0, maxChars);
     }
     this.dailyTokens += tokensUsed;
     const { data, error } = await this.db!.from("cup_commentary_lines").insert({ match_id: String(match.matchId), minute, voice, text, event_type: kind, event_id: eventId, tokens_used: tokensUsed }).select("id,created_at").single();
