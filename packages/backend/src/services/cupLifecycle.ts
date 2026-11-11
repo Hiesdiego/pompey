@@ -10,8 +10,18 @@
  *   2. REVEAL — R64 (matches 0–31): deterministic staggered kickoffs across
  *      Nov 1–6, revealed as soon as the draw is detected. Later rounds:
  *      revealed only when BOTH feeder matches are Settled (the contract
- *      enforces this too), with a deterministic per-match slot and a
- *      collision-free fallback when a slot has passed.
+ *      enforces this too). R16 and QF use the match's deterministic
+ *      staggered slot in LATER_ROUND_SLOTS (R16 Nov 10–11, QF Nov 12,
+ *      all 10:00 UTC + 2h per slot). SF (Nov 13) and the Final (Nov 15)
+ *      instead get a RANDOM kickoff inside their round day, 10:00–16:00
+ *      UTC at minute granularity, 2h clear of the other semi (user
+ *      decision 2026-11-11: 2 per day at random times, not predetermined
+ *      slots). The old now + lead rule clamped every early match to its
+ *      round window start, which piled 15 of 16 R32 matches onto Nov 7
+ *      00:00 UTC; a fixed slot per matchId cannot do that. If a slot
+ *      (or random draw) has already passed, the fallback is now + lead,
+ *      rounded to the next even UTC hour and stepped +2h clear of other
+ *      matches in the same round.
  *   3. START — now >= kickoff and no start snapshot: validate both teams'
  *      prices → CupEngine.submitStartPrice.
  *   4. END — now >= kickoff + 1h: CupEngine.submitEndPrice. Late-start
@@ -32,7 +42,7 @@ import { createPublicClient, http, type PublicClient } from "viem";
 import { baseSepolia, base } from "viem/chains";
 import { config } from "../config.js";
 import { logger } from "../lib/logger.js";
-import type { PriceFeed } from "./priceFeed.js";
+import type { PriceFeed, PriceSource } from "./priceFeed.js";
 import { PriceUnavailableError, PriceValidationError } from "./priceFeed.js";
 import { CupSubmitter } from "./cupSubmitter.js";
 import { CUP_TEAM_SYMBOLS } from "./cupTeams.js";
@@ -96,6 +106,7 @@ export interface CupMatchView {
   feederA: number;
   feederB: number;
   kickoffMs: number; // 0 until revealed
+  endMs: number; // 0 until revealed; kickoff + 1h, pinned on-chain at reveal
   state: number;
   winner: number;
   goalsA: number;
@@ -142,9 +153,10 @@ class CupMatchCache {
       teamB: number;
       feederA: number;
       feederB: number;
-      kickoffTimestamp: bigint;
-      state: number;
       winner: number;
+      kickoffTimestamp: bigint;
+      endTimestamp: bigint;
+      state: number;
       goalsA: number;
       goalsB: number;
     };
@@ -155,6 +167,7 @@ class CupMatchCache {
       feederA: m.feederA,
       feederB: m.feederB,
       kickoffMs: Number(m.kickoffTimestamp) * 1000,
+      endMs: Number(m.endTimestamp) * 1000,
       state: m.state,
       winner: m.winner,
       goalsA: m.goalsA,
@@ -204,23 +217,25 @@ const R64_DAY_OFFSETS: number[] = [
 // First matchId of each round, by roundOf() index: R64, R32, R16, QF, SF, Final.
 const ROUND_START: number[] = [0, 32, 48, 56, 60, 62];
 
-// Fixed UTC kickoffs, indexed by matchId - ROUND_START[round]. Matches are
-// revealed only after both feeders settle, and only use their slot when the
-// configured lead time still fits. R32 is included for future cups; its
-// already-revealed matches in the current tournament remain unchanged.
-//
-// R32 (32–47): 6 matches Nov 7, then 5 each Nov 8 and 9.
-// R16 (48–55): 4 per day Nov 10–11. QF: Nov 12. SF: Nov 13. Final: Nov 15.
+// Later-round slots: deterministic kickoff per match, same pattern as R64
+// (10:00 UTC + 2h per slot within the day). Day is a day-offset from the
+// R64 start date (Nov 1), so day 9 = Nov 10, day 14 = Nov 15.
+// R32 has no entry: its 16 matches were already revealed by the old
+// now+lead rule, all clamped to Nov 7 00:00 UTC, and revealKickoff only
+// works while a match is Created, so those times are locked and cannot
+// be restaggered by this file. This table saves R16 onward.
+//   R16 (48-55): Nov 10-11, 4 per day at 10, 12, 14, 16 UTC.
+//   QF  (56-59): Nov 12, 4 matches at 10, 12, 14, 16 UTC.
+//   SF  (60-61): Nov 13, 2 matches at 10, 12 UTC — now FALLBACK ONLY:
+//     the random draw (randomRoundKickoff) runs first for SF/Final per
+//     the user's 2026-11-11 decision; these slots apply only if no
+//     random time fits (e.g. feeders settle very late).
+//   Final (62):  Nov 15, 10:00 UTC — same fallback-only status as SF.
+// QF keeps its fixed slots: its 4 matches are already Open on-chain,
+// so their kickoffs are locked regardless of what this file says.
 const LATER_ROUND_SLOTS: { day: number; hour: number }[][] = [
   [], // R64: uses R64_DAY_OFFSETS, not this table
-  [
-    { day: 6, hour: 10 }, { day: 6, hour: 12 }, { day: 6, hour: 14 },
-    { day: 6, hour: 16 }, { day: 6, hour: 18 }, { day: 6, hour: 20 },
-    { day: 7, hour: 10 }, { day: 7, hour: 12 }, { day: 7, hour: 14 },
-    { day: 7, hour: 16 }, { day: 7, hour: 18 },
-    { day: 8, hour: 10 }, { day: 8, hour: 12 }, { day: 8, hour: 14 },
-    { day: 8, hour: 16 }, { day: 8, hour: 18 },
-  ],
+  [], // R32: already revealed, locked
   [
     { day: 9, hour: 10 }, { day: 9, hour: 12 }, { day: 9, hour: 14 }, { day: 9, hour: 16 },
     { day: 10, hour: 10 }, { day: 10, hour: 12 }, { day: 10, hour: 14 }, { day: 10, hour: 16 },
@@ -236,6 +251,10 @@ const LATER_ROUND_SLOTS: { day: number; hour: number }[][] = [
   ],
 ];
 
+// Rounds whose kickoff is drawn at random instead of from the slot table:
+// 4 = SF, 5 = Final (user decision 2026-11-11). R16/QF stay fixed-slot.
+const RANDOM_ROUNDS = new Set([4, 5]);
+
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 
@@ -250,6 +269,14 @@ export class CupLifecycle {
   private readonly leadMs: number;
   private readonly durationMs = 60 * 60 * 1000; // cup matches are 1 hour
   private readonly failures = new Map<number, FailureState>();
+  /**
+   * matchId → sources used for the start snapshot. The end snapshot
+   * prefers the same source per team so a venue spread can't masquerade
+   * as a price move. Soft preference only: a stale preferred source
+   * falls back to priority order, and cross-validation still applies.
+   * Empty after a restart (start already on-chain) → priority order.
+   */
+  private readonly startSources = new Map<number, { a: PriceSource; b: PriceSource }>();
   private readonly knownBallots = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
@@ -381,11 +408,63 @@ export class CupLifecycle {
   }
 
   /**
-   * Later rounds use a stable per-match slot when it preserves the configured
-   * lead. If that slot passed or conflicts with a kickoff already revealed in
-   * the round, allocate the next free even UTC hour. If the round window is
-   * exhausted, keep the legal lead and spacing and log the overrun rather
-   * than collapsing matches onto a shared window edge.
+   * Random kickoff for SF / Final (user decision 2026-11-11: 2 per day at
+   * random times, not predetermined slots).
+   *
+   * Draws a random minute between 10:00 and 16:00 UTC on the round's day
+   * (SF = Nov 13, Final = Nov 15), at least 2h clear of any
+   * already-revealed match in the same round, and still leaving the full
+   * lead (staking window) before kickoff. Returns null when no such time
+   * exists (e.g. feeders settled so late the window is gone); the caller
+   * then falls through to the slot / staggered fallback.
+   *
+   * Deliberately NOT restart-safe: each attempt draws a fresh time. That
+   * is harmless because the time only becomes final when the reveal tx
+   * lands on-chain; after that the match is Open and this code never runs
+   * for it again. A failed reveal tx simply draws again on the next tick.
+   */
+  private randomRoundKickoff(matchId: number, now: number): number | null {
+    const round = roundOf(matchId);
+    const w = ROUND_WINDOWS[round];
+    const dayStartMs = this.r64StartMs + w.start * 86_400_000;
+    const windowOpenMs = dayStartMs + 10 * 3_600_000;
+    const windowCloseMs = dayStartMs + 16 * 3_600_000;
+    const earliest = Math.max(now + this.leadMs, now + 65 * 60_000, windowOpenMs);
+    if (earliest > windowCloseMs) return null;
+    const sameRound = this.cache
+      .all()
+      .filter((x) => roundOf(x.matchId) === round && x.kickoffMs !== 0);
+    const minuteMs = 60_000;
+    const spanMinutes = Math.floor((windowCloseMs - earliest) / minuteMs);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const candidate = earliest + Math.floor(Math.random() * (spanMinutes + 1)) * minuteMs;
+      if (sameRound.some((x) => Math.abs(x.kickoffMs - candidate) < 2 * 3_600_000)) continue;
+      return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * Later rounds: deterministic staggered slot from LATER_ROUND_SLOTS,
+   * same pattern as R64 (10:00 UTC + 2h per slot within the day).
+   *
+   * Why this replaced the old rule: the old rule was kickoff =
+   * max(now + lead, window start). Every match whose feeders settled
+   * before its round window opened therefore clamped to the exact same
+   * window-start instant. That is what happened to R32 on Nov 6: 15 of
+   * 16 matches all got Nov 7 00:00 UTC, and the 16th got 01:01 UTC.
+   * A fixed slot per matchId cannot pile up that way, and it is
+   * restart-safe: the same matchId always maps to the same kickoff.
+   *
+   * Fallback, only when the slot has already passed (feeders settled
+   * late, e.g. after a dispute): kickoff = now + lead, rounded up to
+   * the next even UTC hour, then stepped +2h until no other revealed
+   * match in the same round is within 90 minutes of it. The contract
+   * only requires 1h lead (MIN_KICKOFF_LEAD); the 65-minute margin
+   * here is the safety buffer, and the 6h lead is the staking window
+   * we try to preserve, not a contract rule. A blown window logs an
+   * overrun and keeps the lead-time schedule — a late match beats a
+   * doomed tx.
    */
   private laterRoundKickoff(matchId: number, now: number): number {
     const round = roundOf(matchId);
@@ -394,36 +473,68 @@ export class CupLifecycle {
     const windowEndMs = this.r64StartMs + (w.end + 1) * 86_400_000 - 1000;
     const earliestLegal = now + 65 * 60_000;
     const latestSane = windowEndMs - 70 * 60_000;
-    const sameRound = this.cache
-      .all()
-      .filter((x) => roundOf(x.matchId) === round && x.matchId !== matchId && x.kickoffMs !== 0);
 
-    const slot = LATER_ROUND_SLOTS[round]?.[matchId - ROUND_START[round]];
-    if (slot) {
-      const scheduled = this.r64StartMs + slot.day * 86_400_000 + slot.hour * 3_600_000;
-      const enoughLead = scheduled >= Math.max(earliestLegal, now + this.leadMs);
-      const slotIsFree = !sameRound.some((x) => Math.abs(x.kickoffMs - scheduled) < 90 * 60_000);
-      if (enoughLead && slotIsFree) return scheduled;
-
-      logger.warn("[CupLifecycle] later-round slot unavailable - using staggered fallback", {
+    // 0. Random rounds (SF, Final): draw a random kickoff inside the
+    // round day instead of a fixed slot. Falls through to the slot /
+    // staggered fallback below only if no random time fits.
+    if (RANDOM_ROUNDS.has(round)) {
+      const random = this.randomRoundKickoff(matchId, now);
+      if (random !== null) {
+        logger.info("[CupLifecycle] random kickoff drawn", {
+          matchId,
+          round,
+          kickoff: new Date(random).toISOString(),
+        });
+        return random;
+      }
+      logger.warn("[CupLifecycle] no random slot fits — using slot/fallback", {
         matchId,
         round,
-        scheduled: new Date(scheduled).toISOString(),
-        reason: enoughLead ? "slot conflicts with a revealed match" : "slot does not preserve lead time",
       });
     }
 
+    // 1. Deterministic slot. Only use it if it still leaves the full
+    // lead (staking window) between reveal and kickoff.
+    const slot = LATER_ROUND_SLOTS[round]?.[matchId - ROUND_START[round]];
+    if (slot) {
+      const scheduled =
+        this.r64StartMs + slot.day * 86_400_000 + slot.hour * 3_600_000;
+      if (scheduled >= Math.max(earliestLegal, now + this.leadMs)) {
+        return scheduled;
+      }
+      logger.warn("[CupLifecycle] later-round slot already passed — using staggered fallback", {
+        matchId,
+        round,
+        scheduled: new Date(scheduled).toISOString(),
+      });
+    }
+
+    // 2. Staggered fallback: next free even UTC hour at or after
+    // now + lead, 2h apart from any already-revealed match in this round.
     const hourMs = 3_600_000;
     let candidate = Math.max(now + this.leadMs, windowStartMs, earliestLegal);
     candidate = Math.ceil(candidate / hourMs) * hourMs;
     if ((candidate / hourMs) % 2 !== 0) candidate += hourMs;
-
+    const sameRound = this.cache
+      .all()
+      .filter((x) => roundOf(x.matchId) === round && x.kickoffMs !== 0);
     while (sameRound.some((x) => Math.abs(x.kickoffMs - candidate) < 90 * 60_000)) {
       candidate += 2 * hourMs;
     }
 
     if (candidate > latestSane) {
-      logger.error("[CupLifecycle] ROUND WINDOW OVERRUN - keeping staggered lead-time schedule", {
+      const requiredLead = Math.max(earliestLegal, now + this.leadMs);
+      const clampIsClear = !sameRound.some(
+        (x) => Math.abs(x.kickoffMs - latestSane) < 90 * 60_000
+      );
+      if (latestSane >= requiredLead && clampIsClear) {
+        logger.warn("[CupLifecycle] later-round kickoff clamped to round window edge", {
+          matchId,
+          kickoff: new Date(latestSane).toISOString(),
+        });
+        return latestSane;
+      }
+      logger.error("[CupLifecycle] ROUND WINDOW OVERRUN — manual review", {
         matchId,
         round,
         kickoff: new Date(candidate).toISOString(),
@@ -461,11 +572,12 @@ export class CupLifecycle {
   }
 
   private async processMatch(m: CupMatchView, now: number): Promise<void> {
-    const wantEnd = now >= m.kickoffMs + this.durationMs;
+    const wantEnd = m.endMs !== 0 && now >= m.endMs;
+    const stored = wantEnd ? this.startSources.get(m.matchId) : undefined;
     let a, b;
     try {
-      a = this.feed.getValidatedPrice(m.teamA);
-      b = this.feed.getValidatedPrice(m.teamB);
+      a = this.feed.getValidatedPrice(m.teamA, stored?.a);
+      b = this.feed.getValidatedPrice(m.teamB, stored?.b);
     } catch (err) {
       if (err instanceof PriceValidationError || err instanceof PriceUnavailableError) {
         logger.warn("[CupLifecycle] cup snapshot blocked by price validation", {
@@ -487,8 +599,15 @@ export class CupLifecycle {
     });
     if (wantEnd) {
       await this.submitter.submitEndPrice(m.matchId, a.scaled, b.scaled, a.source, b.source);
+      this.startSources.delete(m.matchId);
     } else {
-      await this.submitter.submitStartPrice(m.matchId, a.scaled, b.scaled, a.source, b.source);
+      const audit = await this.submitter.submitStartPrice(m.matchId, a.scaled, b.scaled, a.source, b.source);
+      // Record only a genuinely new start submission: on later ticks the
+      // submitter skips (already on-chain) and must not overwrite the
+      // kickoff-tick sources with a later tick's read.
+      if (!audit.skipped) {
+        this.startSources.set(m.matchId, { a: a.source, b: b.source });
+      }
     }
   }
 
@@ -499,7 +618,7 @@ export class CupLifecycle {
     const due = this.cache
       .all()
       .filter(
-        (m) => m.state === STATE.Open && m.kickoffMs !== 0 && now >= m.kickoffMs + this.durationMs
+        (m) => m.state === STATE.Open && m.endMs !== 0 && now >= m.endMs
       );
     for (const m of due) {
       try {
