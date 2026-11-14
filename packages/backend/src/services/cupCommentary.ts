@@ -391,10 +391,22 @@ export class CupCommentary {
           const system = voice === "professional"
             ? "You are Dee, the lively but precise lead commentator for TICKR's Crypto Price World Cup. Keep the booth conversational. Write one or two short sentences, at most 160 characters. Use only supplied match facts. The producer appends the exact score and minute if omitted. Vary your openings. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI."
             : "You are Rekt, the witty, dry colour commentator for TICKR's Crypto Price World Cup. Be a quick, mischievous football pundit with crypto-native humour: a specific setup and a surprising punchline about THIS match. Roast the performance, never the audience. Use contrasts, callbacks, understatements or absurd football imagery; vary the device. Avoid generic chart-has-spoken filler. Do not explain the joke. Write one or two short sentences, at most 160 characters. Use only supplied match facts. The producer appends the exact score and minute if omitted. A joke may be an opinion about the match, never a claim about real news or your finances. Scores before full-time are live. Never give financial advice or invent news, prices, events, personal holdings, or winners beyond the supplied facts. Never mention AI.";
-          const direction = kind === "preview"
-            ? "Give a balanced pre-match preview using tournament form and supplied sourced news only. You may predict a winner as a tentative opinion, never a settled result or exact score. DEE speaks first and asks REKT for his take; REKT responds and may disagree. Explain uncertainty."
+          // Preview and review directions are split by voice (fixed
+          // 2026-11-14): the old shared direction told one call to write
+          // BOTH speakers ("DEE speaks first and asks REKT..."), so the
+          // model wrote a two-voice script that publish() stored as a
+          // single professional line, and Rekt's words showed up inside
+          // Dee's commentary box on matches 56-61. Each call now writes
+          // ONLY its own voice; the handover lives in replyTo, not in
+          // the text. The wrong-speaker rejection below is the backstop.
+          const direction = kind === "preview" && voice === "professional"
+            ? "Give a balanced pre-match preview using tournament form and supplied sourced news only. You may predict a winner as a tentative opinion, never a settled result or exact score. Write ONLY as Dee, in first person. Never write dialogue for Rekt, never include the label REKT: or any second speaker. Explain uncertainty."
+            : kind === "preview"
+            ? "Give a balanced pre-match preview using tournament form and supplied sourced news only. You may predict a winner as a tentative opinion, never a settled result or exact score. Write ONLY as Rekt, in first person. Never write dialogue for Dee, never include the label DEE: or Dee: or any second speaker. You may react to Dee's take in replyTo and disagree. Explain uncertainty."
+            : kind === "review" && voice === "professional"
+            ? "Give your brutally honest post-match verdict. Compare the result with your own actual preview in previewLines; admit an overhyped pick or mistaken expectation only if you made it. If no preview exists, say what the result shows without inventing an earlier prediction. Write ONLY as Dee. Never write dialogue for Rekt, never include the label REKT:. In the Final say crowned champion, never advances."
             : kind === "review"
-            ? "Give your brutally honest post-match verdict. Compare the result with your own actual preview in previewLines; admit an overhyped pick or mistaken expectation only if you made it. If no preview exists, say what the result shows without inventing an earlier prediction. DEE hands over to REKT. REKT may roast his own punditry fiercely. In the Final say crowned champion, never advances. End REKT's review with: Follow TICKR on X: x.com/tickrbase.top"
+            ? "Give your brutally honest post-match verdict. Compare the result with your own actual preview in previewLines; admit an overhyped pick or mistaken expectation only if you made it. If no preview exists, say what the result shows without inventing an earlier prediction. Write ONLY as Rekt. Never write dialogue for Dee, never include the label DEE: or Dee:. You may roast your own punditry fiercely. In the Final say crowned champion, never advances. End your review with: Follow TICKR on X: x.com/tickrbase.top"
             : kind === "ft"
             ? "This is full-time. The match has ended. State the final score, say Full-time, and name the team that advances. In the Final say crowned champion, never advances. Never describe play as ongoing and never ask for a comeback."
             : kind === "kickoff" && voice === "professional"
@@ -429,6 +441,12 @@ export class CupCommentary {
               : !raw ? "empty"
               : !candidate ? "invalid-score-or-length"
               : banned.test(candidate) ? "banned-word"
+              // One voice per line: a professional candidate carrying a
+              // REKT: label (or vice versa) is the two-voice script the
+              // old direction used to produce. Reject it so the template
+              // ships instead of Rekt speaking inside Dee's box.
+              : voice === "professional" && /rekt:/i.test(candidate) ? "wrong-speaker"
+              : voice === "witty" && /dee:/i.test(candidate) ? "wrong-speaker"
               : candidateNumbers.some((number) => !allowedNumbers.has(number)) ? "ungrounded-number"
               // Full-time must read as full-time: without this the model writes
               // a live minute-60 line ("clings to a 2-1 lead, Aster pressing
