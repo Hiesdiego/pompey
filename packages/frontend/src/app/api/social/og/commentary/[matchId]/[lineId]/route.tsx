@@ -15,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mat
     const { match, line, speaker, score } = data;
     const teams = [match.teamA, match.teamB];
     const logos = await cupLogos(teams);
-    const accent = line.voice === "professional" ? "#93c5fd" : "#c4b5fd";
+    const accent = line.voice === "professional" ? "#93c5fd" : line.voice === "witty" ? "#c4b5fd" : "#6ee7b7";
     const card = new ImageResponse(<Card gold>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <img src={tickrWordmark} width={112} height={59} alt="TICKR" />
@@ -32,7 +32,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mat
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 16, letterSpacing: 2 }}><span style={{ color: accent, fontWeight: 800 }}>{speaker}</span><span style={{ color: "#a1a1aa", fontSize: 12 }}>{line.voice === "professional" ? "LEAD COMMENTATOR" : "COLOUR COMMENTATOR"} / {line.minute}′</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 16, letterSpacing: 2 }}><span style={{ color: accent, fontWeight: 800 }}>{speaker}</span><span style={{ color: "#a1a1aa", fontSize: 12 }}>{line.voice === "professional" ? "LEAD COMMENTATOR" : line.voice === "witty" ? "COLOUR COMMENTATOR" : "ANALYTICS"} / {line.minute}′</span></div>
         <div style={{ display: "flex", fontSize: line.text.length > 480 ? 17 : line.text.length > 320 ? 21 : line.text.length > 220 ? 27 : line.text.length > 150 ? 31 : 38, lineHeight: 1.35, fontWeight: 600, color: "#fff8eb" }}>“{line.text}”</div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #715a30", paddingTop: 18, color: "#d7bf8e", fontSize: 18 }}>

@@ -1,4 +1,4 @@
-export type CommentaryLine = { id: string; minute: number; voice: "professional" | "witty"; text: string; eventType: string; createdAt: string };
+export type CommentaryLine = { id: string; minute: number; voice: "professional" | "witty" | "analytics"; text: string; eventType: string; createdAt: string };
 
 export function commentaryPaths(matchId: number | string, lineId: string) {
   const suffix = `${matchId}/${encodeURIComponent(lineId)}`;
@@ -13,5 +13,5 @@ export function commentaryScore(text: string): string {
 }
 
 export function commentator(voice: CommentaryLine["voice"]) {
-  return voice === "professional" ? "DEE" : "REKT";
+  return voice === "professional" ? "DEE" : voice === "witty" ? "REKT" : "ORA";
 }
