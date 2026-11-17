@@ -49,6 +49,15 @@ import { LiveWsServer } from "./api/wsServer.js";
 import { createSocialDb } from "./lib/supabase.js";
 import { SocialIndexer } from "./services/socialIndexer.js";
 import { CupLeaderboardIndexer } from "./services/cupLeaderboardIndexer.js";
+import { stockConfigured } from "./stockConfig.js";
+import { StockNavPoller } from "./services/stockNavPoller.js";
+import { StockPriceFeed } from "./services/stockPriceFeed.js";
+import { StockSnapshotSubmitter } from "./services/stockSnapshotSubmitter.js";
+import { StockMatchLifecycle } from "./services/stockMatchLifecycle.js";
+import { StockCheckpointSubmitter } from "./services/stockCheckpointSubmitter.js";
+import { StockChainReader } from "./api/stockReadClient.js";
+import { StockTpAggregator } from "./services/stockTpAggregator.js";
+import { buildStockRouter } from "./api/stockRoutes.js";
 
 async function main(): Promise<void> {
 
@@ -143,6 +152,18 @@ async function main(): Promise<void> {
   const cupLeaderboardIndexer = new CupLeaderboardIndexer(db);
   const liveCupLeaderboardIndexer = config.cup.matchPool.toLowerCase() !== config.cup.pool.toLowerCase()
     ? new CupLeaderboardIndexer(db, config.cup.matchPool) : null;
+  const stockEnabled = stockConfigured();
+  const stockNavPoller = stockEnabled ? new StockNavPoller() : null;
+  const stockPriceFeed = stockNavPoller ? new StockPriceFeed(stockNavPoller) : null;
+  const stockSnapshotSubmitter = stockEnabled ? new StockSnapshotSubmitter() : null;
+  const stockLifecycle = stockEnabled && stockPriceFeed && stockSnapshotSubmitter && stockNavPoller
+    ? new StockMatchLifecycle(stockPriceFeed, stockSnapshotSubmitter, stockNavPoller)
+    : null;
+  const stockCheckpointSubmitter = stockPriceFeed && stockEnabled
+    ? new StockCheckpointSubmitter(stockPriceFeed)
+    : null;
+  const stockReader = stockEnabled ? new StockChainReader() : null;
+  const stockTpAggregator = stockEnabled ? new StockTpAggregator() : null;
   chainCache.startWarmer();
 
 
@@ -234,6 +255,15 @@ async function main(): Promise<void> {
   });
   app.use(express.json());
   app.use(buildRouter({ reader, lifecycle, priceFeed, cupPriceFeed, coingecko, chainCache, health: buildHealth }));
+  if (stockEnabled && stockLifecycle && stockPriceFeed && stockNavPoller && stockReader && stockTpAggregator) {
+    app.use(buildStockRouter({
+      reader: stockReader,
+      lifecycle: stockLifecycle,
+      priceFeed: stockPriceFeed,
+      navPoller: stockNavPoller,
+      tpAggregator: stockTpAggregator,
+    }));
+  }
   app.get("/api/cup/matches/:id/commentary", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 0 || id > 62) { res.status(400).json({ error: "Invalid World Cup match" }); return; }
@@ -288,6 +318,13 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error("[backend] lifecycle failed to start", { error: String(err) });
     }
+    if (stockEnabled && stockNavPoller && stockLifecycle && stockCheckpointSubmitter) {
+      stockNavPoller.start();
+      try { await stockLifecycle.start(); }
+      catch (err) { logger.error("[backend] stock lifecycle failed to start", { error: String(err) }); }
+      try { stockCheckpointSubmitter.start(); }
+      catch (err) { logger.error("[backend] stock checkpoint submitter failed to start", { error: String(err) }); }
+    }
     if (cupLifecycle) {
       try {
         await cupLifecycle.start();
@@ -328,6 +365,9 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info("[backend] shutting down", { signal });
     liveWs.stop();
+    stockLifecycle?.stop();
+    stockNavPoller?.stop();
+    stockCheckpointSubmitter?.stop();
     lifecycle.stop();
     cupLifecycle?.stop();
     cupCommentary?.stop();

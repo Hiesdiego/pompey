@@ -12,6 +12,9 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "deploy:cup:testnet": "pnpm --filter @tickr/contracts deploy:cup:testnet",
+    "deploy:stock:testnet": "pnpm --filter @tickr/contracts deploy:stock:testnet",
+    "schedule:stock:testnet": "pnpm --filter @tickr/contracts schedule:stock:testnet",
+    "seed:stock:testnet": "pnpm --filter @tickr/contracts seed:stock:testnet",
     "draw:cup:testnet": "pnpm --filter @tickr/contracts draw:cup:testnet",
     "clean": "turbo run clean"
   },

@@ -26,6 +26,7 @@ import { cn } from "../lib/cn";
 const NAV = [
   { href: "/", label: "Home" },
   { href: "/fixtures", label: "Fixtures" },
+  { href: "/stocks/standings", label: "Stock Standings" },
   { href: "/markets", label: "Markets" },
   { href: "/cup", label: "World Cup" },
   { href: "/watchlist", label: "Watchlist" },

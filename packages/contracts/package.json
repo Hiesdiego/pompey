@@ -22,6 +22,9 @@
     "deploy:cup-match-pool:testnet": "hardhat run scripts/deploy-cup-match-pool.ts --network baseSepolia",
     "draw:cup:testnet": "hardhat run scripts/cup-draw.ts --network baseSepolia",
     "seed:cup:testnet": "hardhat run scripts/cup-seed.ts --network baseSepolia",
+    "deploy:stock:testnet": "hardhat run scripts/StockDeploy.ts --network baseSepolia",
+    "schedule:stock:testnet": "hardhat run scripts/StockGenerateSchedule.ts --network baseSepolia",
+    "seed:stock:testnet": "hardhat run scripts/StockSeedFixtures.ts --network baseSepolia",
 
 
     "node": "hardhat node",
@@ -29,6 +32,7 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.6.1",
+    "@openzeppelin/contracts-upgradeable": "5.4.0",
     "@tickr/shared": "workspace:*"
   },
   "devDependencies": {

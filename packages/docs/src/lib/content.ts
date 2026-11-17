@@ -1,3 +1,5 @@
+import { STOCK_DOCS_SECTIONS } from "./content-stock";
+
 export type Doc = { slug: string; title: string; description: string; group: string; readTime: string; sections: { id: string; title: string; paragraphs: string[]; note?: string; code?: string; bullets?: string[]; links?: { label: string; address: string; description: string }[] }[] };
 
 export const docs: Doc[] = [
@@ -173,7 +175,18 @@ export const docs: Doc[] = [
     { id: "endpoints", title: "Endpoints", paragraphs: ["The frontend uses a backend read API. These endpoints are useful for building read-only views; responses and availability may evolve while Tickr is on testnet."], code: "GET /api/cup/matches/:id/commentary\nGET /api/cup/matches/:id/momentum\nGET /api/teams\nGET /api/fixtures\nGET /api/fixtures/:id\nGET /api/fixtures/:id/pool\nGET /api/table\nGET /api/prices\nGET /api/price-history/:symbol" },
     { id: "behavior", title: "Reading data responsibly", paragraphs: ["Fixture and price responses are cached for short periods. Use the chain as the authority for final settlement and claims; API data is a convenient projection for interfaces. Avoid polling more often than the data changes."] }
   ] },
-];
+].concat(STOCK_DOCS_SECTIONS.map((section) => ({
+  slug: section.slug,
+  title: section.title,
+  description: `Stock League ${section.title.toLowerCase()} and rules.`,
+  group: "Stock League",
+  readTime: "4 min",
+  sections: [{
+    id: section.slug.split("/").at(-1) ?? section.slug,
+    title: section.title,
+    paragraphs: section.body.split(/\n\s*\n/).filter(Boolean),
+  }],
+})));
 
-export const groups = ["Start here", "The game", "Prices & trust", "Developers"];
+export const groups = ["Start here", "The game", "Prices & trust", "Developers", "Stock League"];
 export function getDoc(slug: string) { return docs.find((doc) => doc.slug === slug); }

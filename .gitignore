@@ -20,5 +20,10 @@ supabase/
 *scripts
 /scripts/
 scripts/
+# Stock league deployment helpers are source files, not generated scripts.
+!packages/contracts/scripts/
+!packages/contracts/scripts/StockDeploy.ts
+!packages/contracts/scripts/StockGenerateSchedule.ts
+!packages/contracts/scripts/StockSeedFixtures.ts
 frontend/db
 *migrations

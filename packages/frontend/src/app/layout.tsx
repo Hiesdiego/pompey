@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import Providers from "./providers";
 import { ThemeProvider } from "../components/ThemeProvider";
@@ -12,13 +11,6 @@ import { ToastViewport } from "../components/Toast";
 import { WatchAlertMonitor } from "../components/WatchAlertMonitor";
 import { Analytics } from "@vercel/analytics/next";
 import { siteUrl } from "../lib/siteUrl";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["400", "500", "600", "700"],
-});
 
 // Absolute origin for metadataBase — without it Next emits relative og:image
 // URLs, which crawlers can't resolve. Mirrors siteUrl() in api/social/og/_shared.
@@ -107,9 +99,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
       </head>
-      <body
-        className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] font-sans text-zinc-900 antialiased transition-colors duration-300 md:pb-0 dark:bg-black dark:text-zinc-100`}
-      >
+      <body className="min-h-screen bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] font-sans text-zinc-900 antialiased transition-colors duration-300 md:pb-0 dark:bg-black dark:text-zinc-100">
         <ThemeProvider>
           <PwaRegister />
           <Providers>

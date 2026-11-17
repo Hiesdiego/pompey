@@ -32,6 +32,22 @@ Deployed and wired on **October 17, 2026**. The deployer is the owner; treasury 
 
 All four contracts are wired, and the 64-team field is registered (16 teams per pot). The draw and pool seeding are pending. Before the November 1 tournament start, approve TICK spending and call `CupPool.seedMatchPools(0, 63)` and `CupPool.seedOutright()`. For the October 30 draw ceremony, call `CupRegistry.requestDraw()`, then `executeDraw()` after at least 100 blocks. The backend must reveal Round of 64 kickoffs with at least one hour of lead time (24 hours for openers).
 
+## Stock League (Base Sepolia)
+
+Deployed and wired as Stock League Season 1. TickToken is reused from the crypto league; the stock deployment does not alter crypto contract addresses.
+
+| Contract / role | Address |
+| --- | --- |
+| TICK token | `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b` |
+| StockPriceOracle proxy | `0xfcf29e88fc7c5abdada53052b962ca2395f13f03` |
+| StockResultEngine proxy | `0x37b3b9924d3be3bc58165fe6f7bd553ea1692034` |
+| StockPredictionPool proxy | `0xbb270e85c0c0de720290f5d90f4f8a0e6005a4da` |
+| StockTeamRegistry proxy | `0x85b7c8828599a6e12dccd2125af6e8deb81686fd` |
+| StockMatchRegistry proxy | `0xc3a04de16ec15947d39ac1c27914c67e480ba019` |
+| Backend signer / treasury | `0x5219d14dFbCF0be6EC00D6B5188fFF353aeb33BF` |
+
+The schedule generation and 250 TICK per-fixture seed are pending. Generate the 21 matchdays (231 fixtures) with `pnpm schedule:stock:testnet`, then seed them with `pnpm seed:stock:testnet`. The seed command approves up to 57,750 TICK and is resumable. Configure the `STOCK_` and `NEXT_PUBLIC_STOCK_` environment variables from the package env files before starting the stock backend and frontend.
+
 ## Market factory
 
 | Status | Address | Deployment block |
