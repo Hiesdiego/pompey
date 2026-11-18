@@ -11,7 +11,10 @@ pragma solidity ^0.8.28;
 /// tournament/CupConstants.sol pattern in the crypto repo.
 ///
 /// @dev STOCK DIFFERENCES FROM CRYPTO (locked, do not change):
-///   - 22 teams, single round-robin, 21 matchdays, 231 fixtures.
+///   - 12 teams, DOUBLE round-robin, 22 rounds, 132 fixtures.
+///     Revised Nov 18 2026 from the 22-team single round-robin plan:
+///     the 13 sidelined teams (AMD, NFLX, AVGO, PLTR, ORCL, CRM, JPM,
+///     V, LLY, DIS, HOOD, GME, AMC) return for Season 2.
 ///   - 1 goal = 0.05% (5 bps), not 0.5% (50 bps). Stocks move far less
 ///     than crypto in a 1-hour window, so the crypto threshold would draw
 ///     almost every match.
@@ -32,10 +35,10 @@ pragma solidity ^0.8.28;
 /// (or an equivalent folder) before running `pnpm build`.
 library StockConstants {
     // --- League shape (locked) ---
-    uint16 constant TEAM_COUNT = 22;
-    uint8 constant MATCHDAY_COUNT = 21;
-    uint16 constant FIXTURE_COUNT = 231;
-    uint16 constant FIXTURES_PER_MATCHDAY = 11;
+    uint16 constant TEAM_COUNT = 12;
+    uint8 constant MATCHDAY_COUNT = 22;
+    uint16 constant FIXTURE_COUNT = 132;
+    uint16 constant FIXTURES_PER_MATCHDAY = 6;
 
     // --- Season (locked) ---
     /// @notice Stock league season id in this stack's own namespace.
@@ -43,7 +46,17 @@ library StockConstants {
     /// league, so its season id must never be mixed with crypto season ids.
     uint256 constant SEASON_ID = 1;
     /// @notice Nov 26 2026 00:00:00 UTC. Matchday 20 opens Dec 16 2026.
+    /// DOUBLE-HEADER FINALE: Nov 26 to Dec 16 inclusive is 21 days, so
+    /// 22 rounds need one double-header day. Dec 16 hosts rounds 21 and
+    /// 22 (matchdayIndex 20 and 21) in two waves, morning and evening,
+    /// 12 fixtures that day. Both rounds share the Dec 16 matchday
+    /// window (see StockMatchRegistry._storeFixture), so the window day
+    /// offset is min(matchdayIndex, 20), never 21.
     uint64 constant SEASON_START_TIMESTAMP = 1795651200;
+    /// @notice Number of calendar days the season spans (Nov 26 to Dec 16
+    /// inclusive). Rounds per season (22) exceed this by one, which is
+    /// exactly the double-header finale.
+    uint8 constant SEASON_DAY_COUNT = 21;
     /// @notice One matchday per day.
     uint64 constant MATCHDAY_INTERVAL_SECONDS = 86400;
     /// @notice 1-hour matches, same as the crypto league.

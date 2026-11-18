@@ -8,15 +8,20 @@ import { StockConstants } from "./StockConstants.sol";
 
 /// @title StockTeamRegistry - TICKR Stock League roster (UUPS upgradeable)
 ///
-/// @notice Stores the fixed 22-team stock roster, in the locked teamId
-/// order 0-21: NVDA, AAPL, MSFT, AMZN, GOOGL, META, TSLA, AMD, NFLX,
-/// AVGO, PLTR, MSTR, ORCL, CRM, JPM, V, LLY, DIS, HOOD, CRCL, GME, AMC.
-/// Every team is a Coinbase B20 tokenized stock (symbol suffixed `c`,
-/// 8 decimals). Token addresses are copied verbatim from
-/// base-tokenized-stocks.csv (Base Tokenized Stocks API, live 2026-11-14).
+/// @notice Stores the fixed 12-team stock roster, in the locked teamId
+/// order 0-11: NVDA, AAPL, MSFT, AMZN, GOOGL, META, TSLA, MSTR, CRCL,
+/// INTC, SNDK, SPCX (SpaceX). Revised Nov 18 2026 from the 22-team
+/// roster: INTC, SNDK and SPCX are NEW, not in the 22-team roster.
+/// The 13 sidelined teams return for Season 2. Every team is a
+/// Coinbase B20 tokenized stock (symbol suffixed `c`, 8 decimals).
+/// Token addresses are copied verbatim from the Base Tokenized Stocks
+/// API (https://api.coinbase.com/v1/tokenized-stocks), re-verified live
+/// Nov 18 2026: all 12 carry a live nav_price that day. The old
+/// 22-team registry is NOT reused and NOT modified; this is a fresh
+/// registry for the fresh 12-team stack (see StockDeploy.ts).
 ///
 /// @dev STOCK DIFFERENCES FROM CRYPTO TeamRegistry:
-///   - 22 teams, not 20, and each team carries its on-chain token address
+///   - 12 teams, not 20, and each team carries its on-chain token address
 ///     plus decimals (crypto teams are off-chain CoinGecko/Binance ids).
 ///   - UUPS upgradeable instead of a plain constructor deployment, so the
 ///     roster metadata can be corrected without a full stack redeploy.
@@ -54,7 +59,7 @@ contract StockTeamRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
 
     /// @notice One-time initializer, called through the proxy by the deploy
     /// script. `names`, `symbols` and `tokenAddresses` must each have
-    /// exactly StockConstants.TEAM_COUNT (22) entries, in the locked order.
+    /// exactly StockConstants.TEAM_COUNT (12) entries, in the locked order.
     function initialize(
         address initialOwner,
         string[] memory names,

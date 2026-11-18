@@ -1,9 +1,12 @@
 /**
- * Seed all 231 Stock League Season 1 fixtures with 250 TICK each.
+ * Seed all 132 Stock League Season 1 fixtures with 250 TICK each.
+ *
+ * Run ONLY against the FRESH 12-team StockPredictionPool deployed by
+ * the 12-team StockDeploy.ts, after the fresh schedule is generated.
  *
  * Run after `schedule:stock:testnet`. This script verifies the complete
  * schedule and that the configured signer owns the pool, approves the full
- * maximum (57,750 TICK), then seeds in resumable batches. The contract skips
+ * maximum (33,000 TICK), then seeds in resumable batches. The contract skips
  * already-seeded fixtures, so rerunning after an interrupted batch is safe.
  *
  * Usage:
@@ -17,7 +20,7 @@ import "dotenv/config";
 import { network } from "hardhat";
 import { isAddress, parseAbi } from "viem";
 
-const EXPECTED_FIXTURES = 231;
+const EXPECTED_FIXTURES = 132;
 const FIXTURE_SEED = 250n * 10n ** 18n;
 const ERC20_ABI = parseAbi([
   "function approve(address spender, uint256 amount) external returns (bool)",
@@ -38,7 +41,7 @@ async function main(): Promise<void> {
   const seasonId = BigInt(process.env.STOCK_SEASON_ID ?? "1");
   const batchSize = Number(process.env.STOCK_FIXTURES_PER_BATCH ?? "33");
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > EXPECTED_FIXTURES) {
-    throw new Error("STOCK_FIXTURES_PER_BATCH must be an integer from 1 to 231");
+    throw new Error("STOCK_FIXTURES_PER_BATCH must be an integer from 1 to 132");
   }
 
   const { viem } = await network.create("baseSepolia");

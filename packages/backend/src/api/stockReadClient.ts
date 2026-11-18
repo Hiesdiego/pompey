@@ -1,5 +1,5 @@
 /**
- * Stock on-chain read helpers for the REST API — league table, pools,
+ * Stock on-chain read helpers for the REST API, league table, pools,
  * fixture results, forfeits.
  *
  * Intended destination: packages/backend/src/api/stockReadClient.ts.
@@ -7,7 +7,7 @@
  * scan for GF/GA, 900-block getLogs chunks with watermarks, dirty-only
  * re-reads) with stock differences:
  *
- *   - Stock contracts, stock season id, STOCK_TEAMS (22 teams).
+ *   - Stock contracts, stock season id, STOCK_TEAMS (12 teams).
  *   - Table sort is the LOCKED tiebreak, applied here, never trusting
  *     the raw multicall order: points, goal difference, goals scored,
  *     wins, fewest losses. (The crypto backend learned this the hard way
@@ -19,7 +19,8 @@
  *     scoring, exactly as the crypto engine emits them under 50 bps.
  *   - FORFEIT flag surfaced. Forfeits are indexed from the stock
  *     ResultEngine's ForfeitRecorded event, whose ABI matches the stock
- *     contract source. The scan filters by topic, so an absent event
+ *     contract source (seasonId, fixtureId, homeTeamId, awayTeamId,
+ *     forfeitingTeamId, outcome). The scan filters by topic, so an absent event
  *     simply yields an empty
  *     map, never an error. Table rows carry forfeitWins/forfeitLosses
  *     counts, and getStockFixtureResult() reports the forfeit per
@@ -28,6 +29,9 @@
  *     and the API can show it WAS a forfeit, never a played 3-0.
  *   - Reads go through the shared fallback transport
  *     (createStockPublicClient from stockSnapshotSubmitter.ts).
+ *   - 12-TEAM REVISION (2026-11-18): reads run only against the FRESH
+ *     stock contracts from STOCK_* env vars. The old 22-team registry
+ *     (fixtureCount 231) is never read; see stockConfig.ts.
  *   - NO PlayerStats reads here: the stock pool cannot write to the
  *     crypto PlayerStats (one-time setter already set), so there is no
  *     stock PlayerStats to read. Per-player stock outcomes are derived
@@ -153,7 +157,7 @@ export interface StockFixtureResult {
   voided: boolean;
 }
 
-/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000 — stay under it. */
+/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000, stay under it. */
 const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
 export class StockChainReader {
@@ -194,7 +198,7 @@ export class StockChainReader {
       this.refreshResultEventsInBackground(seasonId);
       this.refreshForfeitEventsInBackground(seasonId);
     } catch (err) {
-      logger.warn("[StockChainReader] event scan failed — serving table without GF/GA and forfeit flags", {
+      logger.warn("[StockChainReader] event scan failed, serving table without GF/GA and forfeit flags", {
         error: String(err),
       });
     }

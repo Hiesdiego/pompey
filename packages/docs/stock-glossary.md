@@ -1,6 +1,7 @@
 # TICKR Stock League: Glossary
 
-Status: locked, Nov 16 2026. Season 1 runs Nov 26 to Dec 16 2026.
+Status: locked, Nov 18 2026. 12-team revision, supersedes the Nov 16 2026
+22-team spec. Season 1 runs Nov 26 to Dec 16 2026.
 
 ## B20
 
@@ -41,6 +42,14 @@ drop-in fallback for the stock league. It is used only if the user supplies a
 `DINARI_API_KEY_ID`. Dinari-only tickers (SPY, QQQ, BABA, TSM, ASML, COST,
 COIN and the rest) sit out Season 1.
 
+## Double round-robin
+
+The Season 1 format. Every team plays every other team twice, once at home
+and once away. With 12 teams that is 22 rounds, 6 fixtures per round, 132
+fixtures in total. Nov 26 to Dec 16 2026 inclusive is 21 days, so 22 rounds
+need one double-header day: the Dec 16 finale hosts rounds 21 and 22 in two
+waves (morning and evening), 12 fixtures that day.
+
 ## Forfeit
 
 A 3-0 loss awarded when a team has no performance for the match period,
@@ -61,15 +70,29 @@ The rounding rule for converting a price move into goals. A move is divided by
 the goal threshold (0.05%) and rounded to the nearest whole goal, with exact
 halves rounding up for positive moves and away from zero for negative moves.
 On chain this is integer math with a half-goal value of 2 bps
-(`BPS_PER_GOAL / 2`). In practice: 0.03% scores the first goal, 0.08% the
-second, 0.13% the third. The exact half point, 0.025%, scores 0 goals under
-the integer math.
+(`BPS_PER_GOAL / 2`). The price move is first truncated to integer basis
+points. In practice: 0.03% scores the first goal, 0.08% the second, 0.13% the
+third. The exact half point, 0.025%, truncates to 2 bps and scores 0 goals
+under the integer math.
+
+## Last-NAV rule
+
+The price rule approved Nov 18 2026. When the Chainlink NAV feed is healthy
+but quiet, the backend accepts the last NAV as the end price, as long as that
+NAV is no older than 24 hours plus a short grace allowance (the 24-hour
+heartbeat). The backend never fabricates a price: it only reuses a real,
+published NAV, and every use of a carried-over NAV is logged. The rule does
+not fix a team with no NAV at all, which is why the roster shrank from 22
+teams to 12.
 
 ## Matchday
 
-One day of the season. The stock league has 21 matchdays, 11 fixtures each,
-231 fixtures in total. A matchday lasts 1 day and all of its matches end the
-same day. Kickoffs are staggered randomly across the matchday.
+One day of the season. The stock league has 21 matchdays, Nov 26 to Dec 16
+2026, and 22 rounds, because the Dec 16 finale hosts rounds 21 and 22 in two
+waves (morning and evening), 12 fixtures that day. Every other matchday hosts
+one round of 6 fixtures. 132 fixtures in total. A matchday lasts 1 day and
+all of its matches end the same day. Kickoffs are staggered randomly across
+the matchday.
 
 ## NAV (Net Asset Value)
 
@@ -80,7 +103,8 @@ token. The on-chain oracle registry at
 `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD` returns the multiplier and a pause
 flag per token in one call. NAV is the stock league's primary price feed.
 NAV feeds update on deviation or heartbeat and can go stale, which is why
-every snapshot checks staleness before trusting a price.
+every snapshot checks staleness before trusting a price, and why the last-NAV
+rule exists for a healthy but quiet feed.
 
 ## No-negative scoreline
 
@@ -106,13 +130,22 @@ what each winner staked. There is no bookmaker setting odds. The payout
 depends on how the pool is split: fewer winners on your outcome means a bigger
 share each.
 
+## Round
+
+One full set of fixtures in which every team plays once. With 12 teams, a
+round has 6 fixtures. Season 1 has 22 rounds and 132 fixtures. Nov 26 to
+Dec 16 2026 inclusive is 21 days, so the Dec 16 finale hosts two rounds, 21
+and 22, in two waves (morning and evening), 12 fixtures that day.
+
 ## Snapshot
 
 A price read pinned to a match moment: the kickoff snapshot at the start of
 the 1-hour window and the full-time snapshot at the end. Only movement between
 the two snapshots counts toward the score. A snapshot is blocked if the NAV is
 stale at that moment, exactly like the crypto league blocks on a stale price.
-TICKR never settles on a guessed price.
+Under the last-NAV rule, a healthy but quiet feed lets the backend use the
+last NAV, no older than 24 hours plus grace, as the end price. TICKR never
+settles on a guessed price.
 
 ## Staking window
 

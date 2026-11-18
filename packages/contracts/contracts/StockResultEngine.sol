@@ -60,7 +60,7 @@ interface IStockPredictionPoolForEngine {
 ///     constructor; setPredictionPool / setPriceOracle / setMatchRegistry
 ///     are one-time setters, as in crypto.
 ///   - isSeasonComplete counts settled PLUS voided fixtures against the
-///     231-fixture total, since a voided fixture is final too.
+///     132-fixture total, since a voided fixture is final too.
 contract StockResultEngine is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     IStockMatchRegistryForEngine public matchRegistry;
     bool public matchRegistrySet;

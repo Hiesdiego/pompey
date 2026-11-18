@@ -6,20 +6,24 @@
  *
  * Mirrors the crypto match page (spec P3.6 to P3.8): pre-match staking,
  * live % bars, post-match result plus claim. State derives from the
- * fixture (backend) merged with live WebSocket updates, plus the
+ * fixture (backend) merged with live updates, plus the
  * StockPriceOracle kickoff snapshot on-chain.
  *
  * Stock differences, all locked:
  *   - Contracts: STOCK_CONTRACTS, STOCK_PREDICTION_POOL_ABI,
  *     STOCK_PRICE_ORACLE_ABI, STOCK_MATCH_REGISTRY_ABI, STOCK_SEASON_ID.
- *   - Scoring: 1 goal = 0.05% (5 bps), integer basis point math, max 10 goals,
- *     no-negative scorelines, via stockFormat.ts. The live board and the
- *     final board both use stockScoreline, never the crypto 0.5% helper.
+ *   - Scoring: 1 goal = 0.05% (5 bps), integer basis point math, 0.03%
+ *     is the first scoring move, max 10 goals, no-negative scorelines,
+ *     via stockFormat.ts. The live board and the final board both use
+ *     stockScoreline, never the crypto 0.5% helper.
  *   - Window: 1 hour from stockMatchConfig.ts (60 min fallback, never
  *     the stale 45-minute shared constant). Betting closes 5 minutes
  *     before full time, same as crypto.
- *   - Feed: Chainlink NAV via the stock oracle. A stale NAV blocks the
- *     snapshot, and the audit card says so plainly.
+ *   - Feed: Chainlink NAV via the stock oracle. Price rule, user
+ *     approved Nov 18 2026: the last NAV within the 24h heartbeat
+ *     counts as the end price when the feed is healthy but quiet. That
+ *     rule does NOT fix a team with no NAV at all, which is why Season
+ *     1 has 12 teams. The audit card says so plainly.
  *   - Forfeit: a settled forfeit shows 3-0 with a FORFEIT pill and the
  *     forfeiting side named. A void shows VOID and notes stakes are
  *     refunded. Both are settled states, claims follow the pool result.
@@ -32,12 +36,22 @@
  *     so the audit box is inline here as StockAuditCard. It shows the
  *     kickoff and full time NAV values, the feed name, and the stale
  *     state. Do not claim an audit card exists elsewhere.
+ *   - On-chain fixture read: STOCK_MATCH_REGISTRY_ABI lists the full
+ *     10-field getFixture tuple, including voided and matchEndTimestamp.
+ *     The 22-team frontend ABI omitted both, so the old code read the
+ *     settled word as a timestamp. This page reads kickoffTimestamp and
+ *     matchEndTimestamp by name only, never by tuple index.
  *
  * League switcher: All / Crypto / Stocks pills at the top link to the
  * matching fixtures views, same control as standings and fixtures.
  *
- * Prices: the single shared WebSocket in useLiveFeed supplies live
- * prices. No second /api/prices poll is added here.
+ * Prices: useStockLiveFeed supplies live stock prices, namespaced by
+ * stock teamId. Stock teamIds 0 to 11 overlap crypto teamIds, so stock
+ * prices are never read from the crypto price map. No second
+ * /api/prices poll is added here.
+ *
+ * Rounds: 22 rounds, Nov 26 to Dec 16 2026. Rounds 21 and 22 share
+ * Dec 16, the double-header finale, morning and evening waves.
  *
  * All timestamps are UTC.
  */
@@ -67,6 +81,7 @@ import {
   formatSignedPctStock,
   formatUtcDateTime,
   forfeitScoreline,
+  stockRoundWave,
   stockScoreline,
 } from "../../../../lib/stockFormat";
 import { formatTick, isoToMs, parseTickInput, OUTCOME_LABELS, OUTCOME_SHORT } from "../../../../lib/format";
@@ -366,7 +381,7 @@ function StockAuditCard({
       </h3>
       {!snapshot ? (
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Kickoff snapshot not yet on-chain. Bars appear once the backend submits start NAV values. A stale NAV blocks the snapshot, it never settles on a stale price.
+          Kickoff snapshot not yet on-chain. Bars appear once the backend submits start NAV values. When the feed is healthy but quiet, the last NAV within the 24h heartbeat counts as the end price. A team with no NAV at all cannot play, which is why Season 1 has 12 teams.
         </p>
       ) : (
         <dl className="space-y-2 text-sm tabular-nums">
@@ -393,7 +408,7 @@ function StockAuditCard({
         </dl>
       )}
       <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-        Feed: Chainlink NAV, 1 goal = 0.05%, 1-hour window, max 10 goals, 3% volatile cap.
+        Feed: Chainlink NAV, 1 goal = 0.05%, 1-hour window, max 10 goals, 3% volatile cap. When the feed is healthy but quiet, the last NAV within the 24h heartbeat counts as the end price.
       </p>
     </div>
   );
@@ -448,19 +463,29 @@ export default function StockMatchPage() {
         }),
       ]);
       setBettingOpen(Boolean(open));
-      const raw = onChainFixture as unknown as { kickoffTimestamp?: bigint; matchEndTimestamp?: bigint } & Record<number, bigint>;
-      const kickoff = (raw.kickoffTimestamp ?? raw[5] ?? 0n) as bigint;
-      const matchEnd = (raw.matchEndTimestamp ?? raw[7] ?? 0n) as bigint;
-      setMatchEndMs(
-        stockMatchEndMs(
-          kickoff > 0n ? Number(kickoff) * 1000 : null,
-          matchEnd > 0n ? Number(matchEnd) * 1000 : null
-        )
-      );
+      // Named fields only. The 10-field ABI includes voided and
+      // matchEndTimestamp, so these names decode correctly. Never read
+      // the tuple by index here: the old 8-field ABI made index 7 the
+      // settled flag, which the old code misread as a timestamp.
+      const raw = onChainFixture as unknown as {
+        homeTeamId: number;
+        awayTeamId: number;
+        matchdayIndex: number;
+        windowStart: bigint;
+        windowEnd: bigint;
+        kickoffTimestamp: bigint;
+        kickoffRevealed: boolean;
+        settled: boolean;
+        voided: boolean;
+        matchEndTimestamp: bigint;
+      };
+      const kickoff = raw.kickoffTimestamp ?? 0n;
+      const matchEnd = raw.matchEndTimestamp ?? 0n;
       const end = stockMatchEndMs(
         kickoff > 0n ? Number(kickoff) * 1000 : null,
         matchEnd > 0n ? Number(matchEnd) * 1000 : null
       );
+      setMatchEndMs(end);
       setBettingCloseMs(stockBettingCloseMs(end));
     } catch {
       setBettingOpen(false);
@@ -651,7 +676,11 @@ export default function StockMatchPage() {
   const winning = pool?.winningOutcome ?? null;
   const hasStake = stakes !== null && stakes.some((s) => s > 0n);
   const won = winning !== null && stakes !== null && stakes[winning] > 0n;
+  const wave = stockRoundWave(fixture.matchdayIndex);
 
+  // Live prices are namespaced stock prices (useStockLiveFeed, keyed by
+  // stock teamId). StockApiPrice.price is a string or null, Number()
+  // converts it. A null price means no live NAV yet, bars wait.
   const homePctLive =
     snapshot && prices[fixture.home.teamId]?.price
       ? ((Number(prices[fixture.home.teamId].price) - Number(snapshot.homeStart) / 10 ** 8) /
@@ -715,9 +744,10 @@ export default function StockMatchPage() {
         ))}
       </div>
 
-      <SectionTitle title={`Stocks, Matchday ${fixture.matchdayIndex + 1}`} />
+      <SectionTitle title={`Stocks, Round ${fixture.matchdayIndex + 1}`} />
       <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
         Kickoff {formatUtcDateTime(fixture.kickoff)}, all times UTC. 1 goal = 0.05%, 1-hour window, Chainlink NAV.
+        {wave !== null && ` Dec 16 double-header finale, ${wave} wave.`}
       </p>
 
       <div className="glass relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8">

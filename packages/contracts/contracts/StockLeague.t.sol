@@ -26,7 +26,8 @@ import { StockPredictionPool } from "./StockPredictionPool.sol";
 /// forfeit 3-0 with explicit flag, both-no-performance void with 1:1
 /// refund, tiebreak fields (points, GD, GF), treasury sweep on zero
 /// winning stakers, 7% fee parimutuel payout, and schedule shape
-/// (21 matchdays, 231 fixtures, 11 per matchday).
+/// (22 rounds, 132 fixtures, 6 per round, double round-robin with a
+/// mirrored second leg and a Dec 16 double-header finale).
 contract StockLeagueTest is Test {
     TickToken tick;
     StockTeamRegistry teamRegistry;
@@ -58,21 +59,15 @@ contract StockLeagueTest is Test {
         tick.mint(bob, 10_000 * 10 ** 18);
         tick.mint(carol, 10_000 * 10 ** 18);
 
-        string[] memory names = new string[](22);
+        string[] memory names = new string[](12);
         names[0] = "NVIDIA"; names[1] = "Apple"; names[2] = "Microsoft"; names[3] = "Amazon";
-        names[4] = "Alphabet"; names[5] = "Meta"; names[6] = "Tesla"; names[7] = "AMD";
-        names[8] = "Netflix"; names[9] = "Broadcom"; names[10] = "Palantir"; names[11] = "Strategy";
-        names[12] = "Oracle"; names[13] = "Salesforce"; names[14] = "JPMorgan"; names[15] = "Visa";
-        names[16] = "Eli Lilly"; names[17] = "Disney"; names[18] = "Robinhood"; names[19] = "Circle";
-        names[20] = "GameStop"; names[21] = "AMC";
-        string[] memory symbols = new string[](22);
+        names[4] = "Alphabet"; names[5] = "Meta"; names[6] = "Tesla"; names[7] = "Strategy";
+        names[8] = "Circle"; names[9] = "Intel"; names[10] = "Sandisk"; names[11] = "SpaceX";
+        string[] memory symbols = new string[](12);
         symbols[0] = "NVDAc"; symbols[1] = "AAPLc"; symbols[2] = "MSFTc"; symbols[3] = "AMZNc";
-        symbols[4] = "GOOGLc"; symbols[5] = "METAc"; symbols[6] = "TSLAc"; symbols[7] = "AMDc";
-        symbols[8] = "NFLXc"; symbols[9] = "AVGOc"; symbols[10] = "PLTRc"; symbols[11] = "MSTRc";
-        symbols[12] = "ORCLc"; symbols[13] = "CRMc"; symbols[14] = "JPMc"; symbols[15] = "Vc";
-        symbols[16] = "LLYc"; symbols[17] = "DISc"; symbols[18] = "HOODc"; symbols[19] = "CRCLc";
-        symbols[20] = "GMEc"; symbols[21] = "AMCc";
-        address[] memory tokens = new address[](22);
+        symbols[4] = "GOOGLc"; symbols[5] = "METAc"; symbols[6] = "TSLAc"; symbols[7] = "MSTRc";
+        symbols[8] = "CRCLc"; symbols[9] = "INTCc"; symbols[10] = "SNDKc"; symbols[11] = "SPCXc";
+        address[] memory tokens = new address[](12);
         tokens[0] = 0xb20000000000000000000078ee7ce2fE4908108C;
         tokens[1] = 0xb200000000000000000000C2e324d24d7eEcd1fb;
         tokens[2] = 0xB200000000000000000000Ab99cFa739E253872B;
@@ -80,21 +75,12 @@ contract StockLeagueTest is Test {
         tokens[4] = 0xb2000000000000000000002D0BA3164cc74f58B7;
         tokens[5] = 0xb2000000000000000000008bC8786B856E61707C;
         tokens[6] = 0xb2000000000000000000001e800a7f5189430cD0;
-        tokens[7] = 0xB2000000000000000000000d8Ce462E99ee7A47B;
-        tokens[8] = 0xb20000000000000000000058B8c947e44011dFE6;
-        tokens[9] = 0xB200000000000000000000Fc737aeA6196aB5a4c;
-        tokens[10] = 0xb2000000000000000000007d16372840dF4dAbbe;
-        tokens[11] = 0xb2000000000000000000004884b426556b92883d;
-        tokens[12] = 0xb200000000000000000000347AFbA223D7B6b63C;
-        tokens[13] = 0xB2000000000000000000006432a3a7991e718DBB;
-        tokens[14] = 0xB200000000000000000000FDe956536A25725156;
-        tokens[15] = 0xB20000000000000000000054b11Fd279a4f7D4EF;
-        tokens[16] = 0xB200000000000000000000f1a0F91e34892E4718;
-        tokens[17] = 0xb2000000000000000000000bD75bF439A38bF7DF;
-        tokens[18] = 0xb2000000000000000000006F944897540579D3f2;
-        tokens[19] = 0xB20000000000000000000019f6E7C675b73C2e4D;
-        tokens[20] = 0xb2000000000000000000007790ed6E48e06eD935;
-        tokens[21] = 0xB200000000000000000000CD7e6b8042cb7c2BB5;
+        tokens[7] = 0xb2000000000000000000004884b426556b92883d;
+        tokens[8] = 0xB20000000000000000000019f6E7C675b73C2e4D;
+        tokens[9] = 0xB2000000000000000000004AFF16039bA04bdFBc;
+        tokens[10] = 0xb200000000000000000000397293Cb8cda9a10c5;
+        tokens[11] = 0xb2000000000000000000007b9fcbd005511aCBd5;
+
 
         address teamImpl = address(new StockTeamRegistry());
         teamRegistry = StockTeamRegistry(
@@ -151,10 +137,10 @@ contract StockLeagueTest is Test {
         pool.setResultEngine(address(engine));
         matchRegistry.setResultEngine(address(engine));
 
-        // Full schedule: 21 matchdays in batches of 7.
+        // Full schedule: 22 rounds in batches of 7, 7 and 8.
         matchRegistry.generateScheduleBatch(uint64(1795651200), uint64(86400), 0, 7);
         matchRegistry.generateScheduleBatch(uint64(1795651200), uint64(86400), 7, 7);
-        matchRegistry.generateScheduleBatch(uint64(1795651200), uint64(86400), 14, 7);
+        matchRegistry.generateScheduleBatch(uint64(1795651200), uint64(86400), 14, 8);
 
         // Seed the fixtures the tests use (0, 1, 2): 250 TICK each.
         tick.approve(address(pool), 250 * 10 ** 18 * 3);
@@ -372,22 +358,68 @@ contract StockLeagueTest is Test {
     // --- Schedule shape ---
 
     function testScheduleShape() public view {
-        assertEq(matchRegistry.fixtureCount(), 231);
+        assertEq(matchRegistry.fixtureCount(), 132);
         assertTrue(matchRegistry.scheduleGenerated());
-        assertEq(matchRegistry.getFixturesByMatchday(0).length, 11);
-        assertEq(matchRegistry.getFixturesByMatchday(20).length, 11);
-        // Matchday 20 window opens Dec 16 2026 00:00 UTC.
-        StockFixture memory f230 = matchRegistry.getFixture(230);
-        assertEq(f230.windowStart, uint64(1795651200) + 20 * 86400);
-        assertEq(f230.windowEnd, uint64(1795651200) + 21 * 86400);
-        // Season is complete only after all 231 finalize.
+        assertEq(matchRegistry.getFixturesByMatchday(0).length, 6);
+        assertEq(matchRegistry.getFixturesByMatchday(20).length, 6);
+        assertEq(matchRegistry.getFixturesByMatchday(21).length, 6);
+        // Matchday 21 window opens Dec 16 2026 00:00 UTC: the double-header
+        // finale shares the Dec 16 window with matchday 20, it does NOT
+        // open Dec 17.
+        StockFixture memory f131 = matchRegistry.getFixture(131);
+        assertEq(f131.windowStart, uint64(1795651200) + 20 * 86400);
+        assertEq(f131.windowEnd, uint64(1795651200) + 21 * 86400);
+        // Season is complete only after all 132 finalize.
         assertFalse(engine.isSeasonComplete(SEASON_ID));
     }
 
+    function testMirrorLegSwapsHomeAndAway() public view {
+        // Fixture f (first leg, rounds 0-10) and fixture f + 66 (second
+        // leg, rounds 11-21) are the same pairing with home and away
+        // swapped, so every pairing is played once at each home.
+        for (uint256 f = 0; f < 66; f++) {
+            (uint16 h0, uint16 a0) = _fixtureTeams(f);
+            (uint16 h1, uint16 a1) = _fixtureTeams(f + 66);
+            assertEq(h1, a0);
+            assertEq(a1, h0);
+        }
+    }
+
+    function testDoubleHeaderFinaleSharesDec16Window() public view {
+        // Rounds 21 and 22 (matchdayIndex 20 and 21) share the Dec 16
+        // window: 12 fixtures that day, in two waves.
+        StockFixture memory f120 = matchRegistry.getFixture(120);
+        StockFixture memory f126 = matchRegistry.getFixture(126);
+        assertEq(f120.windowStart, f126.windowStart);
+        assertEq(f120.windowStart, uint64(1795651200) + 20 * 86400);
+        assertEq(uint256(f120.matchdayIndex), 20);
+        assertEq(uint256(f126.matchdayIndex), 21);
+        assertEq(
+            matchRegistry.getFixturesByMatchday(20).length
+                + matchRegistry.getFixturesByMatchday(21).length,
+            12
+        );
+    }
+
+    function testEachTeamPlays22MatchesElevenHomeElevenAway() public view {
+        // Every team plays 22 matches: 11 at home, 11 away.
+        for (uint16 t = 0; t < 12; t++) {
+            uint256 homeCount;
+            uint256 awayCount;
+            for (uint256 f = 0; f < 132; f++) {
+                (uint16 h, uint16 a) = _fixtureTeams(f);
+                if (h == t) homeCount++;
+                if (a == t) awayCount++;
+            }
+            assertEq(homeCount, 11);
+            assertEq(awayCount, 11);
+        }
+    }
+
     function testEachTeamPlaysOncePerMatchday() public view {
-        // Matchday 0: 22 distinct teams across 11 fixtures.
+        // Matchday 0: 12 distinct teams across 6 fixtures.
         uint256[] memory ids = matchRegistry.getFixturesByMatchday(0);
-        bool[] memory seen = new bool[](22);
+        bool[] memory seen = new bool[](12);
         for (uint256 i = 0; i < ids.length; i++) {
             (uint16 h, uint16 a) = _fixtureTeams(ids[i]);
             assertFalse(seen[h]);
@@ -398,9 +430,9 @@ contract StockLeagueTest is Test {
     }
 
     function testCannotReinitializeProxy() public {
-        string[] memory n = new string[](22);
-        string[] memory s = new string[](22);
-        address[] memory t = new address[](22);
+        string[] memory n = new string[](12);
+        string[] memory s = new string[](12);
+        address[] memory t = new address[](12);
         vm.prank(owner);
         vm.expectRevert();
         teamRegistry.initialize(owner, n, s, t);

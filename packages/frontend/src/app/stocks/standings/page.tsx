@@ -22,10 +22,13 @@
  * a wrong table. After 3 retries it renders what the backend returned
  * and shows a note that goals are still loading.
  *
- * Scoring: 1 goal = 0.05% (5 bps), half-up, no-negative scorelines,
- * max 10 goals per team, 3 pts win / 1 draw / 0 loss, forfeit 3-0.
- * TP (TickrPoints) is unified off-chain and is not a stock table. It
- * lives on the player profile.
+ * Season: 12 teams, double round-robin, 22 rounds, 132 fixtures,
+ * Nov 26 to Dec 16 2026. Dec 16 hosts rounds 21 and 22 in two waves.
+ * Scoring: 1 goal = 0.05% (5 bps), integer basis point math, 0.03% is
+ * the first scoring move, no-negative scorelines, max 10 goals per
+ * team, 3 pts win / 1 draw / 0 loss, forfeit 3-0. TP (TickrPoints) is
+ * unified off-chain and is not a stock table. It lives on the player
+ * profile.
  *
  * Prices: this page adds no price polling. It reads no prices at all.
  */
@@ -147,7 +150,7 @@ export default function StockStandingsPage() {
       </div>
       <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
         <Table2 className="h-4 w-4 text-[#2E7CF6]" />
-        Stock Season 1, Nov 26 to Dec 16 2026, 22 teams, 21 matchdays, ordered by points, then goal difference, goals scored, wins, fewest losses
+        Stock Season 1, Nov 26 to Dec 16 2026, 12 teams, 22 rounds, 132 fixtures, ordered by points, then goal difference, goals scored, wins, fewest losses
       </p>
 
       {goalsPending && (
@@ -157,7 +160,7 @@ export default function StockStandingsPage() {
       )}
 
       {!stockTable ? (
-        <SkeletonRows rows={22} />
+        <SkeletonRows rows={12} />
       ) : stockTable.length === 0 ? (
         <p className="glass rounded-2xl p-6 text-center text-sm text-zinc-500 dark:text-zinc-500">
           No results yet, the table fills in as fixtures settle.

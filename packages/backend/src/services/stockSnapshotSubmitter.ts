@@ -1,5 +1,5 @@
 /**
- * Stock snapshot submitter — signs and sends backend-authorized stock
+ * Stock snapshot submitter, signs and sends backend-authorized stock
  * transactions.
  *
  * Intended destination: packages/backend/src/services/stockSnapshotSubmitter.ts.
@@ -22,9 +22,18 @@
  *      BOTH teams had no performance: the fixture is void and stakes are
  *      refunded 1:1 by the pool (treasury rule does not apply to a void).
  *
- * The ResultEngine ABI below matches the stock contract source. Reverts
- * for a previously recorded result are treated idempotently; all other
- * failures remain visible and the fixture is flagged for manual review.
+ * The ResultEngine ABI below matches the stock contract source (verified
+ * against packages/contracts/contracts/StockResultEngine.sol on the
+ * tickr-stock branch: recordForfeit / recordVoid, ResultAlreadyRecorded,
+ * OnlyBackend). Reverts for a previously recorded result are treated
+ * idempotently; all other failures remain visible and the fixture is
+ * flagged for manual review.
+ *
+ * 12-TEAM REVISION (2026-11-18): the old 22-team StockMatchRegistry
+ * (fixtureCount 231) cannot be reused. These ABIs are used only against
+ * the FRESH stock contracts whose addresses come from STOCK_* env vars
+ * (see stockConfig.ts). The MatchRegistry getFixture ABI includes voided,
+ * matching stockMatchLifecycle.ts (Nov 17 fix).
  *
  * Late-start recovery: if an endPrice is requested but the start
  * snapshot was never submitted (backend was down over the start window),
@@ -50,7 +59,7 @@ import { stockConfig } from "../stockConfig.js";
 import { logger } from "../lib/logger.js";
 import { scaledToPrice } from "../lib/priceMath.js";
 
-// Minimal ABIs — only what the backend calls. Custom errors are included
+// Minimal ABIs, only what the backend calls. Custom errors are included
 // so viem can DECODE revert reasons instead of logging raw selectors.
 const STOCK_PRICE_ORACLE_ABI = [
   {
@@ -156,6 +165,7 @@ const STOCK_MATCH_REGISTRY_ABI = [
           { name: "kickoffTimestamp", type: "uint64" },
           { name: "kickoffRevealed", type: "bool" },
           { name: "settled", type: "bool" },
+          { name: "voided", type: "bool" },
           { name: "matchEndTimestamp", type: "uint64" },
         ],
       },
@@ -199,7 +209,7 @@ const STOCK_RESULT_ENGINE_ABI = [
   { type: "error", name: "OnlyBackend", inputs: [] },
 ] as const;
 
-/** Serializes async work so only one tx is in flight per signer — no nonce collisions. */
+/** Serializes async work so only one tx is in flight per signer, no nonce collisions. */
 class TxQueue {
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -225,12 +235,16 @@ export interface StockSubmissionAudit {
   skipReason?: string;
   /** True when a late startPrice was submitted as recovery before this endPrice. */
   recoveredLateStart?: boolean;
+  /** True per side when the end price came from the last-NAV fallback
+   *  (healthy feed, quiet window, last NAV within 24h). Surfaced in the
+   *  submit log so a fallback settlement is auditable on-chain and off. */
+  lastNavFallback?: { home: boolean; away: boolean };
 }
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 2_000;
 
-/** Contract revert names that mean "already done" — safe to treat as success. */
+/** Contract revert names that mean "already done", safe to treat as success. */
 const IDEMPOTENT_REVERTS = [
   "StartAlreadySubmitted",
   "EndAlreadySubmitted",
@@ -365,9 +379,10 @@ export class StockSnapshotSubmitter {
     homeScaled: bigint,
     awayScaled: bigint,
     homeSource: string,
-    awaySource: string
+    awaySource: string,
+    opts: { lastNavFallback?: { home: boolean; away: boolean } } = {}
   ): Promise<StockSubmissionAudit> {
-    return this.submitPrice("endPrice", fixtureId, homeScaled, awayScaled, homeSource, awaySource);
+    return this.submitPrice("endPrice", fixtureId, homeScaled, awayScaled, homeSource, awaySource, opts.lastNavFallback);
   }
 
   private async submitPrice(
@@ -376,7 +391,8 @@ export class StockSnapshotSubmitter {
     homeScaled: bigint,
     awayScaled: bigint,
     homeSource: string,
-    awaySource: string
+    awaySource: string,
+    lastNavFallback?: { home: boolean; away: boolean }
   ): Promise<StockSubmissionAudit> {
     const audit: StockSubmissionAudit = {
       seasonId: stockConfig.seasonId,
@@ -386,6 +402,7 @@ export class StockSnapshotSubmitter {
       awayScaled,
       homeSource,
       awaySource,
+      lastNavFallback,
     };
     return this.queue.enqueue(async () => {
       const snapshot = await this.getSnapshot(fixtureId);
@@ -416,7 +433,7 @@ export class StockSnapshotSubmitter {
           // validated prices measures a ~0 move (Draw): deterministic,
           // auditable, and strictly better than locked funds. This runs
           // ONLY when the lifecycle has already ruled out a forfeit.
-          logger.error("[StockSnapshotSubmitter] LATE START RECOVERY — start snapshot missing, submitting start price now", {
+          logger.error("[StockSnapshotSubmitter] LATE START RECOVERY, start snapshot missing, submitting start price now", {
             seasonId: stockConfig.seasonId.toString(),
             fixtureId: fixtureId.toString(),
             home: scaledToPrice(homeScaled),
@@ -470,6 +487,7 @@ export class StockSnapshotSubmitter {
         away: scaledToPrice(awayScaled),
         homeSource,
         awaySource,
+        lastNavFallback: lastNavFallback ?? null,
         txHash,
       });
       return audit;
@@ -667,7 +685,7 @@ export class StockSnapshotSubmitter {
         }
         // Deterministic contract reverts are never retried.
         if (this.isContractRevert(message)) {
-          logger.error("[StockSnapshotSubmitter] contract revert — NOT retrying", { message });
+          logger.error("[StockSnapshotSubmitter] contract revert, NOT retrying", { message });
           throw err;
         }
         logger.warn("[StockSnapshotSubmitter] transient failure, retrying", {

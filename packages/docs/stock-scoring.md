@@ -1,6 +1,7 @@
 # TICKR Stock League: Scoring Explained
 
-Status: locked, Nov 16 2026. Season 1 runs Nov 26 to Dec 16 2026.
+Status: locked, Nov 18 2026. 12-team revision, supersedes the Nov 16 2026
+22-team spec. Season 1 runs Nov 26 to Dec 16 2026.
 Applies to: the TICKR Stock League only. Crypto league scoring is unchanged.
 
 ## The one line version
@@ -10,9 +11,15 @@ tokenized stock price moves in that hour. The team with more goals wins the matc
 
 ## The season at a glance
 
-- 22 teams, single round-robin. Every team plays every other team once.
-- 21 matchdays, 11 fixtures per matchday, 231 fixtures in total.
-- Season dates: Nov 26 to Dec 16 2026.
+- 12 teams, double round-robin, home and away. Every team plays every other
+  team twice, once at home and once away.
+- 22 rounds, 6 fixtures per round, 132 fixtures in total.
+- 21 matchdays, Nov 26 to Dec 16 2026 inclusive. 22 rounds in 21 days need one
+  double-header day: the Dec 16 finale hosts rounds 21 and 22 in two waves
+  (morning and evening), 12 fixtures that day. Every other matchday hosts one
+  round of 6 fixtures.
+- Season dates: Nov 26 to Dec 16 2026, ending the same day as the crypto
+  league season.
 - Matches last 1 hour, staggered randomly across the matchday, exactly like the
   crypto league. A matchday lasts 1 day and all of its matches end the same day.
 - Points: 3 for a win, 1 for a draw, 0 for a loss.
@@ -21,7 +28,7 @@ tokenized stock price moves in that hour. The team with more goals wins the matc
 
 ## The roster
 
-Team IDs 0 to 21, in this order:
+Team IDs 0 to 11, in this order:
 
 | Team ID | Team | Token |
 | --- | --- | --- |
@@ -32,25 +39,32 @@ Team IDs 0 to 21, in this order:
 | 4 | Alphabet | GOOGLc |
 | 5 | Meta | METAc |
 | 6 | Tesla | TSLAc |
-| 7 | AMD | AMDc |
-| 8 | Netflix | NFLXc |
-| 9 | Broadcom | AVGOc |
-| 10 | Palantir | PLTRc |
-| 11 | Strategy | MSTRc |
-| 12 | Oracle | ORCLc |
-| 13 | Salesforce | CRMc |
-| 14 | JPMorgan | JPMc |
-| 15 | Visa | Vc |
-| 16 | Eli Lilly | LLYc |
-| 17 | Disney | DISc |
-| 18 | Robinhood | HOODc |
-| 19 | Circle | CRCLc |
-| 20 | GameStop | GMEc |
-| 21 | AMC | AMCc |
+| 7 | Strategy | MSTRc |
+| 8 | Circle | CRCLc |
+| 9 | Intel | INTCc |
+| 10 | SanDisk | SNDKc |
+| 11 | SpaceX | SPCXc |
 
-All 22 are Coinbase B20 tokenized stocks on Base. The symbol is the ticker plus
+All 12 are Coinbase B20 tokenized stocks on Base. The symbol is the ticker plus
 `c`. Season 1 is Coinbase B20 only. Dinari-only stocks (SPY, QQQ, BABA, TSM,
 ASML, COST, COIN and the rest) sit out Season 1.
+
+All 12 teams were verified with a live NAV on Nov 18 2026. Intel, SanDisk, and
+SpaceX are new to the roster: they were not in the 22-team roster.
+
+## Why 12 teams, not 22
+
+The Nov 16 spec had 22 teams. On Nov 17 the Coinbase tokenized stocks API
+returned far fewer live NAV prices than the day before, and 13 of the 22
+rostered teams had no usable NAV at all. Under the forfeit rule, fixtures
+involving those teams would have been decided by forfeit, not by price, on
+most matchdays. The roster was cut to the 12 teams that had a live NAV on
+Nov 18.
+
+The 13 sidelined teams (AMD, NFLX, AVGO, PLTR, ORCL, CRM, JPM, V, LLY, DIS,
+HOOD, GME, AMC) return for Season 2. GameStop and AMC headline the Meme Arena
+later. The last-NAV rule below does not fix teams with no NAV at all, which is
+why the roster shrank from 22 to 12.
 
 ## The goal rule: 1 goal = 0.05%
 
@@ -75,7 +89,8 @@ move in basis points:
 move_bps = (end_price - start_price) * 10,000 / start_price
 ```
 
-Then convert the move into raw goals with half-up rounding:
+The price move is first truncated to integer basis points. Then convert the
+move into raw goals with half-up rounding:
 
 ```
 raw_goals = round_half_up(move_bps / 5)
@@ -83,9 +98,8 @@ raw_goals = round_half_up(move_bps / 5)
 
 On chain this is integer math, identical in form to the crypto league's
 `CupEngine._roundedPercentChange`, with `BPS_PER_GOAL = 5` instead of 50 and a
-half-goal value of 2 basis points (`5 / 2`, integer division). The price move
-is first truncated to integer basis points; 3 bps is the first move that
-scores a goal. A 2.5 bps move truncates to 2 bps and scores zero.
+half-goal value of 2 basis points (`5 / 2`, integer division). Positive moves
+round up from the half, negative moves round away from zero from the half.
 
 In practice that gives these bands:
 
@@ -102,8 +116,9 @@ In practice that gives these bands:
 | -0.13% to -0.17% | -3 |
 
 And so on, 1 goal per additional 0.05%. A move of exactly 0.025% sits on the
-half-goal boundary and scores 0 goals under the on-chain integer math. A move
-needs to reach 0.03% to score its first goal.
+half-goal boundary: it truncates to 2 bps and scores 0 goals under the on-chain
+integer math. A move needs to reach 0.03% (3 bps) to score its first goal.
+Frontend displays must use this same rule, a first goal at 0.03%, not 0.025%.
 
 ## Step 2: no-negative scorelines
 
@@ -151,31 +166,31 @@ GOOGL (home) rises 0.04%. META (away) rises 0.04%.
 
 ### Example 4: both teams fall
 
-JPM (home) falls 0.06%. V (away) falls 0.11%.
+INTC (home) falls 0.06%. SNDK (away) falls 0.11%.
 
-- JPM raw: -6 bps, (-6 - 2) / 5 = -1 goal.
-- V raw: -11 bps, (-11 - 2) / 5 = -2 goals.
+- INTC raw: -6 bps, (-6 - 2) / 5 = -1 goal.
+- SNDK raw: -11 bps, (-11 - 2) / 5 = -2 goals.
 - G_home = max(0, -1) + max(0, 2) = 2.
 - G_away = max(0, -2) + max(0, 1) = 1.
-- Final score: JPM 2, V 1. JPM wins, 3 points. The team that fell less wins
+- Final score: INTC 2, SNDK 1. INTC wins, 3 points. The team that fell less wins
   the match, because its smaller fall concedes fewer goals.
 
 ### Example 5: a quiet hour, 0-0
 
-DIS (home) rises 0.01%. NFLX (away) falls 0.02%.
+CRCL (home) rises 0.01%. SPCX (away) falls 0.02%.
 
-- DIS raw: 1 bp, (1 + 2) / 5 = 0 goals.
-- NFLX raw: -2 bps, (-2 - 2) / 5 = 0 goals.
+- CRCL raw: 1 bp, (1 + 2) / 5 = 0 goals.
+- SPCX raw: -2 bps, (-2 - 2) / 5 = 0 goals.
 - Final score: 0-0. Draw, 1 point each.
 
 ### Example 6: the 10-goal cap
 
-MSTR (home) rises 0.60% in a wild hour. GME (away) falls 0.60%.
+MSTR (home) rises 0.60% in a wild hour. TSLA (away) falls 0.60%.
 
 - MSTR raw: 60 bps, (60 + 2) / 5 = 12 goals.
-- GME raw: -60 bps, (-60 - 2) / 5 = -12 goals.
+- TSLA raw: -60 bps, (-60 - 2) / 5 = -12 goals.
 - Uncapped: G_home = 12 + 12 = 24, G_away = 0.
-- Capped at 10 goals per team per match: final score MSTR 10, GME 0.
+- Capped at 10 goals per team per match: final score MSTR 10, TSLA 0.
 - MSTR wins, 3 points. No team can score more than 10 goals in one match,
   however large the move.
 
@@ -201,10 +216,10 @@ review, exactly as in the crypto league and cup.
 ## Forfeit: no performance means 0-3
 
 If a stock has no performance for the match period, meaning no usable price at
-kickoff or at full time, or no NAV update inside the window, that team forfeits.
-The opponent wins 3-0 automatically. The result is marked FORFEIT on the
-fixture, the table, and the match page, so a forfeit win is always visible as a
-forfeit, never mistaken for a played 3-0.
+kickoff or at full time, that team forfeits. The opponent wins 3-0
+automatically. The result is marked FORFEIT on the fixture, the table, and the
+match page, so a forfeit win is always visible as a forfeit, never mistaken for
+a played 3-0.
 
 - One team with no performance: the other team wins 3-0, 3 points to the
   winner, 0 to the forfeiting team, goal difference plus 3 and minus 3.
@@ -232,7 +247,8 @@ counts. What the stock did before kickoff or after full time is irrelevant.
 
 Kickoffs are staggered randomly across the matchday, like the crypto league, so
 fixtures are spread across the day rather than all starting at once. A matchday
-lasts 1 day and all 11 of its matches end the same day.
+lasts 1 day and all 6 of its matches end the same day. On the Dec 16 finale,
+the two waves (rounds 21 and 22) each end the same day.
 
 ## The price feed and staleness
 
@@ -247,9 +263,24 @@ NAV feeds update only on price deviation or heartbeat, and can hold their last
 value for a stretch. Every snapshot checks staleness against
 `nav_price_updated_at` before trusting a price.
 
-- If the NAV is stale at snapshot time, the snapshot is BLOCKED, exactly like
-  the crypto league blocks on a stale price. No snapshot, no settlement, no
-  guessed price.
+### The last-NAV rule
+
+Approved Nov 18 2026. When the feed is healthy but quiet, the backend accepts
+the last NAV as the end price, as long as that NAV is no older than 24 hours
+plus a short grace allowance (the 24-hour heartbeat). In plain language: a
+stock that barely moved, so Chainlink published no fresh NAV during the hour,
+still gets a price, the most recent NAV, and the match plays on. The backend
+never fabricates a price. It only reuses a real, published NAV, and every use
+of a carried-over NAV is logged.
+
+What this rule does not do: it does not fix a team with no NAV at all. A stock
+that has never published a NAV, or whose feed is down rather than quiet, still
+has no price, and the forfeit rule above applies. That is why the roster
+shrank from 22 teams to 12: the 13 sidelined teams had no NAV to carry over.
+
+- If the last NAV is older than 24 hours plus grace, or the feed is unhealthy,
+  the snapshot is BLOCKED, exactly like the crypto league blocks on a stale
+  price. No snapshot, no settlement, no guessed price.
 - If a blocked snapshot leaves a team with no performance for the period, the
   forfeit rule above applies.
 - CoinGecko is the last resort only, and only if it has a price for that token.
@@ -263,6 +294,21 @@ B20 tokens are native precompiles on Base, not separately deployed contracts.
 There is no per-token bytecode on Basescan. That does not block the league: the
 league only reads prices and stakes TICK, it never holds the stock tokens.
 
+## Season setup: the 22-team schedule cannot be reused
+
+The deployed StockMatchRegistry at
+`0xc3a04de16ec15947d39ac1c27914c67e480ba019` already has fixtureCount 231 for
+the 22-team season and CANNOT be reused for the 12-team season. A 22-team
+single round-robin schedule does not become a 12-team double round-robin
+schedule. The redo path is:
+
+1. Deploy a FRESH StockTeamRegistry with the 12 teams above, teamIds 0 to 11.
+2. Deploy a FRESH StockMatchRegistry.
+3. Generate the 22-round schedule (132 fixtures) and seed it.
+
+Do not pretend the old schedule works for 12 teams. The old registry stays as
+the record of the superseded 22-team plan.
+
 ## How stock scoring differs from crypto scoring
 
 | | Crypto league | Stock league |
@@ -270,7 +316,7 @@ league only reads prices and stakes TICK, it never holds the stock tokens.
 | Goal threshold | 1 goal = 0.5% (50 bps) | 1 goal = 0.05% (5 bps) |
 | Match window | 1 hour | 1 hour |
 | Price feed | Coinbase, Binance, CoinGecko | Chainlink NAV via Base API, CoinGecko last resort |
-| Rounding | Half-up | Half-up |
+| Rounding | Half-up | Half-up, truncated to integer bps first |
 | No-negative scorelines | Yes | Yes, same formula |
 | Points | 3 / 1 / 0 | 3 / 1 / 0 |
 | Table tiebreak | Points, GD, GF, wins, fewest losses | Same order |
@@ -293,12 +339,22 @@ because a stock feed can go quiet in ways a crypto feed rarely does.
 ## Quick reference
 
 - 1 goal = 0.05% = 5 bps. `BPS_PER_GOAL = 5`.
-- Half-up rounding, integer math, half-goal value 2 bps.
+- Half-up rounding, integer math, half-goal value 2 bps. Moves truncate to
+  integer bps first; first goal at 0.03%.
 - `G_home = max(0, r_h) + max(0, -r_a)`, `G_away = max(0, r_a) + max(0, -r_h)`.
 - Max 10 goals per team per match.
 - Raw volatile cap 3%, circuit breaker review above it, hard pause at plus or
   minus 30%.
+- Last-NAV rule: last NAV no older than 24h plus grace, feed healthy but
+  quiet, every use logged, never a fabricated price. No NAV at all still
+  means forfeit.
 - Forfeit: one team with no performance loses 0-3, marked FORFEIT.
 - Void: both teams with no performance, stakes refunded 1:1.
 - Points 3 / 1 / 0. Tiebreak: points, GD, GF, wins, fewest losses.
-- Season: 22 teams, 21 matchdays, 231 fixtures, Nov 26 to Dec 16 2026.
+- Season: 12 teams, double round-robin, 22 rounds, 6 fixtures per round,
+  132 fixtures, 21 matchdays, Nov 26 to Dec 16 2026. Dec 16 finale hosts
+  rounds 21 and 22 in two waves, 12 fixtures that day.
+- Setup: fresh StockTeamRegistry (12 teams) plus fresh StockMatchRegistry.
+  The deployed 22-team registry
+  `0xc3a04de16ec15947d39ac1c27914c67e480ba019` (fixtureCount 231) cannot be
+  reused.

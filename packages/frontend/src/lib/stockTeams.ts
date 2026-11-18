@@ -1,22 +1,31 @@
 /**
- * Stock League roster (Season 1, locked).
+ * Stock League roster (Season 1, locked, 12-team revision Nov 18 2026).
  *
  * Target location in the repo:
  *   packages/frontend/src/lib/stockTeams.ts
  *
- * 22 teams, teamId 0 to 21, single round-robin, 21 matchdays.
- * Season 1 is Coinbase B20 only. SPY, QQQ, BABA, TSM, ASML, COST and COIN
- * are Dinari-only and sit out Season 1. GME and AMC are the two added
- * teams, the meme pair, highest retail recognition and 1-hour volatility,
- * both Coinbase B20 (GMEc, AMMc), a natural derby.
+ * 12 teams, teamId 0 to 11, double round-robin, home and away, 22 rounds,
+ * 6 fixtures per round, 132 fixtures, Nov 26 to Dec 16 2026. Nov 26 to
+ * Dec 16 inclusive is 21 days, so 22 rounds need one double-header day:
+ * the Dec 16 finale hosts rounds 21 and 22 in two waves, morning and
+ * evening. See stockFormat.ts for the round-to-date mapping.
+ *
+ * Season 1 is Coinbase B20 only. The 13 sidelined teams (AMD, NFLX,
+ * AVGO, PLTR, ORCL, CRM, JPM, V, LLY, DIS, HOOD, GME, AMC) return for
+ * Season 2. INTC, SNDK and SPCX are new in this 12-team roster, they
+ * were not in the 22-team roster. All 12 teams were verified with live
+ * NAV on Nov 18 2026.
  *
  * Symbols carry the "c" suffix for the Coinbase tokenized form, for
  * example NVDAc. Names are the full company names, used on cards and
- * tables. No CoinGecko dependency anywhere in this file: logos resolve
- * from local static assets under /public/stock-logos/ first, then fall
- * back to a letter avatar. Add one SVG per symbol there before launch,
- * for example /public/stock-logos/nvdac.svg. If a logo file is missing,
- * the UI still renders, it never blocks the table or a fixture.
+ * tables. No CoinGecko dependency anywhere in this file. Logos are
+ * remote brand logos, verified live Nov 18 2026: DuckDuckGo favicons
+ * for 10 teams, Simple Icons for Strategy (microstrategy) and Circle
+ * (circle). Every URL below answered HTTP 200 on Nov 18 2026. The
+ * local /public/stock-logos/ folder was never shipped, so never point
+ * a logo there. StockTeamBadge still falls back to a letter avatar if
+ * a logo fails to load, so a missing logo never blocks the table or a
+ * fixture.
  *
  * Token contract addresses are intentionally blank here. Do not invent
  * them. Fill tokenContract after the Coinbase B20 token list is verified
@@ -24,6 +33,11 @@
  * yet", and StockTeamBadge treats it as logo-only, never as an error.
  *
  * Decimals: 8, matching the StockPriceOracle NAV scale (1e8).
+ *
+ * TeamId overlap warning: stock teamIds 0 to 11 overlap crypto teamIds,
+ * so live prices must be namespaced per league, never keyed by bare
+ * teamId alone. Stock prices arrive through useStockLiveFeed, keyed by
+ * stock teamId only, and are never merged into the crypto price map.
  */
 
 export interface StockTeam {
@@ -34,33 +48,23 @@ export interface StockTeam {
   /** Coinbase B20 token contract address, "" until verified on-chain. */
   tokenContract: string;
   decimals: 8;
-  /** Local logo path, /public/stock-logos/<symbol-lowercase>.svg. */
+  /** Remote brand logo URL (verified live Nov 18 2026); letter-avatar fallback on error. */
   logoPath: string;
 }
 
 export const STOCK_TEAMS: StockTeam[] = [
-  { teamId: 0, name: "NVIDIA Corporation", shortName: "NVIDIA", symbol: "NVDAc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/nvdac.svg" },
-  { teamId: 1, name: "Apple Inc.", shortName: "Apple", symbol: "AAPLc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/aaplc.svg" },
-  { teamId: 2, name: "Microsoft Corporation", shortName: "Microsoft", symbol: "MSFTc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/msftc.svg" },
-  { teamId: 3, name: "Amazon.com, Inc.", shortName: "Amazon", symbol: "AMZNc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/amznc.svg" },
-  { teamId: 4, name: "Alphabet Inc.", shortName: "Alphabet", symbol: "GOOGLc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/googlc.svg" },
-  { teamId: 5, name: "Meta Platforms, Inc.", shortName: "Meta", symbol: "METAc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/metac.svg" },
-  { teamId: 6, name: "Tesla, Inc.", shortName: "Tesla", symbol: "TSLAc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/tslac.svg" },
-  { teamId: 7, name: "Advanced Micro Devices, Inc.", shortName: "AMD", symbol: "AMDc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/amdc.svg" },
-  { teamId: 8, name: "Netflix, Inc.", shortName: "Netflix", symbol: "NFLXc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/nflxc.svg" },
-  { teamId: 9, name: "Broadcom Inc.", shortName: "Broadcom", symbol: "AVGOc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/avgoc.svg" },
-  { teamId: 10, name: "Palantir Technologies Inc.", shortName: "Palantir", symbol: "PLTRc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/pltrc.svg" },
-  { teamId: 11, name: "Strategy Inc.", shortName: "Strategy", symbol: "MSTRc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/mstrc.svg" },
-  { teamId: 12, name: "Oracle Corporation", shortName: "Oracle", symbol: "ORCLc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/orclc.svg" },
-  { teamId: 13, name: "Salesforce, Inc.", shortName: "Salesforce", symbol: "CRMc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/crmc.svg" },
-  { teamId: 14, name: "JPMorgan Chase and Co.", shortName: "JPMorgan", symbol: "JPMc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/jpmc.svg" },
-  { teamId: 15, name: "Visa Inc.", shortName: "Visa", symbol: "Vc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/vc.svg" },
-  { teamId: 16, name: "Eli Lilly and Company", shortName: "Eli Lilly", symbol: "LLYc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/llyc.svg" },
-  { teamId: 17, name: "The Walt Disney Company", shortName: "Disney", symbol: "DISc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/disc.svg" },
-  { teamId: 18, name: "Robinhood Markets, Inc.", shortName: "Robinhood", symbol: "HOODc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/hoodc.svg" },
-  { teamId: 19, name: "Circle Internet Group, Inc.", shortName: "Circle", symbol: "CRCLc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/crclc.svg" },
-  { teamId: 20, name: "GameStop Corp.", shortName: "GameStop", symbol: "GMEc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/gmec.svg" },
-  { teamId: 21, name: "AMC Entertainment Holdings, Inc.", shortName: "AMC", symbol: "AMCc", tokenContract: "", decimals: 8, logoPath: "/stock-logos/amcc.svg" },
+  { teamId: 0, name: "NVIDIA Corporation", shortName: "NVIDIA", symbol: "NVDAc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/nvidia.com.ico" },
+  { teamId: 1, name: "Apple Inc.", shortName: "Apple", symbol: "AAPLc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/apple.com.ico" },
+  { teamId: 2, name: "Microsoft Corporation", shortName: "Microsoft", symbol: "MSFTc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/microsoft.com.ico" },
+  { teamId: 3, name: "Amazon.com, Inc.", shortName: "Amazon", symbol: "AMZNc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/amazon.com.ico" },
+  { teamId: 4, name: "Alphabet Inc.", shortName: "Alphabet", symbol: "GOOGLc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/google.com.ico" },
+  { teamId: 5, name: "Meta Platforms, Inc.", shortName: "Meta", symbol: "METAc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/meta.com.ico" },
+  { teamId: 6, name: "Tesla, Inc.", shortName: "Tesla", symbol: "TSLAc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/tesla.com.ico" },
+  { teamId: 7, name: "Strategy Inc.", shortName: "Strategy", symbol: "MSTRc", tokenContract: "", decimals: 8, logoPath: "https://cdn.simpleicons.org/microstrategy" },
+  { teamId: 8, name: "Circle Internet Group, Inc.", shortName: "Circle", symbol: "CRCLc", tokenContract: "", decimals: 8, logoPath: "https://cdn.simpleicons.org/circle" },
+  { teamId: 9, name: "Intel Corporation", shortName: "Intel", symbol: "INTCc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/intel.com.ico" },
+  { teamId: 10, name: "SanDisk Corporation", shortName: "SanDisk", symbol: "SNDKc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/sandisk.com.ico" },
+  { teamId: 11, name: "SpaceX", shortName: "SpaceX", symbol: "SPCXc", tokenContract: "", decimals: 8, logoPath: "https://icons.duckduckgo.com/ip3/spacex.com.ico" },
 ];
 
 export function stockTeamById(teamId: number): StockTeam | undefined {

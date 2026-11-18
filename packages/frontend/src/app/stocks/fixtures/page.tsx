@@ -9,20 +9,37 @@
  * on each card. Crypto filters to crypto fixtures only, Stocks to stock
  * fixtures only. The switcher links match the standings page switcher.
  *
- * Matchdays: 21 stock matchdays, Nov 26 to Dec 16 2026, one matchday
- * per day, 11 fixtures per matchday, 231 fixtures total. The pager is
- * the stock matchday pager. The selected day is a UTC calendar day, so
- * crypto fixtures kicking off that UTC day appear under All even though
- * the crypto season uses different matchday numbers. Defaults to the
- * first matchday with any non-settled fixture.
+ * Rounds: 22 stock rounds, Nov 26 to Dec 16 2026, 6 fixtures per
+ * round, 132 fixtures total. Nov 26 to Dec 16 inclusive is 21 days, so
+ * 22 rounds need one double-header day: the Dec 16 finale hosts
+ * rounds 21 and 22 in two waves, morning and evening, 12 fixtures
+ * that day. The pager shows all 22 rounds. Rounds 21 and 22 both carry
+ * the Dec 16 date and the wave in their title, and a banner names the
+ * double-header whenever either finale round is selected. Round dates
+ * come from stockMatchdayDate, which clamps the day offset at 20, so
+ * round 22 maps to Dec 16, never Dec 17.
+ *
+ * The selected day is a UTC calendar day, so crypto fixtures kicking
+ * off that UTC day appear under All even though the crypto season uses
+ * different matchday numbers. Defaults to the first round with any
+ * non-settled fixture.
+ *
+ * Live feed namespacing: fixtureUpdates come from useStockLiveFeed,
+ * which is keyed by STOCK fixtureId. They are passed to StockFixtureCard
+ * only. Crypto FixtureCards get no liveUpdate here, matching the crypto
+ * fixtures page, because a stock fixtureId and a crypto fixtureId are
+ * different matches that happen to share a number. Passing stock
+ * updates into crypto cards would corrupt their kickoff and settled
+ * state. Stock prices are likewise namespaced by stock teamId inside
+ * useStockLiveFeed and never merged into the crypto price map.
  *
  * Refetch: fixtures refetch every 15 seconds while the page is open.
  * That is the fixtures REST refetch, not a price poll. Prices arrive
- * over the single shared WebSocket in useLiveFeed, reused here. Do not
- * add a second /api/prices poll for stocks, it would double egress
- * against the 1GB per month backend cap. Stock prices are only
- * subscribed while a stock page is mounted, because useLiveFeed is only
- * mounted by pages that call it.
+ * through useStockLiveFeed, which polls /api/stocks/prices. Do not add
+ * a second /api/prices poll for stocks, it would double egress against
+ * the 1GB per month backend cap. Stock prices are only subscribed while
+ * a stock page is mounted, because useStockLiveFeed is only mounted by
+ * pages that call it.
  *
  * All timestamps are UTC. See stockFormat.ts, there is no utcTime.ts
  * in the repo at origin/main bad5ca6.
@@ -36,7 +53,14 @@ import { CalendarDays, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
 import { useStockLiveFeed } from "../../../hooks/useStockLiveFeed";
 import { api, type ApiFixture } from "../../../lib/api";
 import { stockApi, type StockApiFixture } from "../../../lib/stockContracts";
-import { stockMatchdayDate, utcDayKey } from "../../../lib/stockFormat";
+import {
+  stockMatchdayDate,
+  stockRoundLabel,
+  stockRoundWave,
+  STOCK_DOUBLE_HEADER_DATE,
+  STOCK_TOTAL_ROUNDS,
+  utcDayKey,
+} from "../../../lib/stockFormat";
 import { FixtureCard } from "../../../components/FixtureCard";
 import { StockFixtureCard, stockFixtureStatus } from "../../../components/StockFixtureCard";
 import { StockScoringExplainer } from "../../../components/StockScoringExplainer";
@@ -95,6 +119,9 @@ export default function StockFixturesPage() {
 
   const current = matchdays.find(([md]) => md === matchday);
   const selectedDay = matchday === null ? null : stockMatchdayDate(matchday);
+  const selectedWave = matchday === null ? null : stockRoundWave(matchday);
+  const isDoubleHeaderDay =
+    selectedDay === STOCK_DOUBLE_HEADER_DATE && selectedWave !== null;
 
   const visibleStock = useMemo(() => {
     if (!current) return [];
@@ -148,7 +175,7 @@ export default function StockFixturesPage() {
       </div>
       <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
         <CalendarDays className="h-4 w-4 text-[#2E7CF6]" />
-        Stock Season 1, 21 matchdays, 1-hour windows, 1 matchday lasts 1 day, Nov 26 to Dec 16 2026, all times UTC
+        Stock Season 1, {STOCK_TOTAL_ROUNDS} rounds, 6 fixtures per round, 132 fixtures, Nov 26 to Dec 16 2026, Dec 16 hosts rounds 21 and 22 in two waves, all times UTC
       </p>
 
       {!stockFixtures || matchday === null ? (
@@ -160,7 +187,7 @@ export default function StockFixturesPage() {
               onClick={() => setMatchday((m) => Math.max(0, (m ?? 0) - 1))}
               disabled={matchday === 0}
               className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
-              aria-label="Previous matchday"
+              aria-label="Previous round"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -170,6 +197,7 @@ export default function StockFixturesPage() {
                   const open = list.some(
                     (f) => stockFixtureStatus(f, fixtureUpdates[f.fixtureId]) !== "settled"
                   );
+                  const wave = stockRoundWave(md);
                   return (
                     <button
                       key={md}
@@ -178,11 +206,19 @@ export default function StockFixturesPage() {
                         "relative shrink-0 rounded-lg px-2.5 py-1.5 font-display text-xs font-bold tabular-nums transition-all active:scale-95",
                         md === matchday
                           ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white shadow-[0_0_16px_rgba(46,124,246,.45)]"
-                          : "bg-black/5 text-zinc-500 hover:bg-[#2E7CF6]/10 hover:text-[#1D4ED8] dark:bg-white/5 dark:text-zinc-400 dark:hover:bg-[#2E7CF6]/12 dark:hover:text-[#7db3ff]"
+                          : "bg-black/5 text-zinc-500 hover:bg-[#2E7CF6]/10 hover:text-[#1D4ED8] dark:bg-white/5 dark:text-zinc-400 dark:hover:bg-[#2E7CF6]/12 dark:hover:text-[#7db3ff]",
+                        wave !== null &&
+                          "ring-1 ring-amber-500/60 dark:ring-amber-400/60"
                       )}
-                      title={`Matchday ${md + 1}, ${stockMatchdayDate(md)} UTC`}
+                      title={stockRoundLabel(md)}
+                      aria-label={stockRoundLabel(md)}
                     >
                       {md + 1}
+                      {wave !== null && (
+                        <span className="ml-1 text-[9px] font-bold uppercase">
+                          {wave === "morning" ? "AM" : "PM"}
+                        </span>
+                      )}
                       {open && md !== matchday && (
                         <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#1D9E75] shadow-[0_0_6px_rgba(29,158,117,.8)]" />
                       )}
@@ -195,18 +231,31 @@ export default function StockFixturesPage() {
               onClick={() => setMatchday((m) => Math.min(matchdays.length - 1, (m ?? 0) + 1))}
               disabled={matchdays.length === 0 || matchday === matchdays.length - 1}
               className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
-              aria-label="Next matchday"
+              aria-label="Next round"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
 
+          {isDoubleHeaderDay && (
+            <p className="mb-6 rounded-xl bg-amber-500/10 p-3 text-sm font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">
+              Double-header finale, Dec 16 hosts rounds 21 and 22 in two waves, morning and
+              evening, 12 fixtures that day. You are viewing round {matchday + 1}, the{" "}
+              {selectedWave} wave.
+            </p>
+          )}
+
           {!current ? (
-            <EmptyState title="No fixtures for this matchday." />
+            <EmptyState title="No fixtures for this round." />
           ) : (
             <>
               <h2 className="mb-4 font-display text-base font-bold text-zinc-900 dark:text-white">
-                Matchday {current[0] + 1}
+                Round {current[0] + 1}
+                {selectedWave !== null && (
+                  <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-300">
+                    Dec 16 double-header, {selectedWave} wave
+                  </span>
+                )}
                 <span className="ml-2 text-sm font-normal text-zinc-500">
                   {selectedDay} UTC, {current[1].length} stock matches
                   {filter === "all" && visibleCrypto.length > 0
@@ -244,7 +293,6 @@ export default function StockFixturesPage() {
                         <FixtureCard
                           key={`crypto-${f.fixtureId}`}
                           fixture={f}
-                          liveUpdate={fixtureUpdates[f.fixtureId]}
                         />
                       ))}
                     </div>
@@ -252,7 +300,7 @@ export default function StockFixturesPage() {
                 </>
               )}
               {filter === "all" && visibleStock.length === 0 && visibleCrypto.length === 0 && (
-                <EmptyState title="No fixtures for this matchday." />
+                <EmptyState title="No fixtures for this round." />
               )}
             </>
           )}

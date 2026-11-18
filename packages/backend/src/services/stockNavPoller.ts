@@ -1,5 +1,5 @@
 /**
- * Stock NAV poller — Chainlink NAV via the Base Tokenized Stocks API.
+ * Stock NAV poller, Chainlink NAV via the Base Tokenized Stocks API.
  *
  * Intended destination: packages/backend/src/services/stockNavPoller.ts.
  * Mirrors the shape of the crypto CoinbasePoller (EventEmitter, in-memory
@@ -7,8 +7,8 @@
  * as the primary source, but the polling discipline is different in every
  * way that matters for the 1 GB/month bandwidth cap:
  *
- *   - ONE HTTP call per poll covers ALL 22 teams. GET / with page_size
- *     500 returns the full token list (368 tokens live 2026-11-16) in a
+ *   - ONE HTTP call per poll covers ALL 12 teams. GET / with page_size
+ *     500 returns the full token list (87 tokens live 2026-11-18) in a
  *     single response, paginated only via next_page_token. There is no
  *     per-team endpoint to hammer; per-team polling would be pure waste.
  *   - HOT/IDLE cadence. Hot (60s) only inside the daily hot window: 30
@@ -31,8 +31,9 @@
  *     last published onchain. A missing nav_price (the API omits
  *     unset/zero fields) means NO usable price for that token, never a
  *     zero. Live check 2026-11-16: only 12 of 368 tokens carried a NAV
- *     at 19:27 UTC, and GMEc had none at all. A team with no NAV is a
- *     forfeit candidate, never a zero price.
+ *     at 19:27 UTC, and GMEc had none at all; live check 2026-11-18:
+ *     the list holds 87 tokens and all 12 roster teams carry a NAV. A
+ *     team with no NAV is a forfeit candidate, never a zero price.
  *   - Freshness for PRICING uses stockConfig.nav.staleAfterMs (25h:
  *     24h heartbeat + 1h tolerance). Freshness for FORFEIT uses the
  *     match window plus grace (stockPriceFeed.isWindowFresh): the NAV
@@ -204,6 +205,28 @@ export class StockNavPoller extends EventEmitter {
     return { ...this.meter };
   }
 
+  /** Ms since epoch of the last poll attempt (any outcome), or null before the first poll. */
+  getLastPollAtMs(): number | null {
+    return this.meter.lastPollAtMs;
+  }
+
+  /**
+   * Feed health, the gate for the last-NAV fallback (see stockPriceFeed.ts):
+   * true only when the last poll SUCCEEDED and landed within
+   * `withinMs` (default stockConfig.nav.feedHealthyWithinMs, 30 min).
+   * A quiet feed is only trustworthy when the poller itself is proving,
+   * poll after poll, that the API is reachable and returning data. An
+   * outage must never be mistaken for a quiet feed: when this returns
+   * false, the fallback does NOT apply and the forfeit/void path stands.
+   */
+  isFeedHealthy(withinMs: number = stockConfig.nav.feedHealthyWithinMs, now: number = Date.now()): boolean {
+    return (
+      this.meter.lastPollOk &&
+      this.meter.lastPollAtMs !== null &&
+      now - this.meter.lastPollAtMs <= withinMs
+    );
+  }
+
   /**
    * One-shot poll, e.g. a gap-fill before a snapshot when the in-memory
    * map is stale. Never touches the poll timer. Note the list endpoint
@@ -270,7 +293,7 @@ export class StockNavPoller extends EventEmitter {
         // Circuit-breaker review: keep the last good tick, quarantine this one.
         tick.suspect = true;
         this.suspect.set(team.teamId, tick);
-        logger.error("[StockNavPoller] SUSPECT NAV — deviation beyond +/-30%, quarantined, last good kept", {
+        logger.error("[StockNavPoller] SUSPECT NAV, deviation beyond +/-30%, quarantined, last good kept", {
           teamId: team.teamId,
           ticker: team.ticker,
           previous: prev.navPrice,
@@ -300,7 +323,7 @@ export class StockNavPoller extends EventEmitter {
 
   /**
    * Fetch every token record, following next_page_token until exhausted.
-   * One page holds 500 tokens and the live list is 368, so this is
+   * One page holds 500 tokens and the live list is 87 (Nov 18), so this is
    * normally a single request. Each page counts against the meter.
    */
   private async fetchAllTokens(): Promise<ApiToken[]> {

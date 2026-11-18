@@ -4,6 +4,11 @@
  * Target location in the repo:
  *   packages/frontend/src/lib/stockMatchConfig.ts
  *
+ * Season: 12 teams, double round-robin, 22 rounds, Nov 26 to Dec 16
+ * 2026. Dec 16 hosts rounds 21 and 22 in two waves, morning and
+ * evening. Round dates live in stockFormat.ts (stockMatchdayDate),
+ * this file only owns the match window length.
+ *
  * FIX NOTE, read this before touching the crypto side.
  * There is no lib/matchConfig.ts in the repo at origin/main bad5ca6, and
  * there is no lib/utcTime.ts either. The task description assumed both

@@ -1,17 +1,20 @@
 /**
- * Stock checkpoint submitter — hourly oracle checkpoints for the stock league.
+ * Stock checkpoint submitter, hourly oracle checkpoints for the stock league.
  *
  * Intended destination: packages/backend/src/services/stockCheckpointSubmitter.ts.
  * Mirrors the crypto CheckpointSubmitter (hourly slot, submitCheckpoints,
  * dedupe by hour slot in-memory + on-chain getPriceAt verification, batch
  * 20, one tx per batch, gas-bounded) with stock differences only:
  *
- *   - Stock teamIds 0-21 (STOCK_TEAMS), stock PriceOracle, stock season id.
+ *   - Stock teamIds 0-11 (STOCK_TEAMS, 12 teams), stock PriceOracle, stock season id.
  *   - Prices come from the StockPriceFeed (NAV primary). A team with no
  *     fresh NAV in an hour is SKIPPED for that hour, never checkpointed
  *     with a stale or zero price: a missing checkpoint is a gap the
  *     markets that need it cannot resolve until VOID_WINDOW, by design,
- *     so resolution is never fabricated.
+ *     so resolution is never fabricated. NOTE: the feed's 25h pricing
+ *     bound means a quiet hour still checkpoints the last NAV; the
+ *     last-NAV fallback (stockPriceFeed.ts) is a FULL-TIME rule only and
+ *     does not change checkpointing.
  *   - Writes go through the shared fallback transport
  *     (createStockPublicClient / createStockFallbackTransport from
  *     stockSnapshotSubmitter.ts) and the same serialized TxQueue pattern
@@ -161,7 +164,7 @@ export class StockCheckpointSubmitter {
       functionName: "teamCount",
     })) as number;
     if (teamCount === 0) {
-      logger.warn("[StockCheckpointSubmitter] empty roster — skipping");
+      logger.warn("[StockCheckpointSubmitter] empty roster, skipping");
       return;
     }
     if (teamCount !== STOCK_TEAMS.length) {
@@ -202,11 +205,11 @@ export class StockCheckpointSubmitter {
       }
     }
     if (teamIds.length === 0) {
-      logger.error("[StockCheckpointSubmitter] no stock team prices available — skipping hour", { slot });
+      logger.error("[StockCheckpointSubmitter] no stock team prices available, skipping hour", { slot });
       return;
     }
 
-    // Batch-submit (gas-bounded, batch 20: 22 teams = 2 txs).
+    // Batch-submit (gas-bounded, batch 20: 12 teams = 1 tx).
     const batchSize = stockConfig.checkpoints.batchSize;
     await this.queue.enqueue(async () => {
       for (let i = 0; i < teamIds.length; i += batchSize) {

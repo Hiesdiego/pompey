@@ -17,11 +17,19 @@
  *   finished stock match reads at a glance. Live cards show the live
  *   rounded score when the caller passes it.
  *
+ * LiveFixtureUpdate is imported from ./FixtureCard, where the crypto
+ * card defines it. There is no hooks/useLiveFeed.ts in the branch, so
+ * do not import the type from there.
+ *
  * Statuses: tba / scheduled / upcoming / live / awaiting / settled /
  * voided / forfeit. "scheduled" is the revealed-but-not-yet-kickoff
  * state the crypto card calls "upcoming" with a countdown, kept here as
  * an alias so callers from either naming can use it. Pills: TBA, LIVE,
  * FT, FORFEIT, VOID, Awaiting result.
+ *
+ * Rounds: 22 rounds, 6 fixtures per round. The card label reads
+ * "Stocks · Round N". Rounds 21 and 22 share Dec 16, the double-header
+ * finale, so those cards add the morning or evening wave to the label.
  *
  * Scoring reminder on every card footer: 1 goal = 0.05%, 1-hour window.
  */
@@ -33,7 +41,7 @@ import { Clock } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isoToMs } from "../lib/format";
 import { STOCK_MATCH_MS } from "../lib/stockMatchConfig";
-import { formatStockScoreline } from "../lib/stockFormat";
+import { formatStockScoreline, stockRoundWave } from "../lib/stockFormat";
 import type { StockApiFixture } from "../lib/stockContracts";
 import { StockTeamBadge } from "./StockLeagueTable";
 import { Countdown } from "./Countdown";
@@ -148,6 +156,8 @@ export function StockFixtureCard({
         : formatStockScoreline(fixture.homeGoals ?? null, fixture.awayGoals ?? null, {
             forfeit: fixture.forfeit === true,
           });
+  const wave = stockRoundWave(fixture.matchdayIndex);
+  const roundLabel = `Stocks · Round ${fixture.matchdayIndex + 1}${wave ? `, ${wave} wave` : ""}`;
 
   return (
     <Link
@@ -160,7 +170,7 @@ export function StockFixtureCard({
     >
       <div className="mb-3 flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-500">
-          Stocks · Matchday {fixture.matchdayIndex + 1}
+          {roundLabel}
         </span>
         <StatusPill status={status} kickoffMs={kickoffMs} />
       </div>

@@ -1,5 +1,5 @@
 /**
- * Stock price feed — validator + aggregator, the single choke point every
+ * Stock price feed, validator + aggregator, the single choke point every
  * stock snapshot goes through before it touches the chain.
  *
  * Intended destination: packages/backend/src/services/stockPriceFeed.ts.
@@ -7,9 +7,9 @@
  * for start/end source consistency, same cross-validation), but the
  * source stack is the stock stack:
  *
- *   1. Chainlink NAV (primary) — StockNavPoller, Base Tokenized Stocks
+ *   1. Chainlink NAV (primary), StockNavPoller, Base Tokenized Stocks
  *      API. nav_price + nav_price_updated_at + multiplier.
- *   2. Dinari (gated, NOT automatic) — only when DINARI_API_KEY_ID is
+ *   2. Dinari (gated, NOT automatic), only when DINARI_API_KEY_ID is
  *      supplied by the user AND a Dinari client is provided to the
  *      constructor. VERIFIED 2026-11-16: Dinari rows exist for all 20
  *      roster tickers plus all 10 reserves, but the Dinari API is
@@ -21,7 +21,7 @@
  *      DinariPriceSource implementation (one method, getLatest) and the
  *      tier activates; until then the tier is inert and the feed logs
  *      once that Dinari is configured-but-unavailable.
- *   3. CoinGecko (last resort) — only if it has a price for the ticker.
+ *   3. CoinGecko (last resort), only if it has a price for the ticker.
  *      The crypto CoingeckoPoller is reused by shape (getPrice(id)),
  *      but the id map is passed in separately and defaults to EMPTY:
  *      no CoinGecko ids for these stocks have been verified, and none
@@ -47,15 +47,38 @@
  *   that period, even if its yesterday-close price is still within the
  *   25h pricing bound. The lifecycle calls this at FT, never at kickoff.
  *
- * SHARP EDGE, flagged for the user: Chainlink equity feeds publish on
- * 0.5% deviation or a 24h heartbeat. A stock that moves less than 0.5%
- * inside a 1-hour match publishes NO new NAV round, so under the locked
- * forfeit rule it forfeits even though nothing is wrong with the feed.
- * That is the locked rule as specified (forfeit, never a silent normal
- * result), but if quiet hours forfeit too often the rule itself needs
- * revisiting (e.g. accept the last NAV as the end price when the feed
- * is healthy but quiet). This file implements the rule; it does not
- * soften it.
+ * LAST-NAV FALLBACK (user approved 2026-11-18, implemented here as
+ * resolveEndPrice / checkLastNavFallback): Chainlink equity feeds publish
+ * on 0.5% deviation or a 24h heartbeat. A stock that moves less than 0.5%
+ * inside a 1-hour match publishes NO new NAV round, so under the old
+ * forfeit rule it forfeited even though nothing was wrong with the feed.
+ * The approved rule accepts the last NAV within the 24h heartbeat as the
+ * end price when the feed is healthy but quiet, instead of forfeiting.
+ * The fallback is named, bounded, and logged, and it NEVER fabricates a
+ * price: it reuses the actual last published NAV value and timestamp.
+ * Conditions, all required (see checkLastNavFallback):
+ *   (a) the team HAS a last NAV tick at all (a team with no NAV ever
+ *       published is not covered; that is why the roster shrank to 12);
+ *   (b) the last NAV was published BEFORE kickoff (the quiet case: no
+ *       publish during the window, so the pre-match NAV is the end
+ *       price; a NAV published after FT + grace is post-match data and
+ *       is never used as the end price);
+ *   (c) the last NAV is no older than
+ *       stockConfig.nav.lastNavFallbackMaxAgeMs (24h) at full-time;
+ *   (d) the feed is HEALTHY: the poller's last poll succeeded within
+ *       stockConfig.nav.feedHealthyWithinMs (30 min), so an outage is
+ *       never mistaken for a quiet feed.
+ * When the fallback applies, the end price equals the start price for
+ * that team (same NAV), so the team scores 0 goals from its own move
+ * and the result is decided by the opponent's move. Every use is logged
+ * at WARN with fixture, team, NAV price, publish time and age, counted
+ * in lastNavFallbackUses, and flagged on the validated price
+ * (lastNavFallback: true) so the API and the submitter audit show it.
+ * The fallback applies ONLY at full-time, via resolveEndPrice. The
+ * start snapshot still uses getValidatedPrice (25h pricing bound) and
+ * the forfeit rule is unchanged for teams that fail every condition:
+ * no performance and no fallback means 0-3 forfeit, both sides missing
+ * means void.
  */
 
 import { stockConfig } from "../stockConfig.js";
@@ -96,6 +119,12 @@ export interface StockValidatedPrice {
   coingeckoPrice: string | null;
   /** Largest deviation of any other fresh source vs the chosen primary. */
   deviationBps: number | null;
+  /** True when this price came from the last-NAV fallback (see header):
+   *  the NAV was published before kickoff and reused as the end price
+   *  because the feed was healthy but quiet. False for every normal price. */
+  lastNavFallback: boolean;
+  /** Age of the reused NAV at full-time (ms), or null when no fallback. */
+  lastNavFallbackAgeMs: number | null;
 }
 
 export class StockPriceUnavailableError extends Error {
@@ -134,6 +163,17 @@ export class StockPriceValidationError extends Error {
   }
 }
 
+/** Result of the last-NAV fallback eligibility check. */
+export interface LastNavFallbackCheck {
+  eligible: boolean;
+  /** Short machine-readable reason (logged on every check that matters). */
+  reason: string;
+  /** The last published NAV tick, when one exists. */
+  tick?: NavTick;
+  /** Age of the tick at full-time (ms), when a tick exists. */
+  ageAtFullTimeMs?: number;
+}
+
 const STALE_WARN_THROTTLE_MS = 5 * 60_000;
 
 export class StockPriceFeed {
@@ -148,6 +188,8 @@ export class StockPriceFeed {
   private readonly coingeckoStaleAfterMs: number;
   private readonly lastStaleWarnAt = new Map<string, number>();
   private warnedDinariUnavailable = false;
+  /** Count of last-NAV fallback uses this process lifetime (ops visibility). */
+  private lastNavFallbackUses = 0;
 
   constructor(
     nav: StockNavPoller,
@@ -186,7 +228,7 @@ export class StockPriceFeed {
     const def = this.teamDef(teamId);
     const now = Date.now();
 
-    // Tier 1 — Chainlink NAV (primary). Missing nav_price = no price.
+    // Tier 1, Chainlink NAV (primary). Missing nav_price = no price.
     let navPrice: string | null = null;
     let navPriceUpdatedAtIso: string | null = null;
     const tick: NavTick | undefined = this.nav.getLatest(teamId);
@@ -195,7 +237,7 @@ export class StockPriceFeed {
       navPriceUpdatedAtIso = tick.navPriceUpdatedAtIso;
     }
 
-    // Tier 2 — Dinari (GATED). Only when the user supplied a key AND a
+    // Tier 2, Dinari (GATED). Only when the user supplied a key AND a
     // client was wired in. A key with no client is not a fallback: it is
     // a configuration gap, logged once, and the tier is skipped.
     let dinariPrice: string | null = null;
@@ -205,13 +247,13 @@ export class StockPriceFeed {
         if (d) dinariPrice = d.price;
       } else if (!this.warnedDinariUnavailable) {
         this.warnedDinariUnavailable = true;
-        logger.error("[StockPriceFeed] DINARI_API_KEY_ID is set but no Dinari client is wired in — Dinari tier is INERT, snapshots will block on stale NAV instead of falling back", {
+        logger.error("[StockPriceFeed] DINARI_API_KEY_ID is set but no Dinari client is wired in, Dinari tier is INERT, snapshots will block on stale NAV instead of falling back", {
           hint: "Dinari is enterprise/key-gated and its API surface is unverified. Wire a DinariPriceSource, or remove the key to silence this.",
         });
       }
     }
 
-    // Tier 3 — CoinGecko (last resort). Only when a verified id exists
+    // Tier 3, CoinGecko (last resort). Only when a verified id exists
     // for this team AND CoinGecko actually has a price for it. An
     // unverified or missing id means no tier, never a guessed id.
     let coingeckoPrice: string | null = null;
@@ -235,7 +277,7 @@ export class StockPriceFeed {
       if (pref) {
         chosen = pref;
       } else if (chosen) {
-        logger.debug("[StockPriceFeed] preferred source stale — falling back to priority order", {
+        logger.debug("[StockPriceFeed] preferred source stale, falling back to priority order", {
           teamId,
           preferredSource,
           source: chosen.source,
@@ -262,7 +304,7 @@ export class StockPriceFeed {
       if (dev === null) continue;
       if (maxDev === null || dev > maxDev) maxDev = dev;
       if (dev > this.maxDeviationBps) {
-        logger.error("[StockPriceFeed] VALIDATION FAILED — feeds disagree, blocking snapshot", {
+        logger.error("[StockPriceFeed] VALIDATION FAILED, feeds disagree, blocking snapshot", {
           teamId,
           ticker: def.ticker,
           source: chosen.source,
@@ -288,7 +330,119 @@ export class StockPriceFeed {
       dinariPrice,
       coingeckoPrice,
       deviationBps: maxDev,
+      lastNavFallback: false,
+      lastNavFallbackAgeMs: null,
     };
+  }
+
+  /** How many times the last-NAV fallback has been used (this process). */
+  getLastNavFallbackUses(): number {
+    return this.lastNavFallbackUses;
+  }
+
+  /**
+   * LAST-NAV FALLBACK eligibility (user approved 2026-11-18). Pure check,
+   * no logging except through the caller: returns why the fallback does
+   * or does not apply for one team at full-time.
+   *
+   * All four conditions are required:
+   *   (a) a last NAV tick exists at all;
+   *   (b) it was published before kickoff (quiet feed, not post-match data);
+   *   (c) it is no older than lastNavFallbackMaxAgeMs (24h) at full-time;
+   *   (d) the feed is healthy (poller last poll succeeded recently).
+   * A team with no NAV at all fails (a) and is never covered: the fallback
+   * does NOT fix missing NAV, which is why the roster shrank to 12.
+   */
+  checkLastNavFallback(
+    teamId: number,
+    windowStartMs: number,
+    windowEndMs: number,
+    now: number = Date.now()
+  ): LastNavFallbackCheck {
+    this.teamDef(teamId); // throws on an unknown teamId
+    const tick = this.nav.getLatest(teamId);
+    if (!tick) {
+      return { eligible: false, reason: "no NAV ever published for this team" };
+    }
+    const ageAtFullTimeMs = windowEndMs - tick.navPriceUpdatedAtMs;
+    if (tick.navPriceUpdatedAtMs > windowStartMs) {
+      return {
+        eligible: false,
+        reason: "latest NAV was published after kickoff, not before it",
+        tick,
+        ageAtFullTimeMs,
+      };
+    }
+    if (ageAtFullTimeMs > stockConfig.nav.lastNavFallbackMaxAgeMs) {
+      return {
+        eligible: false,
+        reason: `last NAV is older than the 24h fallback bound (${Math.round(ageAtFullTimeMs / 3_600_000)}h old at full-time)`,
+        tick,
+        ageAtFullTimeMs,
+      };
+    }
+    if (!this.nav.isFeedHealthy(stockConfig.nav.feedHealthyWithinMs, now)) {
+      return {
+        eligible: false,
+        reason: "NAV feed is not healthy (no recent successful poll), outage is not a quiet feed",
+        tick,
+        ageAtFullTimeMs,
+      };
+    }
+    // Pricing bound as a final guard: the reused NAV must still be a
+    // fresh-enough price (25h). The 24h fallback bound is tighter, so
+    // this only trips if the call runs long after full-time.
+    if (now - tick.navPriceUpdatedAtMs > this.navStaleAfterMs) {
+      return {
+        eligible: false,
+        reason: "last NAV is stale for pricing",
+        tick,
+        ageAtFullTimeMs,
+      };
+    }
+    return { eligible: true, reason: "healthy feed, quiet window, last NAV within 24h", tick, ageAtFullTimeMs };
+  }
+
+  /**
+   * Full-time end price for one team: the normal path when the team
+   * performed in the window, the last-NAV fallback when it did not but
+   * is eligible, and StockPriceUnavailableError otherwise (the lifecycle
+   * turns that into a forfeit for this team). The returned quote carries
+   * lastNavFallback: true when the fallback was used, and every use is
+   * logged at WARN and counted.
+   */
+  resolveEndPrice(
+    teamId: number,
+    windowStartMs: number,
+    windowEndMs: number,
+    fixtureId?: bigint,
+    preferredSource?: StockPriceSource
+  ): StockValidatedPrice {
+    const def = this.teamDef(teamId);
+    if (this.isWindowFresh(teamId, windowStartMs, windowEndMs)) {
+      return this.getValidatedPrice(teamId, preferredSource);
+    }
+    const check = this.checkLastNavFallback(teamId, windowStartMs, windowEndMs);
+    if (!check.eligible || !check.tick) {
+      throw new StockPriceUnavailableError(
+        teamId,
+        `No performance and no last-NAV fallback for stock team ${teamId} (${def.ticker}) in the match window: ${check.reason}`
+      );
+    }
+    const quote = this.getValidatedPrice(teamId, preferredSource);
+    quote.lastNavFallback = true;
+    quote.lastNavFallbackAgeMs = check.ageAtFullTimeMs ?? null;
+    this.lastNavFallbackUses++;
+    logger.warn("[StockPriceFeed] LAST_NAV_FALLBACK used as end price (healthy feed, quiet window)", {
+      fixtureId: fixtureId?.toString() ?? null,
+      teamId,
+      ticker: def.ticker,
+      navPrice: check.tick.navPrice,
+      navPriceUpdatedAt: check.tick.navPriceUpdatedAtIso,
+      ageAtFullTimeMs: check.ageAtFullTimeMs,
+      fallbackUses: this.lastNavFallbackUses,
+    });
+    return quote;
   }
 
   /**
@@ -340,7 +494,7 @@ export class StockPriceFeed {
     const last = this.lastStaleWarnAt.get(key) ?? 0;
     if (now - last < STALE_WARN_THROTTLE_MS) return;
     this.lastStaleWarnAt.set(key, now);
-    logger.warn("[StockPriceFeed] NAV stale/missing — using fallback source", {
+    logger.warn("[StockPriceFeed] NAV stale/missing, using fallback source", {
       teamId,
       ticker,
       usedSource,
@@ -356,7 +510,8 @@ export class StockPriceFeed {
       (q.navPriceUpdatedAtIso !== null ? ` navUpdatedAt=${q.navPriceUpdatedAtIso}` : "") +
       (q.dinariPrice !== null ? ` dinari=${q.dinariPrice}` : "") +
       (q.coingeckoPrice !== null ? ` cg=${q.coingeckoPrice}` : "") +
-      (q.deviationBps !== null ? ` dev=${(q.deviationBps / 100).toFixed(3)}%` : " dev=n/a")
+      (q.deviationBps !== null ? ` dev=${(q.deviationBps / 100).toFixed(3)}%` : " dev=n/a") +
+      (q.lastNavFallback ? ` lastNavFallback age=${q.lastNavFallbackAgeMs}ms` : "")
     );
   }
 }

@@ -5,18 +5,27 @@
  *   packages/frontend/src/lib/stockFormat.ts
  *
  * Scoring, locked, document everywhere it is used:
- *   1 goal = 0.05% (5 bps), half-up rounding, no-negative scorelines
- *   exactly like crypto, max 10 goals per team per match, raw volatile
- *   cap 3% with circuit breaker review, 3 pts win / 1 draw / 0 loss,
- *   tiebreak points, GD, GF, wins, fewest losses.
+ *   1 goal = 0.05% (5 bps), integer basis point math, no-negative
+ *   scorelines exactly like crypto, max 10 goals per team per match,
+ *   raw volatile cap 3% with circuit breaker review, 3 pts win / 1 draw
+ *   / 0 loss, tiebreak points, GD, GF, wins, fewest losses.
  *   Forfeit: no performance for that period means 0-3, opponent wins
  *   3-0, marked FORFEIT. Both sides missing means void, stakes refunded.
  *
- * Crypto comparison, for reviewers: crypto is 1 goal = 0.5% (50 bps),
- * half-up at the 25 bps threshold. Stocks move far less in 1 hour, so
- * the stock threshold is 10x finer: 1 goal = 0.05% (5 bps). Integer math
- * truncates the move to basis points, so 3 bps is the first goal. The shape of the math is identical, only the
- * constant changes. Do not copy the crypto 50/25 constants here.
+ * Crypto comparison, for reviewers: crypto is 1 goal = 0.5% (50 bps).
+ * Stocks move far less in 1 hour, so the stock threshold is 10x finer:
+ * 1 goal = 0.05% (5 bps). Integer math truncates the move to basis
+ * points, and the on-chain half-up offset truncates 5 / 2 to 2 bps, so
+ * 0.03% (3 bps) is the first scoring move, not 0.025%. The shape of
+ * the math is identical, only the constant changes. Do not copy the
+ * crypto 50/25 constants here, and do not restore a 2.5 bps threshold
+ * in this file, the on-chain oracle cannot represent it.
+ *
+ * Price rule, user approved Nov 18 2026: accept the last NAV within
+ * the 24h heartbeat as the end price when the feed is healthy but
+ * quiet. That rule does NOT fix teams with no NAV at all, which is why
+ * the roster is 12 teams. The rule lives in the backend and the
+ * oracle, not in these helpers, which only convert a % move to goals.
  *
  * All timestamps in the stock league are UTC. The helpers below format
  * in UTC explicitly (timeZone: "UTC"), never in the device local zone.
@@ -26,13 +35,19 @@
  * Worked examples (also shown in StockScoringExplainer):
  *   +0.15% over 1 hour = 15 bps = 3 goals.
  *   +0.05% = 5 bps = 1 goal. +0.02% = 2 bps = 0 goals.
- *   +0.03% = 3 bps = 1 goal.
+ *   +0.03% = 3 bps = 1 goal, the first scoring move.
  *   Home -0.10% vs Away +0.05%: raw goals -2 vs +1, normalized 0-3.
  *   Home +0.12% vs Away -0.04%: raw goals +2 vs -1, normalized 3-0.
  *   Home +0.15% vs Away +0.15%: raw goals 3 vs 3, normalized 3-3, draw.
  *   +3.00% raw = 300 bps = 60 goals uncapped, capped to 10 goals, and
  *   flagged volatile for circuit breaker review.
  *   Forfeit: missing side scores 0, opponent scores 3, result 0-3.
+ *
+ * Rounds: 22 rounds, Nov 26 to Dec 16 2026. Nov 26 to Dec 16 inclusive
+ * is 21 days, so 22 rounds need one double-header day. Round 21
+ * (matchdayIndex 20) and round 22 (matchdayIndex 21) both fall on
+ * Dec 16, morning and evening waves. stockMatchdayDate clamps the day
+ * offset at 20, so round 22 maps to Dec 16, never Dec 17.
  */
 
 export const STOCK_GOAL_PCT = 0.05;
@@ -46,6 +61,16 @@ export const STOCK_POINTS_WIN = 3;
 export const STOCK_POINTS_DRAW = 1;
 export const STOCK_POINTS_LOSS = 0;
 
+/** Season shape, locked Nov 18 2026: 12 teams, double round-robin. */
+export const STOCK_TEAM_COUNT = 12;
+export const STOCK_TOTAL_ROUNDS = 22;
+export const STOCK_FIXTURES_PER_ROUND = 6;
+export const STOCK_TOTAL_FIXTURES = 132;
+export const STOCK_SEASON_FIRST_DAY = "2026-11-26";
+export const STOCK_SEASON_LAST_DAY = "2026-12-16";
+/** Dec 16 hosts rounds 21 and 22 in two waves, morning and evening. */
+export const STOCK_DOUBLE_HEADER_DATE = "2026-12-16";
+
 /** +0.15% / -0.10%, always with 2 decimals. */
 export function formatSignedPctStock(pct: number, digits = 2): string {
   const sign = pct > 0 ? "+" : pct < 0 ? "−" : "";
@@ -54,9 +79,11 @@ export function formatSignedPctStock(pct: number, digits = 2): string {
 
 /**
  * Round a raw % change to goals exactly like the stock oracle:
- * 1 goal = 0.05% (5 bps), matching integer half-up on |bps| at 3 bps
- * threshold. Returns a signed goal count, negative when the price fell.
- * The caller must clamp and normalize (see stockScoreline below).
+ * 1 goal = 0.05% (5 bps). The oracle first truncates the move to
+ * integer basis points, then applies the integer half-up offset of
+ * 2 bps, so 3 bps is the first scoring move. Returns a signed goal
+ * count, negative when the price fell. The caller must clamp and
+ * normalize (see stockScoreline below).
  */
 export function roundPctLikeOracleStock(pct: number): number {
   // PriceOracle first truncates the move to integer basis points.
@@ -172,8 +199,35 @@ export function utcDayKey(iso: string | null): string | null {
   return d.toISOString().slice(0, 10);
 }
 
-/** Matchday n (0-based) starts Nov 26 2026 UTC, one matchday per day. */
+/**
+ * Round n (0-based matchdayIndex) starts Nov 26 2026 UTC, one round per
+ * day, except the double-header: round 21 (index 20) and round 22
+ * (index 21) both fall on Dec 16. The day offset is clamped at 20, so
+ * index 21 maps to Dec 16, never Dec 17. The fixtures pager and the
+ * All-league day grouping both rely on this clamp.
+ */
 export function stockMatchdayDate(matchdayIndex: number): string {
-  const start = Date.UTC(2026, 10, 26) + matchdayIndex * 24 * 60 * 60 * 1000;
+  const dayOffset = Math.max(0, Math.min(matchdayIndex, STOCK_TOTAL_ROUNDS - 2));
+  const start = Date.UTC(2026, 10, 26) + dayOffset * 24 * 60 * 60 * 1000;
   return new Date(start).toISOString().slice(0, 10);
+}
+
+/**
+ * Double-header wave for a round, null for ordinary rounds. Round 21
+ * (index 20) is the Dec 16 morning wave, round 22 (index 21) is the
+ * Dec 16 evening wave.
+ */
+export function stockRoundWave(matchdayIndex: number): "morning" | "evening" | null {
+  if (matchdayIndex === STOCK_TOTAL_ROUNDS - 2) return "morning";
+  if (matchdayIndex === STOCK_TOTAL_ROUNDS - 1) return "evening";
+  return null;
+}
+
+/** "Round 21, Dec 16 UTC, double-header, morning wave", used as the pager button title. */
+export function stockRoundLabel(matchdayIndex: number): string {
+  const round = matchdayIndex + 1;
+  const date = stockMatchdayDate(matchdayIndex);
+  const wave = stockRoundWave(matchdayIndex);
+  if (wave) return `Round ${round}, ${date} UTC, double-header finale, ${wave} wave`;
+  return `Round ${round}, ${date} UTC`;
 }

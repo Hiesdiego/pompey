@@ -1,5 +1,5 @@
 /**
- * Unified TP (TickrPoints) aggregator — ONE leaderboard across crypto and stocks.
+ * Unified TP (TickrPoints) aggregator, ONE leaderboard across crypto and stocks.
  *
  * Intended destination: packages/backend/src/services/stockTpAggregator.ts.
  *
@@ -14,13 +14,15 @@
  *   Crypto and stock outcomes count identically; there is no separate
  *   stock leaderboard.
  *
- * TP RULE (aggregator-defined, flag for user confirmation: the brief does
- * not specify a TP formula, so this is the simplest faithful rule):
+ * TP RULE (PROPOSED, still awaiting user confirmation, 2026-11-18):
  *   +3 TP for a won prediction, +1 TP for a correctly predicted draw,
  *   +0 TP for a lost prediction. A forfeit counts as a normal win/loss
  *   for the players who staked on it (the pool settles it 3-0); a void
- *   fixture counts for NOBODY (stakes refunded 1:1, no outcome). Streaks
- *   are computed chronologically from the same outcome stream.
+ *   fixture counts for NOBODY (stakes refunded 1:1, no outcome). A
+ *   fixture settled via the last-NAV fallback counts as a normal result
+ *   (the pool settles it like any played fixture). Streaks are computed
+ *   chronologically from the same outcome stream. If the user changes the
+ *   formula, change TP_WIN / TP_DRAW / TP_LOSS below and nowhere else.
  *
  * SOURCES (both event scans, 900-block chunks, watermarks, dirty-only):
  *   Crypto leg: PlayerStats.OutcomeRecorded(player, seasonId, fixtureId,
@@ -32,7 +34,7 @@
  *   shared fallback transport and scans the event directly.
  *   Stock leg: the stock PredictionPool emits Staked(seasonId, fixtureId,
  *   player, outcome, amount) and Settled(seasonId, fixtureId,
- *   winningOutcome, totalPool) — the same event names as the crypto
+ *   winningOutcome, totalPool), the same event names as the crypto
  *   PredictionPool (verified in packages/contracts/contracts/
  *   PredictionPool.sol). A player's stock outcome for a fixture is
  *   derived, not stored: won = staked on the winning outcome (any stake
@@ -96,7 +98,7 @@ export interface TpPlayerView {
 }
 
 interface Outcome {
-  /** "crypto" | "stock" — which leg produced this outcome. */
+  /** "crypto" | "stock", which leg produced this outcome. */
   leg: "crypto" | "stock";
   won: boolean;
   isDraw: boolean;
@@ -105,7 +107,7 @@ interface Outcome {
 }
 
 const LEADERBOARD_CACHE_MS = 60_000;
-/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000 — stay under it. */
+/** eth_getLogs block-range cap on Base Sepolia public RPC is 1,000, stay under it. */
 const LOG_SCAN_CHUNK_BLOCKS = 900n;
 
 export class StockTpAggregator {
@@ -188,7 +190,7 @@ export class StockTpAggregator {
   private async scanCryptoOutcomes(): Promise<void> {
     const playerStats = config.contracts.playerStats;
     if (!playerStats) {
-      logger.warn("[StockTpAggregator] no crypto PlayerStats address configured — crypto leg empty");
+      logger.warn("[StockTpAggregator] no crypto PlayerStats address configured, crypto leg empty");
       return;
     }
     const latest = await this.publicClient.getBlockNumber();
@@ -230,7 +232,7 @@ export class StockTpAggregator {
   private async scanStockOutcomes(): Promise<void> {
     const pool = stockConfig.contracts.predictionPool;
     if (!pool) {
-      logger.warn("[StockTpAggregator] no stock PredictionPool address configured — stock leg empty");
+      logger.warn("[StockTpAggregator] no stock PredictionPool address configured, stock leg empty");
       return;
     }
     const latest = await this.publicClient.getBlockNumber();

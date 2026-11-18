@@ -1,47 +1,71 @@
 /**
- * Stock match lifecycle — kickoff monitor + match timer for the stock league.
+ * Stock match lifecycle, kickoff monitor + match timer for the stock league.
  *
  * Intended destination: packages/backend/src/services/stockMatchLifecycle.ts.
  * Mirrors the crypto MatchLifecycle (reveal -> start snapshot -> end
  * snapshot, idempotency pre-checks, per-fixture exponential backoff, one
  * fixture failing never blocks the others, TxQueue serializes writes) with
- * four stock differences:
+ * stock differences:
  *
  *   1. EVENT-DRIVEN, not a 30s tick loop. The crypto loop ticks every
  *      30s all day; the stock loop sleeps until the next event (next
  *      window opening, next kickoff, next full-time), capped at 15 min
  *      idle / 60s hot so the NAV hot window still turns over. A 30s
- *      tick would burn RPC reads and log noise for 21 matchdays with
+ *      tick would burn RPC reads and log noise for 22 rounds with
  *      nothing happening between them. Sleep is via a single setTimeout
  *      that is re-armed after every pass; stop() clears it.
- *   2. RANDOM STAGGER, restart-safe. A matchday lasts 1 day and its 11
- *      fixtures kick off at random slots across the day (1-hour matches,
- *      all ending the same day). The slot is a stable hash of
- *      (seasonId, matchdayIndex, fixtureId), NOT Math.random() and NOT
- *      fixture order: a restart re-derives the exact same kickoff times
- *      instead of double-scheduling, while the spread still looks random
- *      to users. Legal reveal still requires kickoff within [now+30min,
- *      now+120min] AND inside the fixture's window; an illegal slot is
- *      flagged for manual review, never sent as a doomed tx.
- *   3. HOT-ONLY REFRESH. The fixture cache re-reads only fixtures that
+ *   2. SLOT-TIME STAGGER, restart-safe (same pattern as crypto
+ *      MatchLifecycle.kickoffSlotMs, NOT the 22-team build's
+ *      now-plus-lead-plus-slot arithmetic, which could never satisfy the
+ *      on-chain 30-120 min reveal lead for slots past the first two).
+ *      A matchday (round) lasts 1 day and its 6 fixtures kick off at
+ *      absolute slot times spread across the fixture window: each
+ *      round's fixtures are spread evenly across the usable window
+ *      (windowStart + 30 min pad to windowEnd - duration - 60 min pad)
+ *      and snapped to a 15-min grid. The slot is derived from the
+ *      fixture's position among its round's fixtures, so a restart
+ *      re-derives the exact same kickoff times instead of
+ *      double-scheduling. Reveal happens when the slot enters the legal
+ *      reveal window (slot minus 120 min); a slot missed by a late
+ *      backend falls back to now + lead, logged as late.
+ *   3. DOUBLE-HEADER FINALE (Dec 16, rounds 21 and 22, matchdayIndex 20
+ *      and 21). Nov 26 to Dec 16 inclusive is 21 days for 22 rounds, so
+ *      the finale hosts two rounds in two waves (morning and evening).
+ *      Rounds 21 and 22 share one on-chain Dec 16 window, while slot
+ *      selection separates round 21 before noon and round 22 from noon.
+ *      The reveal-time overlap guard shifts any colliding kickoff forward
+ *      in 15-min steps and flags manual review when no free slot remains.
+ *   4. HOT-ONLY REFRESH. The fixture cache re-reads only fixtures that
  *      can still change (unrevealed or unsettled), in multicall chunks
  *      of 50, and only on passes that do work. Revealed+settled fixtures
  *      are immutable and cached forever. Idle passes do not re-read the
  *      chain at all.
- *   4. FORFEIT, decided at FULL-TIME. At kickoff the lifecycle submits
- *      the start snapshot from the latest NAV (25h pricing bound). If
- *      NAV is stale at kickoff, the snapshot is BLOCKED (like crypto)
- *      and the fixture waits; nothing is fabricated. At FT the lifecycle
- *      checks, per team, whether a NAV was published inside the match
- *      window [kickoff, FT + grace] (StockPriceFeed.isWindowFresh):
- *        - one team with no performance -> submitter.recordForfeit,
- *          opponent wins 3-0, marked FORFEIT. Never a silent normal 3-0.
- *        - both teams with no performance -> submitter.voidFixture,
- *          stakes refunded 1:1.
- *        - both performed -> normal end snapshot (with late-start
- *          recovery if the start was missed while the backend was down).
+ *   5. FORFEIT, decided at FULL-TIME, with the last-NAV fallback first.
+ *      At kickoff the lifecycle submits the start snapshot from the
+ *      latest NAV (25h pricing bound). If NAV is stale at kickoff, the
+ *      snapshot is BLOCKED (like crypto) and the fixture waits; nothing
+ *      is fabricated. At FT the lifecycle resolves the end price per
+ *      team via StockPriceFeed.resolveEndPrice, which tries, in order:
+ *      a NAV published inside the match window [kickoff, FT + grace],
+ *      then the LAST-NAV FALLBACK (user approved 2026-11-18: last NAV
+ *      within the 24h heartbeat, feed healthy, published before
+ *      kickoff, every use logged). Only a team that fails both is a
+ *      forfeit candidate:
+ *        - one team with no performance and no fallback -> submitter.
+ *          recordForfeit, opponent wins 3-0, marked FORFEIT. Never a
+ *          silent normal 3-0.
+ *        - both teams with no performance and no fallback -> submitter.
+ *          voidFixture, stakes refunded 1:1.
+ *        - both resolved (performed or fallback) -> normal end snapshot
+ *          (with late-start recovery if the start was missed while the
+ *          backend was down).
  *      A forfeit/void failure is logged at ERROR and the fixture is
  *      retried with backoff; it is never settled as a normal result.
+ *
+ * FIX (2026-11-17, carried into this revision): the getFixture ABI
+ * includes voided, so matchEndTimestamp is decoded from the right word
+ * (before the fix it decoded the voided word, corrupting live/awaiting
+ * status), and voided is carried into the cache view.
  *
  * NAV hot window: the lifecycle owns it. Hot from 30 min before the
  * first kickoff of the day until the last full-time + 15 min, idle
@@ -61,6 +85,7 @@ import {
   StockPriceUnavailableError,
   StockPriceValidationError,
 } from "./stockPriceFeed.js";
+import type { StockValidatedPrice } from "./stockPriceFeed.js";
 import { StockSnapshotSubmitter, createStockPublicClient } from "./stockSnapshotSubmitter.js";
 import type { StockNavPoller } from "./stockNavPoller.js";
 import type { PublicClient } from "viem";
@@ -90,6 +115,7 @@ const STOCK_REGISTRY_READ_ABI = [
           { name: "kickoffTimestamp", type: "uint64" },
           { name: "kickoffRevealed", type: "bool" },
           { name: "settled", type: "bool" },
+          { name: "voided", type: "bool" },
           { name: "matchEndTimestamp", type: "uint64" },
         ],
       },
@@ -151,6 +177,7 @@ class StockFixtureCache {
         kickoffTimestamp: bigint;
         kickoffRevealed: boolean;
         settled: boolean;
+        voided: boolean;
         matchEndTimestamp: bigint;
       }>;
       results.forEach((f, idx) => {
@@ -184,6 +211,7 @@ class StockFixtureCache {
         kickoffTimestamp: bigint;
         kickoffRevealed: boolean;
         settled: boolean;
+        voided: boolean;
         matchEndTimestamp: bigint;
       }>;
       results.forEach((f, idx) => {
@@ -208,6 +236,7 @@ class StockFixtureCache {
       kickoffTimestamp: bigint;
       kickoffRevealed: boolean;
       settled: boolean;
+      voided: boolean;
       matchEndTimestamp: bigint;
     }
   ): StockFixtureView {
@@ -228,6 +257,7 @@ class StockFixtureCache {
       kickoffRevealed: f.kickoffRevealed,
       matchEndMs: Number(matchEndTimestamp) * 1000,
       settled: f.settled,
+      voided: f.voided,
     };
   }
 
@@ -243,27 +273,49 @@ class StockFixtureCache {
 }
 
 /**
- * Stable pseudo-random slot for a fixture: a 32-bit FNV-1a hash of
- * (seasonId, matchdayIndex, fixtureId) mod maxSlots. Deterministic per
- * fixture, uniformly spread across slots, and identical after a restart,
- * so the "random stagger" never double-schedules. Do NOT replace with
- * Math.random(): a restart would re-roll slots and reveal a second,
- * different kickoff for the same fixture.
+ * Absolute kickoff slot for a fixture: a time inside its window, spread
+ * evenly across the round's usable window and snapped to the 15-min
+ * grid (same pattern as crypto MatchLifecycle.kickoffSlotMs). The slot
+ * depends only on the fixture's position among its round's fixtures, so
+ * it is identical after a restart and never double-schedules. Returns
+ * null when the window is too short for any legal slot: the caller flags
+ * manual review instead of revealing a doomed kickoff.
+ *
+ * `siblings` is every fixture of the same matchdayIndex (round),
+ * including this one. The two Dec 16 rounds share a 24-hour on-chain
+ * window, so constrain round 21 to the morning and round 22 to the
+ * evening. Their six fixtures are spread independently within each wave.
  */
-export function staggerSlotFor(
-  fixtureId: bigint,
-  matchdayIndex: number,
-  maxSlots: number,
-  seasonId: bigint = stockConfig.seasonId
-): number {
-  const key = `${seasonId.toString()}:${matchdayIndex}:${fixtureId.toString()}`;
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+export function stockKickoffSlotMs(
+  fixture: { fixtureId: bigint; matchdayIndex: number; windowStartMs: number; windowEndMs: number },
+  siblings: Array<{ fixtureId: bigint; matchdayIndex: number; windowStartMs: number; windowEndMs: number }>,
+  durationMs: number = stockConfig.matchDurationMinutes * 60 * 1000
+): number | null {
+  const gridMs = stockConfig.kickoff.slotGridMinutes * 60 * 1000;
+  let usableStart = fixture.windowStartMs + stockConfig.kickoff.slotStartPadMinutes * 60 * 1000;
+  let usableEnd = fixture.windowEndMs - durationMs - stockConfig.kickoff.slotEndPadMinutes * 60 * 1000;
+  if (fixture.matchdayIndex === 20) {
+    usableEnd = Math.min(usableEnd, fixture.windowStartMs + 12 * 60 * 60 * 1000 - durationMs);
+  } else if (fixture.matchdayIndex === 21) {
+    usableStart = Math.max(usableStart, fixture.windowStartMs + 12 * 60 * 60 * 1000);
   }
-  return maxSlots > 0 ? hash % maxSlots : 0;
+  if (usableEnd <= usableStart) return null;
+  const round = siblings
+    .filter((g) => g.matchdayIndex === fixture.matchdayIndex)
+    .sort((a, b) => (a.fixtureId < b.fixtureId ? -1 : 1));
+  const idx = round.findIndex((g) => g.fixtureId === fixture.fixtureId);
+  if (idx < 0) return null;
+  const raw = usableStart + ((idx + 0.5) * (usableEnd - usableStart)) / round.length;
+  const snapped = Math.round(raw / gridMs) * gridMs;
+  return Math.min(Math.max(snapped, usableStart), usableEnd);
 }
+
+/** On-chain reveal lead bounds (same as crypto): kickoff must land
+ *  30-120 min after the reveal tx. */
+const REVEAL_LEAD_MIN_MS = 30 * 60_000;
+const REVEAL_LEAD_MAX_MS = 120 * 60_000;
+/** Hot window margin around slots and kickoffs (same as crypto). */
+const HOT_MARGIN_MS = 10 * 60_000;
 
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
@@ -271,8 +323,6 @@ const BACKOFF_MAX_MS = 30 * 60_000;
 const IDLE_SLEEP_CAP_MS = 15 * 60_000;
 /** Longest sleep between passes while matches are live (hot). */
 const HOT_SLEEP_CAP_MS = 60_000;
-/** Hot window opens this long before the first kickoff of the day. */
-const HOT_LEAD_MS = 30 * 60_000;
 /** Hot window closes this long after the last full-time of the day. */
 const HOT_TAIL_MS = 15 * 60_000;
 
@@ -286,6 +336,8 @@ export class StockMatchLifecycle {
   private readonly durationMs: number;
   private readonly leadMs: number;
   private readonly failures = new Map<bigint, FailureState>();
+  /** Fixtures already flagged once for a window too short for any slot. */
+  private readonly slotWarned = new Set<string>();
   private readonly startSources = new Map<string, { home: StockPriceSource; away: StockPriceSource }>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
@@ -306,7 +358,7 @@ export class StockMatchLifecycle {
     await this.cache.loadAll();
     if (this.cache.size === 0) {
       logger.warn(
-        "[StockMatchLifecycle] no fixtures on-chain yet — the schedule has not been generated. " +
+        "[StockMatchLifecycle] no fixtures on-chain yet, the schedule has not been generated. " +
           "Lifecycle loop running idle until fixtures exist."
       );
     }
@@ -314,8 +366,12 @@ export class StockMatchLifecycle {
     logger.info("[StockMatchLifecycle] starting (event-driven)", {
       matchDurationMin: stockConfig.matchDurationMinutes,
       kickoffLeadMin: stockConfig.kickoff.leadMinutes,
-      staggerSlotMin: stockConfig.kickoff.staggerSlotMinutes,
-      staggerMaxSlots: stockConfig.kickoff.staggerMaxSlots,
+      slotGridMin: stockConfig.kickoff.slotGridMinutes,
+      teams: stockConfig.season.teamCount,
+      rounds: stockConfig.season.matchdays,
+      fixtures: stockConfig.season.totalFixtures,
+      doubleHeaderDate: stockConfig.season.doubleHeaderDate,
+      doubleHeaderMatchdays: stockConfig.season.doubleHeaderMatchdays,
     });
     this.armTimer(0);
   }
@@ -329,6 +385,13 @@ export class StockMatchLifecycle {
   /** Read-only fixture list for the REST API. */
   getFixtures(): StockFixtureView[] {
     return this.cache.all();
+  }
+
+  /** Read-only fixtures for one round (matchdayIndex). The Dec 16
+   *  double-header finale is two calls: index 20 (round 21, morning
+   *  wave) and index 21 (round 22, evening wave). */
+  getFixturesForMatchday(matchdayIndex: number): StockFixtureView[] {
+    return this.cache.all().filter((f) => f.matchdayIndex === matchdayIndex);
   }
 
   private armTimer(delayMs: number): void {
@@ -374,10 +437,20 @@ export class StockMatchLifecycle {
     const hot = this.isHotWindow(now);
     const cap = hot ? HOT_SLEEP_CAP_MS : IDLE_SLEEP_CAP_MS;
     let next = Number.POSITIVE_INFINITY;
-    for (const f of this.cache.all()) {
+    const all = this.cache.all();
+    for (const f of all) {
       if (f.settled) continue;
       if (!f.kickoffRevealed) {
-        if (f.windowStartMs > now) next = Math.min(next, f.windowStartMs - now);
+        // Wake at the legal reveal time: the slot minus the max lead,
+        // never before the window opens. A fixture whose slot is already
+        // inside the reveal window wakes the loop now.
+        const slot = stockKickoffSlotMs(f, all, this.durationMs);
+        if (slot === null) {
+          if (f.windowEndMs > now) next = Math.min(next, 0);
+          continue;
+        }
+        const revealAt = Math.max(f.windowStartMs, slot - REVEAL_LEAD_MAX_MS);
+        if (revealAt > now) next = Math.min(next, revealAt - now);
         else if (f.windowEndMs > now) next = Math.min(next, 0);
       } else {
         if (f.kickoffMs > now) next = Math.min(next, f.kickoffMs - now);
@@ -389,13 +462,26 @@ export class StockMatchLifecycle {
     return Math.min(Math.max(0, next), cap);
   }
 
-  /** Hot while any fixture is live, about to kick off, or just finished. */
+  /** Hot while any fixture is live, about to kick off, or just finished.
+   *  For an unrevealed fixture the slot stands in for the kickoff: hot
+   *  from slot minus max reveal lead minus margin, so the NAV poller is
+   *  already hot when the reveal lands. */
   private isHotWindow(now: number): boolean {
-    for (const f of this.cache.all()) {
+    const all = this.cache.all();
+    for (const f of all) {
       if (f.settled) continue;
-      const kickoff = f.kickoffRevealed ? f.kickoffMs : f.windowStartMs;
-      const end = f.kickoffRevealed && f.matchEndMs > 0 ? f.matchEndMs : f.windowEndMs;
-      if (now >= kickoff - HOT_LEAD_MS && now <= end + HOT_TAIL_MS) return true;
+      let kickoff: number;
+      let end: number;
+      if (f.kickoffRevealed) {
+        kickoff = f.kickoffMs;
+        end = f.matchEndMs > 0 ? f.matchEndMs : f.windowEndMs;
+      } else {
+        const slot = stockKickoffSlotMs(f, all, this.durationMs);
+        if (slot === null) return true; // window too short: stay hot, needs review
+        kickoff = slot;
+        end = f.windowEndMs;
+      }
+      if (now >= kickoff - REVEAL_LEAD_MAX_MS - HOT_MARGIN_MS && now <= end + HOT_TAIL_MS) return true;
     }
     return false;
   }
@@ -408,65 +494,129 @@ export class StockMatchLifecycle {
 
   private async revealDueKickoffs(): Promise<void> {
     const now = Date.now();
-    const due = this.cache
-      .all()
-      .filter(
-        (f) => !f.kickoffRevealed && !f.settled && f.windowStartMs <= now && now < f.windowEndMs
-      );
+    const all = this.cache.all();
+    const due = all.filter(
+      (f) => !f.kickoffRevealed && !f.settled && f.windowStartMs <= now && now < f.windowEndMs
+    );
     if (due.length === 0) return;
 
-    const slotMs = stockConfig.kickoff.staggerSlotMinutes * 60 * 1000;
-    const maxSlots = Math.max(1, stockConfig.kickoff.staggerMaxSlots);
-
-    const byMatchday = new Map<number, StockFixtureView[]>();
-    for (const f of due) {
-      const list = byMatchday.get(f.matchdayIndex) ?? [];
-      list.push(f);
-      byMatchday.set(f.matchdayIndex, list);
-    }
-
     let revealed = 0;
-    for (const [, fixtures] of byMatchday) {
-      fixtures.sort((a, b) => (a.fixtureId < b.fixtureId ? -1 : 1));
-      for (const f of fixtures) {
-        const slot = staggerSlotFor(f.fixtureId, f.matchdayIndex, maxSlots);
-        const kickoffMs = now + this.leadMs + slot * slotMs;
-        // Legal reveal requires kickoff within [now+30min, now+120min] AND inside the window.
-        if (
-          kickoffMs > f.windowEndMs ||
-          this.leadMs + slot * slotMs < stockConfig.kickoff.minLeadMinutes * 60 * 1000 ||
-          this.leadMs + slot * slotMs > stockConfig.kickoff.maxLeadMinutes * 60 * 1000
-        ) {
-          logger.error("[StockMatchLifecycle] MISSED reveal window — manual review required", {
-            fixtureId: f.fixtureId.toString(),
+    let waiting = 0;
+    for (const f of due) {
+      const failure = this.failures.get(f.fixtureId);
+      if (failure && now < failure.nextRetryAtMs) continue;
+      const slot = stockKickoffSlotMs(f, all, this.durationMs);
+      if (slot === null) {
+        const key = f.fixtureId.toString();
+        if (!this.slotWarned.has(key)) {
+          this.slotWarned.add(key);
+          logger.error("[StockMatchLifecycle] window too short for kickoff schedule, manual review required", {
+            fixtureId: key,
             matchday: f.matchdayIndex,
-            staggerSlot: slot,
             windowEnd: new Date(f.windowEndMs).toISOString(),
           });
-          continue;
         }
-        try {
-          const kickoffSec = BigInt(Math.floor(kickoffMs / 1000));
-          await this.submitter.revealKickoff(f.fixtureId, kickoffSec);
-          f.kickoffRevealed = true;
-          f.kickoffMs = kickoffMs;
-          f.matchEndMs = kickoffMs + this.durationMs;
-          revealed++;
-          logger.info("[StockMatchLifecycle] kickoff revealed (random stagger)", {
-            fixtureId: f.fixtureId.toString(),
-            matchday: f.matchdayIndex,
-            staggerSlot: slot,
-            kickoff: new Date(kickoffMs).toISOString(),
-          });
-        } catch (err) {
-          logger.error("[StockMatchLifecycle] revealKickoff failed", {
-            fixtureId: f.fixtureId.toString(),
-            error: String(err),
-          });
-        }
+        continue;
+      }
+      // Too early to reveal: the slot is more than the max lead away.
+      if (now < slot - REVEAL_LEAD_MAX_MS) {
+        waiting++;
+        continue;
+      }
+      let kickoffMs: number;
+      let late = false;
+      if (now <= slot - REVEAL_LEAD_MIN_MS) {
+        kickoffMs = slot;
+      } else {
+        // Slot missed by a late backend: reveal now + lead instead, logged.
+        late = true;
+        kickoffMs = now + this.leadMs;
+        logger.warn("[StockMatchLifecycle] kickoff slot missed, revealing late", {
+          fixtureId: f.fixtureId.toString(),
+          matchday: f.matchdayIndex,
+          slot: new Date(slot).toISOString(),
+          fallbackKickoff: new Date(kickoffMs).toISOString(),
+        });
+      }
+      // Double-header overlap guard: never double-book a kickoff within
+      // one match duration of another revealed fixture (the Dec 16
+      // finale, if its two rounds ever shared one window). Shift forward
+      // in grid steps; manual review when no free slot fits the window.
+      const guarded = this.resolveKickoffOverlap(kickoffMs, f.fixtureId);
+      if (guarded === null) {
+        logger.error("[StockMatchLifecycle] no free kickoff slot, manual review required", {
+          fixtureId: f.fixtureId.toString(),
+          matchday: f.matchdayIndex,
+          kickoff: new Date(kickoffMs).toISOString(),
+          windowEnd: new Date(f.windowEndMs).toISOString(),
+        });
+        continue;
+      }
+      kickoffMs = guarded;
+      if (kickoffMs > f.windowEndMs) {
+        logger.error("[StockMatchLifecycle] MISSED reveal window, manual review required", {
+          fixtureId: f.fixtureId.toString(),
+          matchday: f.matchdayIndex,
+          kickoff: new Date(kickoffMs).toISOString(),
+          windowEnd: new Date(f.windowEndMs).toISOString(),
+        });
+        continue;
+      }
+      try {
+        const kickoffSec = BigInt(Math.floor(kickoffMs / 1000));
+        await this.submitter.revealKickoff(f.fixtureId, kickoffSec);
+        f.kickoffRevealed = true;
+        f.kickoffMs = kickoffMs;
+        f.matchEndMs = kickoffMs + this.durationMs;
+        this.failures.delete(f.fixtureId);
+        revealed++;
+        logger.info("[StockMatchLifecycle] kickoff revealed (window-spread slot)", {
+          fixtureId: f.fixtureId.toString(),
+          matchday: f.matchdayIndex,
+          round: f.matchdayIndex + 1,
+          kickoff: new Date(kickoffMs).toISOString(),
+          late,
+        });
+      } catch (err) {
+        const count = (failure?.count ?? 0) + 1;
+        const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** (count - 1), BACKOFF_MAX_MS);
+        this.failures.set(f.fixtureId, { count, nextRetryAtMs: now + backoffMs });
+        logger.error("[StockMatchLifecycle] revealKickoff failed", {
+          fixtureId: f.fixtureId.toString(),
+          error: String(err),
+        });
       }
     }
-    logger.info("[StockMatchLifecycle] reveal pass complete", { due: due.length, revealed });
+    logger.info("[StockMatchLifecycle] reveal pass complete", { due: due.length, revealed, waiting });
+  }
+
+  /**
+   * Double-header overlap guard: shift a proposed kickoff forward in
+   * slot-grid steps until it is at least one match duration away from
+   * every other revealed, unsettled fixture, or return null when no free
+   * slot fits inside the fixture's window. Two fixtures of the same
+   * round never collide (their slots are spread), so a shift only ever
+   * fires when two rounds share one window, which is the Dec 16 finale
+   * misconfiguration the schedule must avoid.
+   */
+  private resolveKickoffOverlap(kickoffMs: number, fixtureId: bigint): number | null {
+    const gridMs = stockConfig.kickoff.slotGridMinutes * 60 * 1000;
+    const fixture = this.cache.all().find((f) => f.fixtureId === fixtureId);
+    const windowEndMs = fixture?.windowEndMs ?? Number.POSITIVE_INFINITY;
+    let candidate = kickoffMs;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const clash = this.cache.all().some(
+        (g) =>
+          g.fixtureId !== fixtureId &&
+          g.kickoffRevealed &&
+          !g.settled &&
+          Math.abs(g.kickoffMs - candidate) < this.durationMs
+      );
+      if (!clash) return candidate;
+      candidate += gridMs;
+      if (candidate + this.durationMs > windowEndMs) return null;
+    }
+    return null;
   }
 
   // ------------------------------------------------------------- match timer
@@ -510,8 +660,8 @@ export class StockMatchLifecycle {
     // and retries. Nothing is fabricated, and no forfeit is decided yet:
     // the match period has not happened.
     const sourceKey = f.fixtureId.toString();
-    let home;
-    let away;
+    let home: StockValidatedPrice | undefined;
+    let away: StockValidatedPrice | undefined;
     try {
       home = this.feed.getValidatedPrice(f.homeTeamId);
       away = this.feed.getValidatedPrice(f.awayTeamId);
@@ -540,22 +690,65 @@ export class StockMatchLifecycle {
   }
 
   /**
-   * Full-time: forfeit is decided FIRST, before any end snapshot.
-   * A team counts as having performed only if a NAV was published inside
-   * [kickoff, FT + grace]. One team missing -> 0-3 forfeit to the
-   * opponent. Both missing -> void, stakes refunded 1:1. Only when both
-   * performed does the normal end snapshot run.
+   * Full-time: the end price is resolved per team FIRST, before any end
+   * snapshot, via StockPriceFeed.resolveEndPrice: a NAV published inside
+   * [kickoff, FT + grace] wins, else the last-NAV fallback (last NAV
+   * within 24h, feed healthy, published before kickoff), else the team
+   * has no performance and no fallback. One team missing -> 0-3 forfeit
+   * to the opponent. Both missing -> void, stakes refunded 1:1. Only when
+   * both teams resolved does the normal end snapshot run.
    */
   private async processFullTime(f: StockFixtureView, matchEndMs: number): Promise<void> {
     const sourceKey = f.fixtureId.toString();
     const stored = this.startSources.get(sourceKey);
 
-    const homePerformed = this.feed.isWindowFresh(f.homeTeamId, f.kickoffMs, matchEndMs);
-    const awayPerformed = this.feed.isWindowFresh(f.awayTeamId, f.kickoffMs, matchEndMs);
+    // Resolve each side independently: a performed team settles normally
+    // even when its opponent forfeits, and a fallback team settles on its
+    // last NAV (end price equals start price for that team).
+    let home;
+    let away;
+    let homeResolved = false;
+    let awayResolved = false;
+    try {
+      home = this.feed.resolveEndPrice(f.homeTeamId, f.kickoffMs, matchEndMs, f.fixtureId, stored?.home);
+      homeResolved = true;
+    } catch (err) {
+      if (err instanceof StockPriceValidationError) {
+        logger.warn("[StockMatchLifecycle] end snapshot blocked by price validation", {
+          fixtureId: f.fixtureId.toString(),
+          error: err.message,
+        });
+        return;
+      }
+      if (!(err instanceof StockPriceUnavailableError)) throw err;
+      logger.warn("[StockMatchLifecycle] home team has no performance and no last-NAV fallback", {
+        fixtureId: f.fixtureId.toString(),
+        homeTeamId: f.homeTeamId,
+        error: err.message,
+      });
+    }
+    try {
+      away = this.feed.resolveEndPrice(f.awayTeamId, f.kickoffMs, matchEndMs, f.fixtureId, stored?.away);
+      awayResolved = true;
+    } catch (err) {
+      if (err instanceof StockPriceValidationError) {
+        logger.warn("[StockMatchLifecycle] end snapshot blocked by price validation", {
+          fixtureId: f.fixtureId.toString(),
+          error: err.message,
+        });
+        return;
+      }
+      if (!(err instanceof StockPriceUnavailableError)) throw err;
+      logger.warn("[StockMatchLifecycle] away team has no performance and no last-NAV fallback", {
+        fixtureId: f.fixtureId.toString(),
+        awayTeamId: f.awayTeamId,
+        error: err.message,
+      });
+    }
 
-    if (!homePerformed || !awayPerformed) {
-      if (!homePerformed && !awayPerformed) {
-        logger.error("[StockMatchLifecycle] VOID — neither team performed in the match window", {
+    if (!homeResolved || !awayResolved) {
+      if (!homeResolved && !awayResolved) {
+        logger.error("[StockMatchLifecycle] VOID, neither team performed in the match window and neither qualifies for the last-NAV fallback", {
           fixtureId: f.fixtureId.toString(),
           homeTeamId: f.homeTeamId,
           awayTeamId: f.awayTeamId,
@@ -567,12 +760,12 @@ export class StockMatchLifecycle {
         this.startSources.delete(sourceKey);
         return;
       }
-      const forfeitingTeamId = !homePerformed ? f.homeTeamId : f.awayTeamId;
-      logger.error("[StockMatchLifecycle] FORFEIT — team had no NAV performance in the match window, opponent wins 3-0", {
+      const forfeitingTeamId = !homeResolved ? f.homeTeamId : f.awayTeamId;
+      logger.error("[StockMatchLifecycle] FORFEIT, team had no NAV performance in the match window and no last-NAV fallback, opponent wins 3-0", {
         fixtureId: f.fixtureId.toString(),
         forfeitingTeamId,
-        homePerformed,
-        awayPerformed,
+        homeResolved,
+        awayResolved,
         kickoff: new Date(f.kickoffMs).toISOString(),
         matchEnd: new Date(matchEndMs).toISOString(),
       });
@@ -581,34 +774,21 @@ export class StockMatchLifecycle {
       this.startSources.delete(sourceKey);
       return;
     }
+    // Resolve flags are set only after assigning the corresponding quote.
+    // Keep an explicit invariant check so TypeScript narrows both values.
+    if (!home || !away) throw new Error("resolved stock quote missing after successful price resolution");
 
-    // Both performed: a suspect (quarantined +/-30% spike) NAV for either
+    // Both resolved: a suspect (quarantined +/-30% spike) NAV for either
     // team blocks settlement for manual review. Never settle on a spike.
     const homeSuspect = this.navPoller.getSuspect(f.homeTeamId);
     const awaySuspect = this.navPoller.getSuspect(f.awayTeamId);
     if (homeSuspect || awaySuspect) {
-      logger.error("[StockMatchLifecycle] CIRCUIT BREAKER REVIEW — suspect NAV quarantined, settlement blocked", {
+      logger.error("[StockMatchLifecycle] CIRCUIT BREAKER REVIEW, suspect NAV quarantined, settlement blocked", {
         fixtureId: f.fixtureId.toString(),
         homeSuspect: homeSuspect?.navPrice ?? null,
         awaySuspect: awaySuspect?.navPrice ?? null,
       });
       return;
-    }
-
-    let home;
-    let away;
-    try {
-      home = this.feed.getValidatedPrice(f.homeTeamId, stored?.home);
-      away = this.feed.getValidatedPrice(f.awayTeamId, stored?.away);
-    } catch (err) {
-      if (err instanceof StockPriceValidationError || err instanceof StockPriceUnavailableError) {
-        logger.warn("[StockMatchLifecycle] end snapshot blocked by price validation", {
-          fixtureId: f.fixtureId.toString(),
-          error: err.message,
-        });
-        return;
-      }
-      throw err;
     }
 
     logger.info("[StockMatchLifecycle] submitting end snapshot", {
@@ -617,7 +797,8 @@ export class StockMatchLifecycle {
       away: this.feed.describeQuote(away),
     });
     await this.submitter.submitEndPrice(
-      f.fixtureId, home.scaled, away.scaled, home.source, away.source
+      f.fixtureId, home.scaled, away.scaled, home.source, away.source,
+      { lastNavFallback: { home: home.lastNavFallback, away: away.lastNavFallback } }
     );
     this.startSources.delete(sourceKey);
   }

@@ -18,7 +18,7 @@ interface IStockTeamRegistry {
 struct StockFixture {
     uint16 homeTeamId;
     uint16 awayTeamId;
-    uint8 matchdayIndex; // 0..20
+    uint8 matchdayIndex; // 0..21 (round index; see double-header note below)
     uint64 windowStart; // matchday window opens
     uint64 windowEnd; // matchday window closes
     uint64 kickoffTimestamp; // 0 until backend-revealed
@@ -33,12 +33,23 @@ struct StockFixture {
 /// @notice Fresh stack, parallel to the crypto league, NOT Season 3.
 /// Two responsibilities, copied from crypto MatchRegistry and adapted:
 ///
-/// 1. FIXTURE GENERATION - a SINGLE round-robin for the 22-team roster,
-///    generated deterministically on-chain via the circle method. Crypto
-///    plays home-and-away (38 matchdays); the stock league plays each
-///    pairing ONCE, so there is no mirrored second leg: 21 rounds,
-///    11 fixtures per round, 231 fixtures total. Generation is batched
-///    (a full season exceeds per-transaction gas limits) and resumable.
+/// 1. FIXTURE GENERATION - a DOUBLE round-robin for the 12-team roster,
+///    generated deterministically on-chain via the circle method with a
+///    mirrored second leg. Crypto plays home-and-away over 38 matchdays;
+///    the stock league plays home-and-away over 22 rounds: rounds 1-11
+///    (matchdayIndex 0-10) are the first leg, rounds 12-22
+///    (matchdayIndex 11-21) repeat every pairing with home and away
+///    swapped. 6 fixtures per round, 132 fixtures total. Generation is
+///    batched (a full season exceeds per-transaction gas limits) and
+///    resumable.
+///    DOUBLE-HEADER FINALE: Nov 26 to Dec 16 2026 inclusive is 21 days,
+///    so 22 rounds need one double-header day. Dec 16 hosts rounds 21
+///    and 22 (matchdayIndex 20 and 21) in two waves, morning and
+///    evening, 12 fixtures that day. Both rounds share the Dec 16
+///    matchday window: the window day offset is min(matchdayIndex, 20),
+///    so matchdayIndex 21 opens Dec 16 00:00 UTC, not Dec 17. Kickoff
+///    reveal still staggers the two waves inside that shared window
+///    (30-120 minute lead, enforced on-chain).
 ///
 /// 2. KICKOFF REVEAL - backend-signed, same trust model as crypto: the
 ///    backend signer already decides results via the price oracle, so
@@ -48,9 +59,11 @@ struct StockFixture {
 ///    so the in-play betting window can never be moved under live bettors.
 ///
 /// @dev STOCK DIFFERENCES FROM CRYPTO MatchRegistry:
-///   - Single round-robin (21 matchdays, 231 fixtures), no mirror leg.
+///   - Double round-robin (22 rounds, 132 fixtures), mirrored second leg.
 ///   - Matchday interval is 1 day (86400s): a matchday lasts 1 day, all
-///     its matches end the same day. Season Nov 26 to Dec 16 2026.
+///     its matches end the same day, except the Dec 16 double-header,
+///     when rounds 21 and 22 share one day in two waves. Season Nov 26
+///     to Dec 16 2026.
 ///   - Match duration is fixed at 3600s (no owner setter: the stock
 ///     league is locked to 1-hour matches for Season 1).
 ///   - `voided` flag plus markVoided(), so the ResultEngine can void a
@@ -154,14 +167,14 @@ contract StockMatchRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeabl
     }
 
     // =========================================================================
-    // FIXTURE GENERATION - circle-method SINGLE round robin
+    // FIXTURE GENERATION - circle-method DOUBLE round robin (mirrored second leg)
     // =========================================================================
 
-    /// @notice Generates the fixture schedule IN BATCHES. 231 fixtures
+    /// @notice Generates the fixture schedule IN BATCHES. 132 fixtures
     /// exceed per-transaction gas limits, so generation is split across
-    /// multiple transactions, e.g. 3 matchdays (33 fixtures) per call.
+    /// multiple transactions, e.g. 3 matchdays (18 fixtures) per call.
     /// Batches must be contiguous starting from matchday 0; the schedule
-    /// is complete when all 21 matchdays are generated, at which point
+    /// is complete when all 22 matchdays are generated, at which point
     /// scheduleGenerated flips true and no further batches are accepted.
     /// Fixture indices are deterministic, so the final schedule is
     /// identical regardless of batch sizing. Season timing params are
@@ -185,7 +198,7 @@ contract StockMatchRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeabl
         if (n == 0 || n % 2 != 0) revert TeamCountMustBeEvenAndNonZero();
         if (n != StockConstants.TEAM_COUNT) revert TeamCountMustBeEvenAndNonZero();
 
-        uint16 rounds = n - 1; // single round-robin: 21 rounds
+        uint16 rounds = 2 * (n - 1); // double round-robin: 22 rounds
         uint8 totalMatchdays = uint8(rounds);
         uint8 endMatchday = startMatchday + matchdayCount;
 
@@ -213,7 +226,13 @@ contract StockMatchRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeabl
 
         for (uint16 round = 0; round < rounds; round++) {
             if (round >= startMatchday && round < endMatchday) {
-                _storeRound(arr, n, round, uint8(round), uint256(round) * (n / 2));
+                // Second leg (rounds 11-21) mirrors the first leg
+                // (rounds 0-10): same pairings, home and away swapped.
+                // The circle rotation has period n - 1 = 11, so after
+                // 11 rotations `arr` is back to its starting order and
+                // the second leg replays the first leg pairings exactly.
+                bool mirrored = round >= (n - 1);
+                _storeRound(arr, n, round, uint8(round), uint256(round) * (n / 2), mirrored);
             }
             _rotate(arr, n);
         }
@@ -230,19 +249,31 @@ contract StockMatchRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeabl
 
     /// @dev Stores one round's pairings. Circle method: teamA = arr[i],
     /// its partner = arr[n-1-i] from the opposite end. Alternate which side
-    /// is home each round so no team is permanently at home.
+    /// is home each round so no team is permanently at home. When
+    /// `mirrored` is true (second leg), home and away are swapped
+    /// relative to the first-leg pairing, so every pairing is played
+    /// once at each team's home. The home alternation uses the
+    /// within-leg round (round % (n - 1)), NOT the absolute round:
+    /// round 11 replays round 0, and if the absolute parity were used
+    /// the odd-round flip plus the mirror swap would cancel out and
+    /// the second leg would repeat the first leg's home team.
     function _storeRound(
         uint16[] memory arr,
         uint16 n,
         uint16 round,
         uint8 matchdayIndex,
-        uint256 baseFixtureId
+        uint256 baseFixtureId,
+        bool mirrored
     ) private {
         uint16 pairsPerRound = n / 2;
+        uint16 legRound = round % (n - 1); // 0-10 in both legs
         for (uint16 i = 0; i < pairsPerRound; i++) {
-            bool teamAHome = (round % 2 == 0);
+            bool teamAHome = (legRound % 2 == 0);
             uint16 homeIdx = teamAHome ? i : n - 1 - i;
             uint16 awayIdx = teamAHome ? n - 1 - i : i;
+            if (mirrored) {
+                (homeIdx, awayIdx) = (awayIdx, homeIdx);
+            }
             _storeFixture(baseFixtureId + i, arr[homeIdx], arr[awayIdx], matchdayIndex);
         }
     }
@@ -258,7 +289,16 @@ contract StockMatchRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeabl
     }
 
     function _storeFixture(uint256 fixtureId, uint16 home, uint16 away, uint8 matchdayIndex) private {
-        uint64 windowStart = seasonStartTimestamp + (uint64(matchdayIndex) * matchdayIntervalSeconds);
+        // Double-header finale: matchdayIndex 21 (round 22) shares the
+        // Dec 16 window with matchdayIndex 20 (round 21). The window day
+        // offset is capped at SEASON_DAY_COUNT - 1 = 20, so round 22
+        // opens Dec 16 00:00 UTC, not Dec 17. Rounds 0-20 map 1:1 to
+        // Nov 26-Dec 16. Kickoff reveal staggers the two Dec 16 waves
+        // inside the shared window.
+        uint64 dayOffset = matchdayIndex > StockConstants.SEASON_DAY_COUNT - 1
+            ? uint64(StockConstants.SEASON_DAY_COUNT - 1)
+            : uint64(matchdayIndex);
+        uint64 windowStart = seasonStartTimestamp + (dayOffset * matchdayIntervalSeconds);
         uint64 windowEnd = windowStart + matchdayIntervalSeconds;
 
         _fixtures[fixtureId] = StockFixture({

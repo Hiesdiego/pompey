@@ -10,15 +10,24 @@
  * tickToken address is imported from the crypto config, not duplicated.
  *
  * Locked season facts, stated here so every consumer agrees:
- *   22 teams, single round-robin, 21 matchdays, 11 fixtures per matchday,
- *   231 fixtures, Nov 26 to Dec 16 2026, 1-hour matches staggered randomly
- *   like crypto, one matchday lasts 1 day. Scoring: 1 goal = 0.05% (5 bps),
- *   half-up rounding, no-negative scorelines exactly like crypto, max 10
- *   goals per team per match, raw volatile cap 3% with circuit breaker
- *   review, 3 pts win / 1 draw / 0 loss, tiebreak points, GD, GF, wins,
- *   fewest losses. Forfeit: no performance for that period means 0-3,
+ *   12 teams, double round-robin, home and away, 22 rounds, 6 fixtures
+ *   per round, 132 fixtures, Nov 26 to Dec 16 2026, 1-hour matches
+ *   staggered randomly like crypto, one round lasts 1 day, except the
+ *   Dec 16 finale, which hosts rounds 21 and 22 in two waves, morning
+ *   and evening, 12 fixtures that day. Scoring: 1 goal = 0.05% (5 bps),
+ *   integer basis point math, so 0.03% is the first scoring move,
+ *   no-negative scorelines exactly like crypto, max 10 goals per team
+ *   per match, raw volatile cap 3% with circuit breaker review, 3 pts
+ *   win / 1 draw / 0 loss, tiebreak points, GD, GF, wins, fewest
+ *   losses. Forfeit: no performance for that period means 0-3,
  *   opponent wins 3-0, marked FORFEIT. Both sides missing means void,
  *   stakes refunded.
+ *
+ * Price rule, user approved Nov 18 2026: accept the last NAV within the
+ * 24h heartbeat as the end price when the feed is healthy but quiet.
+ * That rule does NOT fix teams with no NAV at all, which is why the
+ * roster shrank from 22 teams to these 12. See StockScoringExplainer
+ * for the plain-language version.
  *
  * Never import from the @tickr/shared barrel. Direct module paths only.
  */
@@ -38,13 +47,15 @@ export const STOCK_SEASON_ID: bigint = BigInt(
 /** Stock season calendar, locked. Dates are UTC. */
 export const STOCK_SEASON = {
   seasonId: 1,
-  teamCount: 22,
-  matchdays: 21,
-  fixturesPerMatchday: 11,
-  totalFixtures: 231,
-  /** First matchday, UTC midnight. Matchday n starts Nov 26 + n days. */
-  firstMatchdayUtc: "2026-11-26",
-  lastMatchdayUtc: "2026-12-16",
+  teamCount: 12,
+  rounds: 22,
+  fixturesPerRound: 6,
+  totalFixtures: 132,
+  /** First round, UTC midnight. Round n starts Nov 26 + n days, except round 22, which shares Dec 16 with round 21. */
+  firstRoundUtc: "2026-11-26",
+  lastRoundUtc: "2026-12-16",
+  /** Dec 16 hosts rounds 21 and 22 in two waves, morning and evening. */
+  doubleHeaderDate: "2026-12-16",
   matchDurationMinutes: 60,
 } as const;
 
@@ -57,6 +68,12 @@ function envAddress(value: string | undefined): Address | "" {
  * Deployed stock contract addresses. "" = not configured yet.
  * Keep these references static: Next.js inlines NEXT_PUBLIC_* values only
  * when it can see the property access at build time.
+ *
+ * NOTE: the 22-team stock stack already deployed on Base Sepolia used a
+ * 22-team schedule that is now stale. This 12-team season needs the
+ * schedule redone, an upgrade, or a fresh registry, an engineering team
+ * call. Do not point these vars at the 22-team registry and expect a
+ * 12-team season. Fill them in only after the 12-team stack deploys.
  */
 export const STOCK_CONTRACTS = {
   /** TICK is reused from the crypto league. Same token, same address. */
@@ -162,8 +179,10 @@ export const STOCK_PREDICTION_POOL_ABI = [
 
 /**
  * StockPriceOracle.getSnapshot. NAV prices, scaled 1e8.
- * Chainlink NAV is the primary feed. A stale NAV blocks the snapshot,
- * exactly like crypto, unless a verified fallback is supplied.
+ * Chainlink NAV is the primary feed. Price rule, user approved Nov 18
+ * 2026: the backend accepts the last NAV within the 24h heartbeat as
+ * the end price when the feed is healthy but quiet. A team with no NAV
+ * at all cannot play, that is why the roster is 12 teams.
  */
 export const STOCK_PRICE_ORACLE_ABI = [
   {
@@ -190,7 +209,18 @@ export const STOCK_PRICE_ORACLE_ABI = [
   },
 ] as const;
 
-/** StockMatchRegistry read-only views. */
+/**
+ * StockMatchRegistry read-only views.
+ *
+ * FIX (12-team revision): the 22-team frontend ABI listed only 8 tuple
+ * fields and omitted voided and matchEndTimestamp. The real on-chain
+ * tuple has 10 fields, in this order: homeTeamId, awayTeamId,
+ * matchdayIndex, windowStart, windowEnd, kickoffTimestamp,
+ * kickoffRevealed, settled, voided, matchEndTimestamp. The backend
+ * fixed its copy on Nov 17 2026, the frontend copy is fixed here, so
+ * the match page can read matchEndTimestamp by name instead of
+ * misreading the settled word as a timestamp.
+ */
 export const STOCK_MATCH_REGISTRY_ABI = [
   {
     type: "function",
@@ -209,6 +239,8 @@ export const STOCK_MATCH_REGISTRY_ABI = [
           { name: "kickoffTimestamp", type: "uint64" },
           { name: "kickoffRevealed", type: "bool" },
           { name: "settled", type: "bool" },
+          { name: "voided", type: "bool" },
+          { name: "matchEndTimestamp", type: "uint64" },
         ],
       },
     ],
@@ -225,17 +257,24 @@ export const STOCK_MATCH_REGISTRY_ABI = [
 // ── Stock backend API ──────────────────────────────────────────────────────
 
 /**
- * Stock backend endpoints, mounted by the backend under /api/stocks/*.
+ * Stock backend endpoints, mounted by the backend under /api/stocks/*
+ * (plural, canonical). The 22-team frontend called /api/stock/*, which
+ * the backend never served, so every stock page 404d in production.
+ * This file calls /api/stocks/* only. Do not reintroduce the singular
+ * path.
+ *
  * Backend must implement these with the same shapes as /api/table,
  * /api/fixtures, /api/fixtures/:id and /api/fixtures/:id/pool, plus the
  * stock-only fields on fixtures: forfeit, forfeitingTeamId, voided,
  * homeGoals, awayGoals. Until the backend ships them, pages using
  * stockApi degrade to the same ErrorState the crypto pages show.
  *
- * Prices are NOT fetched here. Prices arrive over the single shared
- * WebSocket in useLiveFeed, which stock pages reuse. Do not add a second
- * /api/prices poll for stocks, it would double egress against the 1GB
- * per month backend cap.
+ * Prices are NOT fetched here. Prices arrive through useStockLiveFeed,
+ * which polls /api/stocks/prices and is namespaced to stock teamIds.
+ * Stock teamIds 0 to 11 overlap crypto teamIds, so stock prices must
+ * never be merged into the crypto price map or keyed by bare teamId
+ * outside the stock namespace. Do not add a second /api/prices poll for
+ * stocks, it would double egress against the 1GB per month backend cap.
  */
 export interface StockApiFixtureTeam {
   teamId: number;
@@ -293,6 +332,18 @@ export interface StockApiTableRow {
   forfeits?: number;
 }
 
+/** One row from /api/stocks/prices. teamId is a STOCK teamId, namespaced, never a crypto teamId. */
+export interface StockApiPrice {
+  teamId: number;
+  ticker: string;
+  symbol: string;
+  price: string | null;
+  source: string | null;
+  navPriceUpdatedAt: string | null;
+  multiplier: number | null;
+  ok: boolean;
+}
+
 export class StockApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -337,14 +388,3 @@ export const stockApi = {
   table: () => stockGet<StockApiTableRow[]>("/api/stocks/table"),
   prices: () => stockGet<StockApiPrice[]>("/api/stocks/prices"),
 };
-
-export interface StockApiPrice {
-  teamId: number;
-  ticker: string;
-  symbol: string;
-  price: string | null;
-  source: string | null;
-  navPriceUpdatedAt: string | null;
-  multiplier: number | null;
-  ok: boolean;
-}

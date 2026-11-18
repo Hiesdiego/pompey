@@ -1,5 +1,16 @@
 /**
- * TICKR Stock League — full fresh deploy (Base Sepolia).
+ * TICKR Stock League 12-TEAM REVISION, full fresh deploy (Base Sepolia).
+ *
+ * REDO PATH (locked Nov 18 2026): the deployed 22-team StockMatchRegistry
+ * 0xc3a04de16ec15947d39ac1c27914c67e480ba019 already has fixtureCount 231
+ * with its 21-matchday schedule generated. A 12-team season CANNOT reuse
+ * that schedule, and it must NOT be regenerated or overwritten. This
+ * script deploys a FRESH StockTeamRegistry carrying the 12 teams plus a
+ * FRESH StockMatchRegistry (plus fresh oracle, engine and pool), then the
+ * 22-round schedule is generated on the FRESH registry and seeded. The
+ * old 22-team registry stays untouched on-chain. Record the new proxy
+ * addresses and point backend and frontend STOCK_ env at them; keep the
+ * old addresses only as a historical note.
  *
  * Deploys a brand-new, parallel stock stack as UUPS proxies. NOTHING in
  * the crypto league's contracts is touched: no shared storage, no shared
@@ -8,7 +19,7 @@
  * never redeployed, so TICK balances survive (standing rule).
  *
  * Order:
- *   1. StockTeamRegistry implementation + proxy (22 teams, locked order)
+ *   1. StockTeamRegistry implementation + proxy (12 teams, locked order)
  *   2. StockMatchRegistry implementation + proxy
  *   3. StockPriceOracle implementation + proxy
  *   4. StockResultEngine implementation + proxy
@@ -45,11 +56,11 @@
  *   This command is available at both the workspace root and contracts package.
  *
  * Env overrides (all optional):
- *   TICK_TOKEN_ADDRESS       — default: testnet TICK 0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b
- *   BACKEND_SIGNER_ADDRESS   — default: read live from the current crypto PriceOracle
- *   CRYPTO_PRICE_ORACLE_ADDRESS — default: current address in deployed-addresses.md
- *   TREASURY_ADDRESS         — default: deployer
- *   STOCK_MATCH_DURATION_SECONDS — default: 3600 (locked, do not change)
+ *   TICK_TOKEN_ADDRESS      , default: testnet TICK 0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b
+ *   BACKEND_SIGNER_ADDRESS  , default: read live from the current crypto PriceOracle
+ *   CRYPTO_PRICE_ORACLE_ADDRESS, default: current address in deployed-addresses.md
+ *   TREASURY_ADDRESS        , default: deployer
+ *   STOCK_MATCH_DURATION_SECONDS, default: 3600 (locked, do not change)
  *
  * After this: run StockGenerateSchedule.ts, then seed pools, then update
  * backend/frontend .env files with the STOCK_ addresses below.
@@ -61,22 +72,22 @@ const TICK_TOKEN_DEFAULT = "0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b";
 const CRYPTO_ORACLE_DEFAULT = "0x2814bd64f7774eccd5dc11a792f15fecdfebdf90";
 const MATCH_DURATION_SECONDS = 3600n; // 1 hour, locked for Stock Season 1
 
-// Locked roster, teamId 0-21. Names, symbols and Coinbase B20 token
-// addresses copied verbatim from base-tokenized-stocks.csv
-// (Base Tokenized Stocks API, live 2026-11-14). All decimals 8.
+// Locked roster, teamId 0-11. Names, symbols and Coinbase B20 token
+// addresses copied verbatim from the Base Tokenized Stocks API
+// (https://api.coinbase.com/v1/tokenized-stocks), re-verified live
+// Nov 18 2026: all 12 carry a live nav_price that day (INTCc 56.25 at
+// 09:23 UTC, SNDKc 828.01 at 09:45 UTC, SPCXc 142.44 at 07:10 UTC).
+// INTC, SNDK and SPCX (SpaceX) are NEW, not in the 22-team roster.
+// The 13 sidelined teams return for Season 2. All decimals 8.
 const TEAM_NAMES = [
   "NVIDIA", "Apple", "Microsoft", "Amazon", "Alphabet",
-  "Meta", "Tesla", "AMD", "Netflix", "Broadcom",
-  "Palantir", "Strategy", "Oracle", "Salesforce", "JPMorgan",
-  "Visa", "Eli Lilly", "Disney", "Robinhood", "Circle",
-  "GameStop", "AMC",
+  "Meta", "Tesla", "Strategy", "Circle",
+  "Intel", "Sandisk", "SpaceX",
 ];
 const TEAM_SYMBOLS = [
   "NVDAc", "AAPLc", "MSFTc", "AMZNc", "GOOGLc",
-  "METAc", "TSLAc", "AMDc", "NFLXc", "AVGOc",
-  "PLTRc", "MSTRc", "ORCLc", "CRMc", "JPMc",
-  "Vc", "LLYc", "DISc", "HOODc", "CRCLc",
-  "GMEc", "AMCc",
+  "METAc", "TSLAc", "MSTRc", "CRCLc",
+  "INTCc", "SNDKc", "SPCXc",
 ];
 const TEAM_TOKEN_ADDRESSES = [
   "0xb20000000000000000000078ee7ce2fE4908108C", // NVDAc
@@ -86,21 +97,11 @@ const TEAM_TOKEN_ADDRESSES = [
   "0xb2000000000000000000002D0BA3164cc74f58B7", // GOOGLc
   "0xb2000000000000000000008bC8786B856E61707C", // METAc
   "0xb2000000000000000000001e800a7f5189430cD0", // TSLAc
-  "0xB2000000000000000000000d8Ce462E99ee7A47B", // AMDc
-  "0xb20000000000000000000058B8c947e44011dFE6", // NFLXc
-  "0xB200000000000000000000Fc737aeA6196aB5a4c", // AVGOc
-  "0xb2000000000000000000007d16372840dF4dAbbe", // PLTRc
   "0xb2000000000000000000004884b426556b92883d", // MSTRc
-  "0xb200000000000000000000347AFbA223D7B6b63C", // ORCLc
-  "0xB2000000000000000000006432a3a7991e718DBB", // CRMc
-  "0xB200000000000000000000FDe956536A25725156", // JPMc
-  "0xB20000000000000000000054b11Fd279a4f7D4EF", // Vc
-  "0xB200000000000000000000f1a0F91e34892E4718", // LLYc
-  "0xb2000000000000000000000bD75bF439A38bF7DF", // DISc
-  "0xb2000000000000000000006F944897540579D3f2", // HOODc
   "0xB20000000000000000000019f6E7C675b73C2e4D", // CRCLc
-  "0xb2000000000000000000007790ed6E48e06eD935", // GMEc
-  "0xB200000000000000000000CD7e6b8042cb7c2BB5", // AMCc
+  "0xB2000000000000000000004AFF16039bA04bdFBc", // INTCc
+  "0xb200000000000000000000397293Cb8cda9a10c5", // SNDKc
+  "0xb2000000000000000000007b9fcbd005511aCBd5", // SPCXc
 ];
 
 function address(name: string, value: string | undefined): `0x${string}` {
@@ -141,9 +142,9 @@ async function main(): Promise<void> {
   }
 
   if (
-    TEAM_NAMES.length !== 22 || TEAM_SYMBOLS.length !== 22 || TEAM_TOKEN_ADDRESSES.length !== 22
+    TEAM_NAMES.length !== 12 || TEAM_SYMBOLS.length !== 12 || TEAM_TOKEN_ADDRESSES.length !== 12
   ) {
-    throw new Error("Stock roster must be exactly 22 teams");
+    throw new Error("Stock roster must be exactly 12 teams");
   }
 
   console.log("Deployer :", owner);
@@ -174,7 +175,7 @@ async function main(): Promise<void> {
   }
 
   // --- 1. TeamRegistry ---
-  console.log("Deploying StockTeamRegistry (22 teams)...");
+  console.log("Deploying StockTeamRegistry (12 teams, FRESH registry, old 22-team registry untouched)...");
   const teamRegistry = await deployProxy("StockTeamRegistry", "initialize", [
     owner,
     TEAM_NAMES,
@@ -183,7 +184,7 @@ async function main(): Promise<void> {
   ]);
 
   // --- 2. MatchRegistry ---
-  console.log("Deploying StockMatchRegistry...");
+  console.log("Deploying StockMatchRegistry (FRESH registry, schedule NOT yet generated)...");
   const matchRegistry = await deployProxy("StockMatchRegistry", "initialize", [
     owner,
     teamRegistry,
@@ -264,13 +265,16 @@ async function main(): Promise<void> {
   console.log(`NEXT_PUBLIC_STOCK_MATCH_REGISTRY_ADDRESS=${matchRegistry}`);
   console.log("");
   console.log("Next steps:");
-  console.log(`  1. Generate the schedule (21 matchdays, 231 fixtures):`);
+  console.log(`  1. Generate the schedule on the FRESH registry (22 rounds, 132 fixtures,`);
+  console.log(`     Dec 16 double-header finale with rounds 21 and 22 in two waves):`);
   console.log(`     $env:STOCK_MATCH_REGISTRY_ADDRESS='${matchRegistry}'; pnpm schedule:stock:testnet`);
-  console.log("  2. Seed pools with 250 TICK x 231 fixtures (the seed script approves first):");
+  console.log("  2. Seed pools with 250 TICK x 132 fixtures = 33,000 TICK (the seed script approves first):");
   console.log(`     $env:STOCK_PREDICTION_POOL_ADDRESS='${predictionPool}'; pnpm seed:stock:testnet`);
   console.log("  3. Update backend + frontend .env files with the STOCK_ addresses above");
   console.log("  4. Restart the backend with the stock loop enabled");
   console.log("  5. Crypto contracts untouched: verify no crypto address changed");
+  console.log("  6. Old 22-team StockMatchRegistry 0xc3a04de16ec15947d39ac1c27914c67e480ba019");
+  console.log("     stays untouched (fixtureCount 231). Do NOT point STOCK_ env at it.");
 }
 
 main().catch((error) => {

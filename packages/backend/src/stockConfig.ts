@@ -1,5 +1,5 @@
 /**
- * TICKR Stock League — backend configuration (STOCK_* env).
+ * TICKR Stock League, backend configuration (STOCK_* env).
  *
  * Intended destination: packages/backend/src/stockConfig.ts (new file,
  * alongside the crypto config.ts). It deliberately does NOT import the
@@ -15,12 +15,34 @@
  * The only value that fails fast is the backend signer key, and only when
  * a stock SUBMITTER is constructed (read-only services never need it).
  *
- * LOCKED SEASON (do not change without a user decision):
- *   22 teams, single round-robin, 21 matchdays, 11 fixtures per matchday,
- *   231 fixtures, Nov 26 to Dec 16 2026, 1-hour matches staggered randomly,
- *   matchday lasts 1 day, all matches end the same day.
+ * LOCKED SEASON, 12-TEAM REVISION (user decision 2026-11-18, revises the
+ * 22-team season locked 2026-11-16):
+ *   12 teams, double round-robin (home and away), 22 rounds, 6 fixtures
+ *   per round, 132 fixtures, Nov 26 to Dec 16 2026, 1-hour matches
+ *   staggered randomly, a matchday (round) lasts 1 day, all matches end
+ *   the same day as the crypto league. Nov 26 to Dec 16 inclusive is 21
+ *   days, so 22 rounds need ONE double-header day: the Dec 16 finale
+ *   hosts rounds 21 and 22 (matchdayIndex 20 and 21) in two waves,
+ *   morning and evening, 12 fixtures that day. The backend lifecycle
+ *   groups fixtures by matchdayIndex, so two rounds sharing one calendar
+ *   day need no special case beyond the overlap guard in
+ *   stockMatchLifecycle.ts; the on-chain schedule MUST give the two
+ *   finale rounds separate windows (morning wave and evening wave) so
+ *   their kickoff slots cannot collide.
  *
- * SCORING (locked 2026-11-16, user call):
+ * FRESH CONTRACTS, READ THIS BEFORE DEPLOYING:
+ *   The deployed 22-team StockMatchRegistry
+ *   0xc3a04de16ec15947d39ac1c27914c67e480ba019 already has fixtureCount
+ *   231 for the 22-team season and CANNOT be reused for the 12-team
+ *   season. The redo path is a FRESH StockTeamRegistry (12 teams) plus a
+ *   FRESH StockMatchRegistry, then generate the 22-round schedule and
+ *   seed. The backend reads every stock contract address from STOCK_*
+ *   env vars (fresh addresses to be filled in after deploy) and NEVER
+ *   hardcodes a registry address. Do not point STOCK_* at the old
+ *   231-fixture registry: the lifecycle would load 231 fixtures for 22
+ *   teams that no longer exist.
+ *
+ * SCORING (locked 2026-11-16, unchanged by the 12-team revision):
  *   1 goal = 0.05% (5 bps), half-up rounding, no-negative scorelines
  *   exactly like crypto, max 10 goals per team per match, raw volatile
  *   cap 3% (300 bps). Crypto uses 50 bps per goal (PriceOracle
@@ -32,19 +54,28 @@
  * PRICE FEED (locked):
  *   Chainlink NAV primary via the Base Tokenized Stocks API
  *   (https://api.coinbase.com/v1/tokenized-stocks, no key, verified live
- *   2026-11-16: returns nav_price, nav_price_updated_at, multiplier per
- *   token). Dinari is VERIFIED NOT worthy as a drop-in fallback: rows
- *   exist for all tickers, but the Dinari API is enterprise/key-gated, not
- *   a free public feed, so it is NEVER used automatically. A Dinari tier
- *   only activates when DINARI_API_KEY_ID is supplied by the user AND a
+ *   2026-11-18: all 12 roster teams carry a nav_price). Dinari is
+ *   VERIFIED NOT worthy as a drop-in fallback: rows exist for all
+ *   tickers, but the Dinari API is enterprise/key-gated, not a free
+ *   public feed, so it is NEVER used automatically. A Dinari tier only
+ *   activates when DINARI_API_KEY_ID is supplied by the user AND a
  *   Dinari client is wired in (see stockPriceFeed.ts). CoinGecko is last
  *   resort only when it has a price for the ticker, otherwise the snapshot
  *   is BLOCKED like crypto, never silently fallen back.
  *
+ * LAST-NAV FALLBACK (user approved 2026-11-18, see stockPriceFeed.ts):
+ *   When the feed is healthy but quiet, the last NAV within the 24h
+ *   heartbeat is accepted as the end price instead of forfeiting. Bound:
+ *   lastNavFallbackMaxAgeMs (24h) measured at full-time, only when the
+ *   poller is healthy, only when the last NAV was published before
+ *   kickoff, and never for a team with no NAV at all. Every use is
+ *   logged. It does NOT fix teams with no NAV at all, which is why the
+ *   roster shrank from 22 to 12.
+ *
  * BANDWIDTH (hard cap 1 GB/month, user instruction 2026-11-16):
  *   NAV polling follows the same hot/idle discipline as the crypto feeds.
  *   The list endpoint returns ALL tokens in ONE call (page_size 500), so
- *   one poll covers all 22 teams: hot 60s cadence only inside the daily
+ *   one poll covers all 12 teams: hot 60s cadence only inside the daily
  *   hot window (30 min before first kickoff to last full-time + 15 min),
  *   idle 15 min cadence otherwise. Never poll NAV every 60s all day.
  *   RPC reads go through the shared fallback transport in
@@ -126,14 +157,21 @@ export const stockConfig = {
    *  and any onchain verification do. */
   oracleRegistry: "0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD" as `0x${string}`,
 
-  /** Locked season window (UTC). 21 matchdays, Nov 26 to Dec 16 2026. */
+  /** Locked season window (UTC). 22 rounds, Nov 26 to Dec 16 2026.
+   *  Dec 16 is the double-header finale: rounds 21 and 22
+   *  (matchdayIndex 20 and 21) share that calendar day in two waves. */
   season: {
     startDate: optional("STOCK_SEASON_START_DATE", "2026-11-26"),
     endDate: optional("STOCK_SEASON_END_DATE", "2026-12-16"),
-    teamCount: 22,
-    matchdays: 21,
-    fixturesPerMatchday: 11,
-    totalFixtures: 231,
+    teamCount: 12,
+    matchdays: 22,
+    fixturesPerMatchday: 6,
+    totalFixtures: 132,
+    /** Calendar day of the double-header finale (UTC date). */
+    doubleHeaderDate: optional("STOCK_DOUBLE_HEADER_DATE", "2026-12-16"),
+    /** matchdayIndex values that share the double-header day (0-based:
+     *  round 21 is index 20, round 22 is index 21). */
+    doubleHeaderMatchdays: [20, 21],
   },
 
   /** 1-hour matches, like crypto. Backend config, NOT on-chain: the
@@ -147,21 +185,25 @@ export const stockConfig = {
     leadMinutes: optionalInt("STOCK_KICKOFF_LEAD_MINUTES", 60),
     minLeadMinutes: 30,
     maxLeadMinutes: 120,
-    /** Stagger: kickoff slots are spread across the 1-day matchday
-     *  window. Slot assignment is a stable hash of the fixture id (see
-     *  stockMatchLifecycle.ts), so a restart re-derives the same slots. */
-    staggerSlotMinutes: optionalInt("STOCK_KICKOFF_STAGGER_SLOT_MINUTES", 60),
-    /** Max slots per matchday (11 fixtures / 60-min slots spreads a
-     *  matchday across ~10 hours of the day). */
-    staggerMaxSlots: optionalInt("STOCK_KICKOFF_STAGGER_MAX_SLOTS", 11),
+    /** Kickoff slots are absolute times inside the fixture window (see
+     *  stockMatchLifecycle.ts stockKickoffSlotMs): each round's 6
+     *  fixtures are spread evenly across the usable window and snapped
+     *  to this grid. A restart re-derives the same slots. */
+    slotGridMinutes: optionalInt("STOCK_KICKOFF_SLOT_GRID_MINUTES", 15),
+    /** Usable window starts this long after windowStart. */
+    slotStartPadMinutes: optionalInt("STOCK_KICKOFF_SLOT_START_PAD_MINUTES", 30),
+    /** Usable window ends this long before the last legal kickoff
+     *  (windowEnd minus match duration minus this pad). */
+    slotEndPadMinutes: optionalInt("STOCK_KICKOFF_SLOT_END_PAD_MINUTES", 60),
   },
 
   nav: {
     /** Base Tokenized Stocks API. Read-only, no key. Verified live
-     *  2026-11-16: GET / returns { tokens: [...] } with nav_price,
-     *  nav_price_updated_at, multiplier, isin, contract_address. */
+     *  2026-11-18: GET / returns { tokens: [...] } with nav_price,
+     *  nav_price_updated_at, multiplier, isin, contract_address, and
+     *  all 12 roster teams carry a nav_price. */
     baseUrl: optional("STOCK_NAV_API_URL", "https://api.coinbase.com/v1/tokenized-stocks"),
-    /** Hot cadence: one list call covers all 22 teams. Only inside the
+    /** Hot cadence: one list call covers all 12 teams. Only inside the
      *  daily hot window (30 min before first kickoff to last FT + 15 min).
      *  Chainlink equity feeds update on 0.5% deviation or a 24h heartbeat,
      *  so polling faster than 60s is pure waste. */
@@ -179,6 +221,18 @@ export const stockConfig = {
     /** Forfeit grace: after full-time, a NAV published up to this long
      *  after FT still counts as performance for the match window. */
     forfeitGraceMs: optionalInt("STOCK_FORFEIT_GRACE_MS", 60 * 60_000),
+    /** LAST-NAV FALLBACK bound (user approved 2026-11-18): the last NAV
+     *  is accepted as the end price only when it is no older than this
+     *  at full-time (24h Chainlink heartbeat) AND the feed is healthy
+     *  AND the NAV was published before kickoff. A team with no NAV at
+     *  all is never covered by this fallback. See stockPriceFeed.ts. */
+    lastNavFallbackMaxAgeMs: optionalInt("STOCK_LAST_NAV_FALLBACK_MAX_AGE_MS", 24 * 60 * 60_000),
+    /** Feed-health window for the last-NAV fallback: the poller's last
+     *  successful poll must be within this long, otherwise the feed is
+     *  treated as unhealthy and the fallback does NOT apply (an outage
+     *  must never be mistaken for a quiet feed). Idle cadence is 15 min,
+     *  so 30 min tolerates one missed idle poll. */
+    feedHealthyWithinMs: optionalInt("STOCK_NAV_FEED_HEALTHY_WITHIN_MS", 30 * 60_000),
   },
 
   /** Dinari fallback is GATED, not automatic. Empty = no Dinari tier at
@@ -198,7 +252,7 @@ export const stockConfig = {
 
   checkpoints: {
     intervalMinutes: optionalInt("STOCK_CHECKPOINT_INTERVAL_MINUTES", 60),
-    /** Max teams per submitCheckpoints tx (gas-bounded). 22 teams = 2 txs. */
+    /** Max teams per submitCheckpoints tx (gas-bounded). 12 teams = 1 tx. */
     batchSize: optionalInt("STOCK_CHECKPOINT_BATCH_SIZE", 20),
   },
 

@@ -1,6 +1,7 @@
 # TICKR Stock League: FAQ
 
-Status: locked, Nov 16 2026. Season 1 runs Nov 26 to Dec 16 2026.
+Status: locked, Nov 18 2026. 12-team revision, supersedes the Nov 16 2026
+22-team spec. Season 1 runs Nov 26 to Dec 16 2026.
 
 ## Scoring
 
@@ -28,8 +29,9 @@ examples: stock-scoring.md.
 
 0.03%. Moves from -0.02% to +0.02% score 0 goals. The first goal lands at
 0.03%, the second at 0.08%, the third at 0.13%, and so on, 1 goal per
-additional 0.05%. The exact half point, 0.025%, scores 0 goals under the
-on-chain integer math.
+additional 0.05%. The price move is first truncated to integer basis points,
+so the exact half point, 0.025%, truncates to 2 bps and scores 0 goals under
+the on-chain integer math.
 
 ### Is there a limit on goals in a match?
 
@@ -68,32 +70,48 @@ Once the threshold was rescaled to 0.05%, the window could stay at 1 hour.
 ### When do matches kick off?
 
 Kickoffs are staggered randomly across the matchday, like the crypto league.
-A matchday lasts 1 day, has 11 fixtures, and all of them end the same day.
-Fixtures are spread across the day rather than all starting at once.
+A matchday lasts 1 day, has 6 fixtures, and all of them end the same day.
+Fixtures are spread across the day rather than all starting at once. The
+exception is the Dec 16 finale, which hosts rounds 21 and 22 in two waves
+(morning and evening), 12 fixtures that day.
 
 ### Do stock matches pause when the stock market is closed?
 
 No. Tokenized stocks on Base trade 24/7, so there is no market-hours gating.
 The NAV reference feed can go quiet outside traditional market hours, and that
-is handled by the staleness rule, not by pausing matches. If the NAV is stale
-at snapshot time, the snapshot is blocked.
+is handled by the staleness rule and the last-NAV rule, not by pausing matches.
+If the last NAV is older than 24 hours plus grace, or the feed is unhealthy,
+the snapshot is blocked.
 
 ## Teams and format
 
-### Why 22 teams?
+### Why 12 teams?
 
-The original 20-team roster was extended by 2, GameStop and AMC, the highest
-recognition retail names with real 1-hour volatility, both Coinbase B20, and a
-natural derby pair. 22 teams gives a single round-robin of 21 matchdays, 11
-fixtures per matchday, 231 fixtures, running Nov 26 to Dec 16 2026, ending the
-same day as the crypto league season.
+The Nov 16 plan had 22 teams. On Nov 17 the Coinbase tokenized stocks API
+returned far fewer live NAV prices than the day before, and 13 of the 22
+rostered teams had no usable NAV at all. Under the forfeit rule, most
+matchdays would have been decided by forfeits, not by price. The roster was
+cut on Nov 18 to the 12 teams that had a live NAV: NVIDIA, Apple, Microsoft,
+Amazon, Alphabet, Meta, Tesla, Strategy, Circle, Intel, SanDisk, and SpaceX.
+12 teams gives a double round-robin, home and away, 22 rounds, 6 fixtures per
+round, 132 fixtures, running Nov 26 to Dec 16 2026, ending the same day as
+the crypto league season. Nov 26 to Dec 16 inclusive is 21 days, so 22 rounds
+need one double-header day: the Dec 16 finale hosts rounds 21 and 22 in two
+waves (morning and evening), 12 fixtures that day.
 
-### Who are the 22 teams?
+### Who are the 12 teams?
 
-NVIDIA, Apple, Microsoft, Amazon, Alphabet, Meta, Tesla, AMD, Netflix,
-Broadcom, Palantir, Strategy, Oracle, Salesforce, JPMorgan, Visa, Eli Lilly,
-Disney, Robinhood, Circle, GameStop, and AMC. All Coinbase B20 tokenized
-stocks, symbols with a `c` suffix (NVDAc, AAPLc).
+NVIDIA, Apple, Microsoft, Amazon, Alphabet, Meta, Tesla, Strategy, Circle,
+Intel, SanDisk, and SpaceX. All Coinbase B20 tokenized stocks, symbols with a
+`c` suffix (NVDAc, AAPLc). Intel, SanDisk, and SpaceX are new to the roster:
+they were not in the 22-team plan.
+
+### What happened to the other 10 teams from the 22-team plan?
+
+Thirteen teams sit out Season 1 and return for Season 2: AMD, Netflix,
+Broadcom, Palantir, Oracle, Salesforce, JPMorgan, Visa, Eli Lilly, Disney,
+Robinhood, GameStop, and AMC. They had no usable NAV when the roster was
+finalised on Nov 18. GameStop and AMC headline the Meme Arena later.
 
 ### Why only Coinbase B20 stocks in Season 1?
 
@@ -110,6 +128,14 @@ stack, cup-style. It is not Season 3 of the crypto league, and the crypto
 league is untouched. The two leagues run side by side and share TICK and the
 TP leaderboard.
 
+### Can every stock appear in price-target markets?
+
+Not in Season 1. The stock league is the build now. But it is a noted future
+requirement from the user that every stock (all 22, not just the 12 league
+teams) can appear in the market list for price-target creation. That is to be
+brainstormed and built later, not now. No price-target markets are built in
+this revision.
+
 ## Price feed
 
 ### What is NAV?
@@ -125,11 +151,29 @@ prices and stakes TICK.
 
 ### What happens if the NAV is stale?
 
-The snapshot is blocked, exactly like the crypto league blocks on a stale
-price. NAV feeds update on deviation or heartbeat and can hold their last value
-for a stretch, so every snapshot checks `nav_price_updated_at` before trusting
-a price. TICKR never settles a match on a guessed price. If a blocked snapshot
+It depends on how stale, and whether the feed is healthy. NAV feeds update on
+deviation or heartbeat and can hold their last value for a stretch, so every
+snapshot checks `nav_price_updated_at` before trusting a price.
+
+Under the last-NAV rule, approved Nov 18 2026: when the feed is healthy but
+quiet, the backend accepts the last NAV as the end price, as long as that NAV
+is no older than 24 hours plus a short grace allowance (the 24-hour heartbeat).
+A stock that barely moved, so Chainlink published no fresh NAV during the
+hour, still gets a price, the most recent NAV, and the match plays on. The
+backend never fabricates a price. It only reuses a real, published NAV, and
+every use of a carried-over NAV is logged.
+
+If the last NAV is older than 24 hours plus grace, or the feed is unhealthy,
+the snapshot is blocked, exactly like the crypto league blocks on a stale
+price. TICKR never settles a match on a guessed price. If a blocked snapshot
 leaves a team with no performance for the period, the forfeit rule applies.
+
+### Does the last-NAV rule fix a team with no NAV at all?
+
+No. That is exactly why the roster shrank from 22 teams to 12. The last-NAV
+rule only carries over a real, published NAV for a team that has one. A stock
+with no NAV at all has nothing to carry over, so it still has no price and the
+forfeit rule applies.
 
 ### What is the fallback if NAV fails?
 
@@ -225,6 +269,15 @@ Yes. A separate, fresh stack, built cup-style and parallel to the crypto
 league. The crypto contracts are untouched. TICK is reused: same token,
 `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b`.
 
+### Can the deployed 22-team StockMatchRegistry be reused for 12 teams?
+
+No. The deployed StockMatchRegistry at
+`0xc3a04de16ec15947d39ac1c27914c67e480ba019` already has fixtureCount 231 for
+the 22-team season and cannot be reused. The redo path is a fresh
+StockTeamRegistry with the 12 teams (teamIds 0 to 11), plus a fresh
+StockMatchRegistry, then generate the 22-round schedule (132 fixtures) and
+seed it.
+
 ### What does upgradeable mean here?
 
 The stock stack uses the UUPS upgradeable pattern, so the logic contracts can
@@ -269,11 +322,16 @@ stale outside traditional market hours, and the staleness rule covers that.
 
 ### When does Season 1 run?
 
-Nov 26 to Dec 16 2026. 22 teams, 21 matchdays, 231 fixtures, 11 per matchday.
-1-hour matches, staggered randomly across each matchday.
+Nov 26 to Dec 16 2026. 12 teams, double round-robin, 22 rounds, 6 fixtures
+per round, 132 fixtures, 21 matchdays. 1-hour matches, staggered randomly
+across each matchday. The Dec 16 finale hosts rounds 21 and 22 in two waves
+(morning and evening), 12 fixtures that day.
 
 ### What happens after Season 1?
 
-Season 2 is undecided. Dinari-only stocks (SPY, QQQ, BABA, TSM, ASML, COST,
-COIN) are the natural Season 2 material, once a second feed is wired in. Any
-Season 2 decision will be announced before it is built.
+Season 2 brings back the 13 sidelined teams: AMD, Netflix, Broadcom, Palantir,
+Oracle, Salesforce, JPMorgan, Visa, Eli Lilly, Disney, Robinhood, GameStop,
+and AMC, with GameStop and AMC headlining the Meme Arena. Dinari-only stocks
+(SPY, QQQ, BABA, TSM, ASML, COST, COIN) are also Season 2 material, once a
+second feed is wired in. Any Season 2 decision will be announced before it is
+built.

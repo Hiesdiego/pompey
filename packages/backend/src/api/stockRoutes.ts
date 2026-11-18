@@ -21,13 +21,13 @@
  *     fine for a limiter. Replace with the shared limiter if the repo
  *     gains one; do not remove it without one.
  *
- * Endpoints (all JSON):
- *   GET /api/stocks/teams            — 22-team roster (B20 symbols, ISINs)
- *   GET /api/stocks/fixtures        — all stock fixtures w/ kickoff state
- *   GET /api/stocks/fixtures/:id    — one fixture (+ forfeit flag when settled)
- *   GET /api/stocks/table           — stock league table (locked tiebreak)
- *   GET /api/stocks/prices          — latest validated NAV per team
- *   GET /api/stocks/players/:address — UNIFIED TP row (crypto + stock)
+ * Endpoints (all JSON, canonical /api/stocks/* plural naming everywhere):
+ *   GET /api/stocks/teams           , 12-team roster (B20 symbols, ISINs, logos)
+ *   GET /api/stocks/fixtures       , all stock fixtures w/ kickoff state
+ *   GET /api/stocks/fixtures/:id   , one fixture (+ forfeit flag when settled)
+ *   GET /api/stocks/table          , stock league table (locked tiebreak)
+ *   GET /api/stocks/prices         , latest validated NAV per team
+ *   GET /api/stocks/players/:address, UNIFIED TP row (crypto + stock)
  *
  * The players endpoint is the unified TP surface: crypto TP plus stock
  * TP in one row, no separate stock leaderboard anywhere. A player who
@@ -86,9 +86,32 @@ function stockRateLimit(maxPerMinute = 120): (req: Request, res: Response, next:
   };
 }
 
-function serializeStockFixture(f: StockFixtureView, forfeitingTeamId?: number, voided?: boolean) {
+export interface SerializeStockFixtureOpts {
+  forfeitingTeamId?: number | null;
+  voided?: boolean;
+  homeGoals?: number | null;
+  awayGoals?: number | null;
+}
+
+function serializeStockFixture(f: StockFixtureView, opts: SerializeStockFixtureOpts = {}) {
   const home = STOCK_TEAMS.find((t) => t.teamId === f.homeTeamId);
   const away = STOCK_TEAMS.find((t) => t.teamId === f.awayTeamId);
+  const forfeitingTeamId = opts.forfeitingTeamId ?? null;
+  // FIX (2026-11-17): the old shape returned forfeit as an object
+  // ({ forfeitingTeamId }) or null, while the frontend type is a boolean
+  // and StockFixtureCard checks `fixture.forfeit === true`, so the flag
+  // never matched. It also sent no scoreline at all, so every settled
+  // card rendered "–" instead of the FT score. forfeit is a boolean now,
+  // forfeitingTeamId is its own field, and goals ride along.
+  let homeGoals = opts.homeGoals ?? null;
+  let awayGoals = opts.awayGoals ?? null;
+  if (homeGoals === null && awayGoals === null && forfeitingTeamId !== null) {
+    // Forfeit recorded but no ResultRecorded yet: the reader reports
+    // 0-0 for this case, which is never a real forfeit scoreline.
+    // The locked rule is 3-0 to the opponent, so derive it here.
+    homeGoals = forfeitingTeamId === f.homeTeamId ? 0 : 3;
+    awayGoals = forfeitingTeamId === f.homeTeamId ? 3 : 0;
+  }
   return {
     fixtureId: f.fixtureId.toString(),
     seasonId: stockConfig.seasonId.toString(),
@@ -96,6 +119,11 @@ function serializeStockFixture(f: StockFixtureView, forfeitingTeamId?: number, v
     home: home ? { teamId: home.teamId, ticker: home.ticker, name: home.name, symbol: home.tokenSymbol } : null,
     away: away ? { teamId: away.teamId, ticker: away.ticker, name: away.name, symbol: away.tokenSymbol } : null,
     matchdayIndex: f.matchdayIndex,
+    // 1-based round number for the UI (round 21 is matchdayIndex 20).
+    round: f.matchdayIndex + 1,
+    // True for the two Dec 16 finale rounds (matchdayIndex 20 and 21),
+    // which share one calendar day in two waves (morning and evening).
+    doubleHeader: stockConfig.season.doubleHeaderMatchdays.some((round) => round === f.matchdayIndex),
     windowStart: new Date(f.windowStartMs).toISOString(),
     windowEnd: new Date(f.windowEndMs).toISOString(),
     kickoff: f.kickoffMs > 0 ? new Date(f.kickoffMs).toISOString() : null,
@@ -103,8 +131,11 @@ function serializeStockFixture(f: StockFixtureView, forfeitingTeamId?: number, v
     matchEnd: f.matchEndMs > 0 ? new Date(f.matchEndMs).toISOString() : null,
     settled: f.settled,
     // Forfeit is surfaced, never hidden inside a 3-0 scoreline.
-    forfeit: forfeitingTeamId !== undefined ? { forfeitingTeamId } : null,
-    voided: voided ?? false,
+    forfeit: forfeitingTeamId !== null,
+    forfeitingTeamId,
+    voided: opts.voided ?? false,
+    homeGoals,
+    awayGoals,
   };
 }
 
@@ -124,18 +155,41 @@ export function buildStockRouter(deps: StockApiDeps): Router {
         decimals: t.decimals,
         issuer: t.issuer,
         isin: t.isin,
+        logoPath: t.logoPath,
       }))
     );
   });
 
-  router.get("/api/stocks/fixtures", (_req: Request, res: Response) => {
+  router.get("/api/stocks/fixtures", async (_req: Request, res: Response) => {
     cache(res, 15);
     const forfeits = deps.reader.getForfeitMap();
-    res.json(
-      deps.lifecycle.getFixtures().map((f) =>
-        serializeStockFixture(f, forfeits.get(f.fixtureId.toString()))
-      )
-    );
+    const fixtures = deps.lifecycle.getFixtures();
+    const out = [];
+    for (const f of fixtures) {
+      const forfeitingTeamId = forfeits.get(f.fixtureId.toString()) ?? null;
+      let homeGoals: number | null = null;
+      let awayGoals: number | null = null;
+      // Settled fixtures only: attach the recorded scoreline so cards
+      // show FT scores instead of "–". Unsettled fixtures need no chain
+      // read at all. getStockFixtureResult re-scans are watermarked, so
+      // this is cheap after the first call; a failed read falls back to
+      // the forfeit map and a null scoreline, never a 502 of the list.
+      if (f.settled) {
+        try {
+          const r = await deps.reader.getStockFixtureResult(stockConfig.seasonId, f.fixtureId);
+          if (r) {
+            homeGoals = r.homeGoals;
+            awayGoals = r.awayGoals;
+          }
+        } catch (err) {
+          logger.warn("[api/stocks] fixture result read failed, serving without scoreline", {
+            error: String(err),
+          });
+        }
+      }
+      out.push(serializeStockFixture(f, { forfeitingTeamId, voided: f.voided, homeGoals, awayGoals }));
+    }
+    res.json(out);
   });
 
   router.get("/api/stocks/fixtures/:id", async (req: Request, res: Response) => {
@@ -152,12 +206,13 @@ export function buildStockRouter(deps: StockApiDeps): Router {
       res.status(404).json({ error: "fixture not found" });
       return;
     }
-    // Forfeit flag is best-effort: a failed chain read must not 502 a
-    // fixture that the lifecycle cache already knows.
+    // Forfeit flag and scoreline are best-effort: a failed chain read
+    // must not 502 a fixture that the lifecycle cache already knows.
     let forfeitingTeamId: number | undefined;
     let voided = false;
+    let result: Awaited<ReturnType<typeof deps.reader.getStockFixtureResult>> = null;
     try {
-      const result = await deps.reader.getStockFixtureResult(stockConfig.seasonId, id);
+      result = await deps.reader.getStockFixtureResult(stockConfig.seasonId, id);
       if (result?.forfeit) forfeitingTeamId = result.forfeit.forfeitingTeamId;
       if (result?.voided) voided = true;
     } catch (err) {
@@ -168,7 +223,14 @@ export function buildStockRouter(deps: StockApiDeps): Router {
     if (forfeitingTeamId === undefined) {
       forfeitingTeamId = deps.reader.getForfeitMap().get(id.toString());
     }
-    res.json(serializeStockFixture(f, forfeitingTeamId, voided));
+    res.json(
+      serializeStockFixture(f, {
+        forfeitingTeamId: forfeitingTeamId ?? null,
+        voided,
+        homeGoals: result?.homeGoals ?? null,
+        awayGoals: result?.awayGoals ?? null,
+      })
+    );
   });
 
   router.get("/api/stocks/fixtures/:id/pool", async (req: Request, res: Response) => {
@@ -209,6 +271,11 @@ export function buildStockRouter(deps: StockApiDeps): Router {
           source: q.source,
           navPriceUpdatedAt: tick?.navPriceUpdatedAtIso ?? null,
           multiplier: tick?.multiplier ?? null,
+          // True only when this price was produced by the last-NAV
+          // fallback (healthy feed, quiet window). getValidatedPrice
+          // never sets it; resolveEndPrice does, at full-time.
+          lastNavFallback: q.lastNavFallback,
+          lastNavFallbackAgeMs: q.lastNavFallbackAgeMs,
           ok: true as const,
         };
       } catch (err) {
@@ -220,6 +287,8 @@ export function buildStockRouter(deps: StockApiDeps): Router {
           source: null,
           navPriceUpdatedAt: deps.navPoller.getLatest(t.teamId)?.navPriceUpdatedAtIso ?? null,
           multiplier: deps.navPoller.getLatest(t.teamId)?.multiplier ?? null,
+          lastNavFallback: false,
+          lastNavFallbackAgeMs: null,
           ok: false as const,
           error: err instanceof Error ? err.message : String(err),
         };

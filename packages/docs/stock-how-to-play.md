@@ -1,6 +1,7 @@
 # TICKR Stock League: How to Play
 
-Status: locked, Nov 16 2026. Season 1 runs Nov 26 to Dec 16 2026.
+Status: locked, Nov 18 2026. 12-team revision, supersedes the Nov 16 2026
+22-team spec. Season 1 runs Nov 26 to Dec 16 2026.
 If you already play the crypto league, you already know this game. The stock
 league is the same game with different teams: tokenized stocks on Base instead
 of cryptocurrencies. Price performance is the score, stakes are TICK,
@@ -8,7 +9,7 @@ everything settles on chain.
 
 ## The game in one paragraph
 
-22 tokenized stocks play a league season, 21 matchdays, 231 matches. Each match
+12 tokenized stocks play a league season, 22 rounds, 132 matches. Each match
 lasts 1 hour. In that hour, every 0.05% a stock's price moves is worth 1 goal.
 Pick a match, back the team you think will move more, stake TICK, and if your
 team wins or draws the way you backed it, you share the pool with the other
@@ -16,11 +17,15 @@ winners. If the stock is on Base, you can predict its next move.
 
 ## The teams
 
-NVIDIA, Apple, Microsoft, Amazon, Alphabet, Meta, Tesla, AMD, Netflix,
-Broadcom, Palantir, Strategy, Oracle, Salesforce, JPMorgan, Visa, Eli Lilly,
-Disney, Robinhood, Circle, GameStop, and AMC. All 22 are Coinbase B20
-tokenized stocks, trading 24/7 on Base. Their symbols carry a `c`, NVDAc,
-AAPLc, and so on.
+NVIDIA, Apple, Microsoft, Amazon, Alphabet, Meta, Tesla, Strategy, Circle,
+Intel, SanDisk, and SpaceX. All 12 are Coinbase B20 tokenized stocks, trading
+24/7 on Base. Their symbols carry a `c`, NVDAc, AAPLc, and so on. Intel,
+SanDisk, and SpaceX are new to the roster.
+
+The 13 teams from the earlier 22-team plan (AMD, Netflix, Broadcom, Palantir,
+Oracle, Salesforce, JPMorgan, Visa, Eli Lilly, Disney, Robinhood, GameStop,
+and AMC) sit out Season 1 and return for Season 2. GameStop and AMC headline
+the Meme Arena later.
 
 ## Step 1: sign in and get TICK
 
@@ -41,8 +46,10 @@ AAPLc, and so on.
    and the live split of stakes across the three outcomes: home win, draw, away
    win.
 
-A matchday has 11 stock fixtures, spread across the day at randomly staggered
-kickoff times, so there is almost always a match coming up.
+A matchday has 6 stock fixtures, spread across the day at randomly staggered
+kickoff times, so there is almost always a match coming up. The exception is
+the Dec 16 finale, which hosts rounds 21 and 22 in two waves (morning and
+evening), 12 fixtures that day.
 
 ## Step 3: choose your outcome and stake TICK
 
@@ -131,13 +138,27 @@ there are no surprises:
 A stock that falls hard still played the match. Only a missing price, not a bad
 price, causes a forfeit.
 
-## Stale prices
+## Stale prices and the last-NAV rule
 
 The stock league prices come from Chainlink NAV. NAV updates on price deviation
-or heartbeat, so it can go stale. If the NAV is stale at snapshot time, the
-snapshot is blocked, exactly like the crypto league blocks on a stale price.
-TICKR never settles a match on a guessed price. A blocked snapshot that leaves a
-team with no performance for the period leads to the forfeit rule above.
+or heartbeat, so it can go stale. When the feed is healthy but quiet, the
+backend accepts the last NAV as the end price, as long as that NAV is no older
+than 24 hours plus a short grace allowance (the 24-hour heartbeat). In plain
+language: a stock that barely moved, so Chainlink published no fresh NAV
+during the hour, still gets a price, the most recent NAV, and the match plays
+on. The backend never fabricates a price. It only reuses a real, published
+NAV, and every use of a carried-over NAV is logged.
+
+That rule does not fix a team with no NAV at all. A stock that has never
+published a NAV, or whose feed is down rather than quiet, still has no price,
+and the forfeit rule above applies. That is why the roster shrank from 22
+teams to 12.
+
+If the last NAV is older than 24 hours plus grace, or the feed is unhealthy,
+the snapshot is blocked, exactly like the crypto league blocks on a stale
+price. TICKR never settles a match on a guessed price. A blocked snapshot that
+leaves a team with no performance for the period leads to the forfeit rule
+above.
 
 ## TickrPoints (TP): one leaderboard for everything
 
@@ -180,7 +201,7 @@ Every correct call, in either league, counts toward the same score.
 - Earnings and news move stocks fast. A stock reporting earnings can swing
   several percent in an hour, which is a lot of goals, capped at 10 per team.
   Check the calendar before you stake.
-- GameStop and AMC are the volatile pair in the league. They move more in an
+- Strategy and Tesla are the volatile pair in the league. They move more in an
   hour than the large caps, which makes them fun and dangerous in equal
   measure.
 - Draws are common in quiet hours. If both stocks barely move, 0-0 and 1-1
@@ -191,7 +212,9 @@ Every correct call, in either league, counts toward the same score.
 ## The season
 
 - Season 1: Nov 26 to Dec 16 2026.
-- 22 teams, 21 matchdays, 231 fixtures, 11 per matchday.
+- 12 teams, double round-robin, 22 rounds, 6 fixtures per round, 132 fixtures.
+- 21 matchdays. The Dec 16 finale hosts rounds 21 and 22 in two waves
+  (morning and evening), 12 fixtures that day.
 - 1-hour matches, staggered randomly across each matchday.
 - Champion decided on points, then goal difference, then goals scored, then
   wins, then fewest losses.
