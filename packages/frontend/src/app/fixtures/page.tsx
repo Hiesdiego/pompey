@@ -1,109 +1,112 @@
-/**
- * Fixtures page (spec P3.5): the full season calendar — all 38 matchdays,
- * with TBA dates and countdowns. Defaults to the current matchday.
- */
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
 import { api, type ApiFixture } from "../../lib/api";
+import { stockApi, type StockApiFixture } from "../../lib/stockContracts";
+import { stockMatchdayDate, stockRoundLabel, stockRoundWave, STOCK_DOUBLE_HEADER_DATE, STOCK_TOTAL_ROUNDS, utcDayKey } from "../../lib/stockFormat";
 import { FixtureCard, fixtureStatus } from "../../components/FixtureCard";
+import { StockFixtureCard } from "../../components/StockFixtureCard";
+import { StockScoringExplainer } from "../../components/StockScoringExplainer";
 import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../../components/States";
 import { cn } from "../../lib/cn";
 import { CONTRACTS, PRICE_ORACLE_ABI, PRICE_DECIMALS, SEASON_ID } from "../../lib/contracts";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { usePriceFeed } from "../../lib/price/usePriceFeed";
+import { useStockLiveFeed } from "../../hooks/useStockLiveFeed";
 import { normalizeScoreline, roundPctLikeOracle } from "../../lib/format";
 
-interface FixtureSnapshot {
-  homeStart: bigint;
-  awayStart: bigint;
-  homeEnd: bigint;
-  awayEnd: bigint;
-  startSubmitted: boolean;
-  endSubmitted: boolean;
+type LeagueFilter = "all" | "crypto" | "stocks";
+type FixtureSnapshot = { homeStart: bigint; awayStart: bigint; homeEnd: bigint; awayEnd: bigint; startSubmitted: boolean; endSubmitted: boolean };
+type TimelineFixture = { kind: "crypto"; fixture: ApiFixture } | { kind: "stocks"; fixture: StockApiFixture };
+
+const REFETCH_MS = 15_000;
+const dayTime = (fixture: ApiFixture | StockApiFixture) => fixture.kickoff ?? ("scheduledKickoff" in fixture ? fixture.scheduledKickoff : null) ?? fixture.windowStart;
+const dayKey = (fixture: ApiFixture | StockApiFixture) => utcDayKey(dayTime(fixture));
+
+function DayPager({ values, selected, onChange, stock = false }: { values: [number, (ApiFixture | StockApiFixture)[]][]; selected: number; onChange: (day: number) => void; stock?: boolean }) {
+  const selectedIndex = values.findIndex(([day]) => day === selected);
+  const label = (day: number) => stock ? stockRoundLabel(day) : `Matchday ${day + 1}`;
+  return <div className="glass mb-6 flex items-center gap-2 rounded-2xl p-2">
+    <button onClick={() => onChange(values[Math.max(0, selectedIndex - 1)]?.[0] ?? selected)} disabled={selectedIndex <= 0} className="rounded-xl border border-black/10 p-2 text-zinc-600 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300" aria-label="Previous matchday"><ChevronLeft className="h-4 w-4" /></button>
+    <div className="flex-1 overflow-x-auto"><div className="flex gap-1.5">{values.map(([day, list]) => {
+      const open = list.some((f) => f.settled !== true);
+      const wave = stock ? stockRoundWave(day) : null;
+      return <button key={day} onClick={() => onChange(day)} title={label(day)} aria-label={label(day)} className={cn("relative shrink-0 rounded-lg px-2.5 py-1.5 font-display text-xs font-bold tabular-nums", day === selected ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "bg-black/5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400", wave && "ring-1 ring-amber-500/60")}>
+        {day + 1}{wave && <span className="ml-1 text-[9px] uppercase">{wave === "morning" ? "AM" : "PM"}</span>}{open && day !== selected && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#1D9E75]" />}
+      </button>;
+    })}</div></div>
+    <button onClick={() => onChange(values[Math.min(values.length - 1, selectedIndex + 1)]?.[0] ?? selected)} disabled={selectedIndex < 0 || selectedIndex >= values.length - 1} className="rounded-xl border border-black/10 p-2 text-zinc-600 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300" aria-label="Next matchday"><ChevronRight className="h-4 w-4" /></button>
+  </div>;
 }
 
 export default function FixturesPage() {
-  const [fixtures, setFixtures] = useState<ApiFixture[] | null>(null);
+  const [cryptoFixtures, setCryptoFixtures] = useState<ApiFixture[] | null>(null);
+  const [stockFixtures, setStockFixtures] = useState<StockApiFixture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [matchday, setMatchday] = useState<number | null>(null);
-  const [snapshots, setSnapshots] = useState<Record<string, FixtureSnapshot>>({});
+  const [filter, setFilter] = useState<LeagueFilter>("all");
+  const [cryptoDay, setCryptoDay] = useState<number | null>(null);
+  const [stockDay, setStockDay] = useState<number | null>(null);
   const { prices } = usePriceFeed(true);
+  const { fixtureUpdates } = useStockLiveFeed(true);
 
   useEffect(() => {
+    const requestedLeague = new URLSearchParams(window.location.search).get("league");
+    if (requestedLeague === "crypto" || requestedLeague === "stocks" || requestedLeague === "all") setFilter(requestedLeague);
     let alive = true;
-    api
-      .fixtures()
-      .then((f) => {
-        if (!alive) return;
-        setFixtures(f);
-        // Default to the first matchday with any non-settled fixture.
-        const firstOpen = f.find((x) => !x.settled)?.matchdayIndex ?? 0;
-        setMatchday(firstOpen);
-      })
-      .catch((e: Error) => {
-        if (alive) setError(e.message);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      void api.fixtures().then(setFixtures).catch(() => {});
-    }, 15_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const matchdays = useMemo(() => {
-    if (!fixtures) return [];
-    const groups = new Map<number, ApiFixture[]>();
-    for (const f of fixtures) {
-      const arr = groups.get(f.matchdayIndex) ?? [];
-      arr.push(f);
-      groups.set(f.matchdayIndex, arr);
-    }
-    return [...groups.entries()].sort((a, b) => a[0] - b[0]);
-  }, [fixtures]);
-
-  const current = matchdays.find(([md]) => md === matchday);
-  const scoreFixtures = current?.[1].filter((f) => {
-    const status = fixtureStatus(f);
-    return status === "live" || status === "settled";
-  }) ?? [];
-  const scoreFixtureIds = scoreFixtures.map((f) => f.fixtureId).join(",");
-
-  useEffect(() => {
-    if (!scoreFixtureIds || !CONTRACTS.priceOracle) return;
-    let alive = true;
-    const ids = scoreFixtureIds.split(",");
-    Promise.all(ids.map(async (id) => {
+    const load = async () => {
       try {
-        const value = await getPublicClient().readContract({
-          address: CONTRACTS.priceOracle as `0x${string}`,
-          abi: PRICE_ORACLE_ABI,
-          functionName: "getSnapshot",
-          args: [SEASON_ID, BigInt(id)],
-        });
-        return [id, value as unknown as FixtureSnapshot] as const;
-      } catch {
-        return [id, null] as const;
+        const [crypto, stocks] = await Promise.all([api.fixtures(), stockApi.fixtures()]);
+        if (!alive) return;
+        setCryptoFixtures(crypto);
+        setStockFixtures(stocks);
+        setCryptoDay((value) => value ?? (crypto.find((f) => !f.settled)?.matchdayIndex ?? 0));
+        setStockDay((value) => value ?? (stocks.find((f) => !f.settled)?.matchdayIndex ?? 0));
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
       }
-    })).then((results) => {
-      if (!alive) return;
-      setSnapshots((old) => ({ ...old, ...Object.fromEntries(results.filter((r): r is readonly [string, FixtureSnapshot] => r[1] !== null)) }));
-    });
+    };
+    void load();
+    const timer = setInterval(() => void load(), REFETCH_MS);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  const cryptoDays = useMemo(() => {
+    const groups = new Map<number, ApiFixture[]>();
+    for (const f of cryptoFixtures ?? []) groups.set(f.matchdayIndex, [...(groups.get(f.matchdayIndex) ?? []), f]);
+    return [...groups.entries()].sort((a, b) => a[0] - b[0]);
+  }, [cryptoFixtures]);
+  const stockDays = useMemo(() => {
+    const groups = new Map<number, StockApiFixture[]>();
+    for (const f of stockFixtures ?? []) groups.set(f.matchdayIndex, [...(groups.get(f.matchdayIndex) ?? []), f]);
+    return [...groups.entries()].sort((a, b) => a[0] - b[0]);
+  }, [stockFixtures]);
+
+  const timeline = useMemo(() => {
+    const groups = new Map<string, TimelineFixture[]>();
+    for (const f of cryptoFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "crypto", fixture: f }]); }
+    for (const f of stockFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "stocks", fixture: f }]); }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, matches]) => [day, matches.sort((a, b) => new Date(dayTime(a.fixture)).getTime() - new Date(dayTime(b.fixture)).getTime())] as const);
+  }, [cryptoFixtures, stockFixtures]);
+
+  const activeCrypto = filter === "crypto" ? cryptoDays.find(([day]) => day === cryptoDay)?.[1] ?? [] : [];
+  const scoreFixtures = activeCrypto.filter((f) => ["live", "settled"].includes(fixtureStatus(f)));
+  const scoreIds = scoreFixtures.map((f) => f.fixtureId).join(",");
+  const [snapshots, setSnapshots] = useState<Record<string, FixtureSnapshot>>({});
+  useEffect(() => {
+    if (!scoreIds || !CONTRACTS.priceOracle) return;
+    let alive = true;
+    Promise.all(scoreIds.split(",").map(async (id) => {
+      try { const result = await getPublicClient().readContract({ address: CONTRACTS.priceOracle as `0x${string}`, abi: PRICE_ORACLE_ABI, functionName: "getSnapshot", args: [SEASON_ID, BigInt(id)] }); return [id, result as unknown as FixtureSnapshot] as const; }
+      catch { return [id, null] as const; }
+    })).then((results) => { if (alive) setSnapshots((old) => ({ ...old, ...Object.fromEntries(results.filter((r): r is readonly [string, FixtureSnapshot] => r[1] !== null)) })); });
     return () => { alive = false; };
-  }, [scoreFixtureIds]);
+  }, [scoreIds]);
 
   const scoreFor = (fixture: ApiFixture): [number, number] | null => {
     if (!fixture.home || !fixture.away) return null;
-    const status = fixtureStatus(fixture);
-    const snapshot = snapshots[fixture.fixtureId];
+    const status = fixtureStatus(fixture); const snapshot = snapshots[fixture.fixtureId];
     if (!snapshot?.startSubmitted) return null;
     const pct = (start: bigint, current: number | bigint | null) => {
       if (current === null || start <= 0n) return null;
@@ -111,109 +114,31 @@ export default function FixturesPage() {
       const currentPrice = typeof current === "bigint" ? Number(current) / 10 ** PRICE_DECIMALS : current;
       return startPrice > 0 ? ((currentPrice - startPrice) / startPrice) * 100 : null;
     };
-    const homePct = status === "settled" && snapshot.endSubmitted
-      ? pct(snapshot.homeStart, snapshot.homeEnd)
-      : status === "live" ? pct(snapshot.homeStart, prices[fixture.home.symbol] ?? null) : null;
-    const awayPct = status === "settled" && snapshot.endSubmitted
-      ? pct(snapshot.awayStart, snapshot.awayEnd)
-      : status === "live" ? pct(snapshot.awayStart, prices[fixture.away.symbol] ?? null) : null;
-    if (homePct === null || awayPct === null) return null;
-    return normalizeScoreline(roundPctLikeOracle(homePct), roundPctLikeOracle(awayPct));
+    const h = status === "settled" && snapshot.endSubmitted ? pct(snapshot.homeStart, snapshot.homeEnd) : status === "live" ? pct(snapshot.homeStart, prices[fixture.home.symbol] ?? null) : null;
+    const a = status === "settled" && snapshot.endSubmitted ? pct(snapshot.awayStart, snapshot.awayEnd) : status === "live" ? pct(snapshot.awayStart, prices[fixture.away.symbol] ?? null) : null;
+    return h === null || a === null ? null : normalizeScoreline(roundPctLikeOracle(h), roundPctLikeOracle(a));
   };
 
-  if (error) {
-    return (
-      <div className="py-10">
-        <ErrorState message={error} onRetry={() => window.location.reload()} />
-      </div>
-    );
-  }
+  if (error) return <div className="py-10"><ErrorState message={error} onRetry={() => window.location.reload()} /></div>;
+  const loading = !cryptoFixtures || !stockFixtures || cryptoDay === null || stockDay === null;
 
-  return (
-    <div>
-      <SectionTitle
-        title="Fixtures"
-        action={
-          <Link
-            href="/standings"
-            className="inline-flex items-center gap-1 text-sm font-semibold text-[#1D4ED8] transition-colors hover:text-[#2E7CF6] dark:text-[#7db3ff] dark:hover:text-[#4B93FF]"
-          >
-            <Table2 className="h-4 w-4" /> League standings
-          </Link>
-        }
-      />
-      <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-        <CalendarDays className="h-4 w-4 text-[#2E7CF6]" />
-        Season 1 · 38 matchdays · 1-hour windows · dates show as TBA until revealed
-      </p>
-
-      {!fixtures || matchday === null ? (
-        <SkeletonCards cards={6} />
-      ) : (
-        <>
-          <div className="glass mb-6 flex items-center gap-2 rounded-2xl p-2">
-            <button
-              onClick={() => setMatchday((m) => Math.max(0, (m ?? 0) - 1))}
-              disabled={matchday === 0}
-              className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
-              aria-label="Previous matchday"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <div className="flex-1 overflow-x-auto">
-              <div className="flex gap-1.5">
-                {matchdays.map(([md, list]) => {
-                  const open = list.some((f) => fixtureStatus(f) !== "settled");
-                  return (
-                    <button
-                      key={md}
-                      onClick={() => setMatchday(md)}
-                      className={cn(
-                        "relative shrink-0 rounded-lg px-2.5 py-1.5 font-display text-xs font-bold tabular-nums transition-all active:scale-95",
-                        md === matchday
-                          ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white shadow-[0_0_16px_rgba(46,124,246,.45)]"
-                          : "bg-black/5 text-zinc-500 hover:bg-[#2E7CF6]/10 hover:text-[#1D4ED8] dark:bg-white/5 dark:text-zinc-400 dark:hover:bg-[#2E7CF6]/12 dark:hover:text-[#7db3ff]"
-                      )}
-                      title={`Matchday ${md + 1}`}
-                    >
-                      {md + 1}
-                      {open && md !== matchday && (
-                        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#1D9E75] shadow-[0_0_6px_rgba(29,158,117,.8)]" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <button
-              onClick={() => setMatchday((m) => Math.min(matchdays.length - 1, (m ?? 0) + 1))}
-              disabled={matchdays.length === 0 || matchday === matchdays.length - 1}
-              className="rounded-xl border border-black/10 p-2 text-zinc-600 transition-all hover:border-[#2E7CF6]/50 hover:text-[#1D4ED8] active:scale-95 disabled:opacity-30 dark:border-white/10 dark:text-zinc-300 dark:hover:border-[#2E7CF6]/50 dark:hover:text-[#7db3ff]"
-              aria-label="Next matchday"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-
-          {!current ? (
-            <EmptyState title="No fixtures for this matchday." />
-          ) : (
-            <>
-              <h2 className="mb-4 font-display text-base font-bold text-zinc-900 dark:text-white">
-                Matchday {current[0] + 1}
-                <span className="ml-2 text-sm font-normal text-zinc-500">
-                  {current[1].length} matches
-                </span>
-              </h2>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {current[1].map((f) => (
-                  <FixtureCard key={f.fixtureId} fixture={f} score={scoreFixtures.some((item) => item.fixtureId === f.fixtureId) ? scoreFor(f) : undefined} />
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      )}
+  return <div>
+    <SectionTitle title="Fixtures" action={<Link href="/standings" className="inline-flex items-center gap-1 text-sm font-semibold text-[#1D4ED8] dark:text-[#7db3ff]"><Table2 className="h-4 w-4" /> League standings</Link>} />
+    <div className="mb-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Fixture league">
+      {(["all", "crypto", "stocks"] as LeagueFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("rounded-xl px-4 py-1.5 text-sm font-semibold", filter === value ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "glass text-zinc-500 dark:text-zinc-400")}>{value === "all" ? "All" : value === "crypto" ? "Crypto" : "Stocks"}</button>)}
     </div>
-  );
+    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto and stock fixtures, grouped by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
+    {loading ? <SkeletonCards cards={6} /> : filter === "all" ? timeline.length === 0 ? <EmptyState title="No fixtures available." /> : <div className="space-y-9">{timeline.map(([day, matches]) => <section key={day}>
+      <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {matches.length} fixtures</span></h2>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <div key={`crypto-${entry.fixture.fixtureId}`}><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#2E7CF6]">Crypto · Matchday {entry.fixture.matchdayIndex + 1}</p><FixtureCard fixture={entry.fixture} /></div> : <div key={`stock-${entry.fixture.fixtureId}`}><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Stocks · Round {entry.fixture.matchdayIndex + 1}{stockRoundWave(entry.fixture.matchdayIndex) ? ` · ${stockRoundWave(entry.fixture.matchdayIndex)}` : ""}</p><StockFixtureCard fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} /></div>)}</div>
+    </section>)}</div> : filter === "crypto" ? <>
+      {cryptoDay !== null && <DayPager values={cryptoDays} selected={cryptoDay} onChange={setCryptoDay} />}
+      {cryptoDays.find(([day]) => day === cryptoDay) ? <><h2 className="mb-4 font-display text-base font-bold">Matchday {cryptoDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{activeCrypto.length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{activeCrypto.map((f) => <FixtureCard key={f.fixtureId} fixture={f} score={scoreFor(f)} />)}</div></> : <EmptyState title="No fixtures for this matchday." />}
+    </> : <>
+      {stockDay !== null && <DayPager values={stockDays} selected={stockDay} onChange={setStockDay} stock />}
+      {stockDay !== null && stockMatchdayDate(stockDay) === STOCK_DOUBLE_HEADER_DATE && stockRoundWave(stockDay) && <p className="mb-5 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">Dec 16 hosts rounds 21 and 22 in two waves, morning and evening.</p>}
+      {stockDays.find(([day]) => day === stockDay) ? <><h2 className="mb-4 font-display text-base font-bold">Round {stockDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{stockMatchdayDate(stockDay!)} UTC · {stockDays.find(([day]) => day === stockDay)?.[1].length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{(stockDays.find(([day]) => day === stockDay)?.[1] ?? []).map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={fixtureUpdates[f.fixtureId]} />)}</div></> : <EmptyState title="No fixtures for this round." />}
+      <div className="mt-8"><StockScoringExplainer compact /></div>
+    </>}
+  </div>;
 }

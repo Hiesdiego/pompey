@@ -652,7 +652,7 @@ export default function StockMatchPage() {
   if (!fixture.home || !fixture.away) {
     return (
       <EmptyState title="Match not found.">
-        <Link href="/stocks/fixtures" className="font-semibold text-[#1D4ED8] hover:underline dark:text-[#7db3ff]">
+        <Link href="/fixtures?league=stocks" className="font-semibold text-[#1D4ED8] hover:underline dark:text-[#7db3ff]">
           Back to stock fixtures
         </Link>
       </EmptyState>
@@ -718,16 +718,16 @@ export default function StockMatchPage() {
   return (
     <div>
       <Link
-        href="/stocks/fixtures"
+        href="/fixtures?league=stocks"
         className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 transition-colors hover:text-[#1D4ED8] dark:text-zinc-400 dark:hover:text-[#7db3ff]"
       >
         <ArrowLeft className="h-4 w-4" /> Stock fixtures
       </Link>
       <div className="mb-4 flex flex-wrap gap-2">
         {[
-          { label: "All", href: "/stocks/fixtures" },
-          { label: "Crypto", href: "/fixtures" },
-          { label: "Stocks", href: "/stocks/fixtures" },
+          { label: "All", href: "/fixtures" },
+          { label: "Crypto", href: "/fixtures?league=crypto" },
+          { label: "Stocks", href: "/fixtures?league=stocks" },
         ].map((p) => (
           <Link
             key={p.label}

@@ -26,8 +26,7 @@ import { cn } from "../lib/cn";
 const NAV = [
   { href: "/", label: "Home" },
   { href: "/fixtures", label: "Fixtures" },
-  { href: "/stocks/fixtures", label: "Stock Fixtures" },
-  { href: "/stocks/standings", label: "Stock Standings" },
+  { href: "/standings", label: "Standings" },
   { href: "/markets", label: "Markets" },
   { href: "/cup", label: "World Cup" },
   { href: "/watchlist", label: "Watchlist" },
@@ -334,7 +333,7 @@ export function Header() {
         </div>
       </div>
       <nav aria-label="More destinations" className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
-        {[{ href: "/#trending", label: "Trending" }, { href: "/standings", label: "League" }, ...NAV.filter((n) => !["/", "/markets", "/fixtures"].includes(n.href))].map((n) => (
+        {[{ href: "/#trending", label: "Trending" }, { href: "/standings", label: "League" }, ...NAV.filter((n) => !["/", "/markets", "/fixtures", "/standings"].includes(n.href))].map((n) => (
           <Link
             key={n.href}
             href={n.href}
