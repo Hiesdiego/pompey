@@ -34,19 +34,19 @@ All four contracts are wired, and the 64-team field is registered (16 teams per 
 
 ## Stock League (Base Sepolia)
 
-Deployed and wired as Stock League Season 1. TickToken is reused from the crypto league; the stock deployment does not alter crypto contract addresses.
+Active Season 1 is the 12-team deployment. TickToken is reused from the crypto league; the stock deployment does not alter crypto contract addresses. The schedule contains 22 rounds and 132 fixtures, and all fixtures have been seeded at 250 TICK each (33,000 TICK total).
 
-| Contract / role | Address |
+| Contract / role | Active 12-team deployment |
 | --- | --- |
 | TICK token | `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b` |
-| StockPriceOracle proxy | `0xfcf29e88fc7c5abdada53052b962ca2395f13f03` |
-| StockResultEngine proxy | `0x37b3b9924d3be3bc58165fe6f7bd553ea1692034` |
-| StockPredictionPool proxy | `0xbb270e85c0c0de720290f5d90f4f8a0e6005a4da` |
-| StockTeamRegistry proxy | `0x85b7c8828599a6e12dccd2125af6e8deb81686fd` |
-| StockMatchRegistry proxy | `0xc3a04de16ec15947d39ac1c27914c67e480ba019` |
+| StockPriceOracle proxy | `0xd0620e22ef3063d31067e23d11c4436b36952615` |
+| StockResultEngine proxy | `0x6dd6131a02dfebc211cadacd1f15324a841d7d55` |
+| StockPredictionPool proxy | `0xd36fc87d56fb838e7c48cc22a761f7ec76401a49` |
+| StockTeamRegistry proxy | `0x7c506a895d84363af3a63e730cbf4fa0b956cf1b` |
+| StockMatchRegistry proxy | `0x1f5be62901e7cb2981ef70ede824c34a303aedbe` |
 | Backend signer / treasury | `0x5219d14dFbCF0be6EC00D6B5188fFF353aeb33BF` |
 
-The schedule generation and 250 TICK per-fixture seed are pending. Generate the 21 matchdays (231 fixtures) with `pnpm schedule:stock:testnet`, then seed them with `pnpm seed:stock:testnet`. The seed command approves up to 57,750 TICK and is resumable. Configure the `STOCK_` and `NEXT_PUBLIC_STOCK_` environment variables from the package env files before starting the stock backend and frontend.
+The old 22-team deployment remains on-chain and untouched. Do not use its addresses for the active season; in particular, its prediction pool is `0xbb270e85c0c0de720290f5d90f4f8a0e6005a4da` and its match registry already contains 231 fixtures.
 
 ## Market factory
 
