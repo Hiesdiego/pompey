@@ -106,6 +106,12 @@ export const STOCK_MIN_STAKE_TICK = 10;
  * stake(seasonId, fixtureId, outcome, amount), outcome is uint8
  * (WinHome=0, Draw=1, WinAway=2). claim(seasonId, fixtureId). claimed()
  * is keyed by the GLOBAL fixture id (see stockGlobalFixtureId above).
+ * platformFeeBps is read for payout estimates. It is a real public
+ * view on StockPredictionPool (owner-adjustable, 7% default); it was
+ * missing from this frontend ABI, so the stake panel and the
+ * pre-match briefing could not read the fee on-chain. There is no
+ * claimVoid on the stock pool: claim() refunds voided stakes 1:1, so
+ * do not add a claimVoid entry here.
  */
 export const STOCK_PREDICTION_POOL_ABI = [
   {
@@ -129,6 +135,13 @@ export const STOCK_PREDICTION_POOL_ABI = [
       { name: "fixtureId", type: "uint256" },
     ],
     outputs: [],
+  },
+  {
+    type: "function",
+    name: "platformFeeBps",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
   },
   {
     type: "function",

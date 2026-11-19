@@ -16,6 +16,8 @@
 
 export const qks = {
   markets: ["tickr", "markets"] as const,
+  stockMarkets: ["tickr", "stockMarkets"] as const,
+  stockMarket: (id: number | string | bigint) => ["tickr", "stockMarket", id.toString()] as const,
   market: (id: number | string | bigint) =>
     ["tickr", "market", id.toString()] as const,
   oddsHistory: (id: number | string | bigint) =>

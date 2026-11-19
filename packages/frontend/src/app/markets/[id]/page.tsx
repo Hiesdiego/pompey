@@ -77,6 +77,8 @@ import { WatchButton } from "../../../components/WatchButton";
 import { marketOdds, formatMarketOdds, isHighPayout } from "../../../lib/marketOdds";
 import { useMarketFees } from "../../../lib/query/useMarketFees";
 import { SimilarMarkets } from "../../../components/SimilarMarkets";
+import { StockMarketDetailPanel } from "../../../components/StockMarketDetailPanel";
+import { isStockMarketRoute } from "../../../lib/stockMarketContracts";
 
 interface MarketDetail {
   id: bigint;
@@ -337,8 +339,13 @@ function StatePill({
 
 export default function MarketDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const routeKey = params.id as string;
+  if (isStockMarketRoute(routeKey)) return <StockMarketDetailPanel />;
+  return <CryptoMarketDetailPage routeKey={routeKey} />;
+}
+
+function CryptoMarketDetailPage({ routeKey }: { routeKey: string }) {
+  const router = useRouter();
   const route = marketFromRoute(routeKey);
   const id = route?.id ?? 0n;
   const factoryAddress = route?.factory ?? MARKET_FACTORY_ADDRESS;

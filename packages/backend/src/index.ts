@@ -58,6 +58,11 @@ import { StockCheckpointSubmitter } from "./services/stockCheckpointSubmitter.js
 import { StockChainReader } from "./api/stockReadClient.js";
 import { StockTpAggregator } from "./services/stockTpAggregator.js";
 import { buildStockRouter } from "./api/stockRoutes.js";
+import { stockMarketConfigured } from "./stockMarketConfig.js";
+import { StockListService } from "./services/stockListService.js";
+import { StockMarketReader } from "./services/stockMarketReader.js";
+import { StockMarketKeeper } from "./services/stockMarketKeeper.js";
+import { buildStockMarketRouter } from "./api/stockMarketRoutes.js";
 
 async function main(): Promise<void> {
 
@@ -164,6 +169,17 @@ async function main(): Promise<void> {
     : null;
   const stockReader = stockEnabled ? new StockChainReader() : null;
   const stockTpAggregator = stockEnabled ? new StockTpAggregator() : null;
+  const stockMarketEnabled = stockMarketConfigured();
+  const stockListService = stockMarketEnabled ? new StockListService() : null;
+  const stockMarketReader = stockMarketEnabled
+    ? new StockMarketReader({
+        nameLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.name ?? null,
+        iconLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.iconUrl ?? null,
+      })
+    : null;
+  const stockMarketKeeper = stockMarketEnabled && stockListService && stockMarketReader
+    ? new StockMarketKeeper(stockListService, stockMarketReader, stockPriceFeed ?? undefined)
+    : null;
   chainCache.startWarmer();
 
 
@@ -264,6 +280,9 @@ async function main(): Promise<void> {
       tpAggregator: stockTpAggregator,
     }));
   }
+  if (stockMarketEnabled && stockListService && stockMarketReader) {
+    app.use(buildStockMarketRouter({ listService: stockListService, reader: stockMarketReader }));
+  }
   app.get("/api/cup/matches/:id/commentary", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 0 || id > 62) { res.status(400).json({ error: "Invalid World Cup match" }); return; }
@@ -325,6 +344,12 @@ async function main(): Promise<void> {
       try { stockCheckpointSubmitter.start(); }
       catch (err) { logger.error("[backend] stock checkpoint submitter failed to start", { error: String(err) }); }
     }
+    if (stockMarketEnabled && stockListService) {
+      stockListService.start();
+      if (stockNavPoller) {
+        stockNavPoller.on("status", (status) => stockListService.setHot(status === "polling"));
+      }
+    }
     if (cupLifecycle) {
       try {
         await cupLifecycle.start();
@@ -349,6 +374,11 @@ async function main(): Promise<void> {
       logger.error("[backend] factory keeper failed to start", { error: String(err) });
     }
     try {
+      stockMarketKeeper?.start();
+    } catch (err) {
+      logger.error("[backend] stock market keeper failed to start", { error: String(err) });
+    }
+    try {
       await socialIndexer.start();
     } catch (err) {
       logger.error("[backend] social indexer failed to start", { error: String(err) });
@@ -368,6 +398,8 @@ async function main(): Promise<void> {
     stockLifecycle?.stop();
     stockNavPoller?.stop();
     stockCheckpointSubmitter?.stop();
+    stockMarketKeeper?.stop();
+    stockListService?.stop();
     lifecycle.stop();
     cupLifecycle?.stop();
     cupCommentary?.stop();

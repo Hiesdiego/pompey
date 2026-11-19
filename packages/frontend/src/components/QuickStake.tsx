@@ -1,16 +1,28 @@
 /**
- * QuickStake — stake from the markets board without opening market details.
+ * QuickStake, stake from the markets board without opening market details.
  *
  * A `QuickStakeChips` strip renders on each open market card (desktop:
  * revealed on hover; mobile: always visible). Tapping a chip opens a
  * compact bottom-sheet (dialog on desktop) with just amount + estimated
  * payout + a single confirm. The transaction path is identical to the
- * detail page: approve-if-needed → stake, both gas-sponsored via
+ * detail page: approve-if-needed, then stake, both gas-sponsored via
  * useContractWrite.
  *
  * MarketFactory chips show a seed-aware, post-fee 10 TICK projection.
  * The sheet recalculates for the entered stake; match pools use their own
  * fee rule and show no chip quote before the pool is loaded.
+ *
+ * Variants:
+ * - "factory": permissionless v0.3 markets via MarketFactory.stake.
+ * - "match": crypto PredictionPool 1/X/2 via stake(seasonId, fixtureId,
+ *   outcome, amount) on the crypto pool.
+ * - "stock-match": stock PredictionPool 1/X/2, same call shape, but
+ *   pointed at STOCK_CONTRACTS.predictionPool with STOCK_SEASON_ID and
+ *   STOCK_MIN_STAKE_TICK, and stock team badges. The stock flow is
+ *   otherwise identical: same quick amounts, same 500 TICK large-stake
+ *   confirm step, same approve buffer, same batched approve and stake,
+ *   same toast on broadcast, same gas-sponsored path. The crypto flow
+ *   is untouched; only the stock branch reads the stock config.
  */
 
 "use client";
@@ -27,6 +39,12 @@ import {
   TICK_TOKEN_ABI,
 } from "../lib/contracts";
 import {
+  STOCK_CONTRACTS,
+  STOCK_MIN_STAKE_TICK,
+  STOCK_PREDICTION_POOL_ABI,
+  STOCK_SEASON_ID,
+} from "../lib/stockContracts";
+import {
   MARKET_FACTORY_ABI,
   MARKET_FACTORY_ADDRESS,
   FACTORY_MIN_STAKE_TICK,
@@ -41,15 +59,17 @@ import { queryClient } from "../lib/query/queryClient";
 import { qks } from "../lib/query/keys";
 import { toast } from "./Toast";
 import { TeamBadge } from "./TeamBadge";
+import { StockTeamBadge } from "./StockLeagueTable";
 import { StakeDialog } from "./StakeDialog";
 import { CONFIRM_THRESHOLD_TICK, LargeStakeConfirm } from "./LargeStakeConfirm";
+import { STOCK_MARKET_FACTORY_ABI, STOCK_MARKET_FACTORY_ADDRESS, STOCK_FACTORY_MIN_STAKE_TICK } from "../lib/stockMarketContracts";
 
 const QUICK_AMOUNTS = [25, 100, 250, 1000];
 
 /**
  * Stakes at or above this many TICK require an explicit in-app confirm step
  * before the (silent) wallet signature fires. Below it, "Stake" submits
- * immediately — one tap, no modal. Gas is sponsored either way.
+ * immediately, one tap, no modal. Gas is sponsored either way.
  */
 
 /** Basescan link for a tx hash on the active chain. */
@@ -60,14 +80,15 @@ function explorerTxUrl(hash: string): string {
 /**
  * Which staking contract the sheet targets:
  * - "factory": permissionless v0.3 markets via MarketFactory.stake(marketId, outcome, amount)
- * - "match":   PredictionPool 1/X/2 via stake(seasonId, fixtureId, outcome, amount)
+ * - "match":   crypto PredictionPool 1/X/2 via stake(seasonId, fixtureId, outcome, amount)
+ * - "stock-match": stock PredictionPool 1/X/2 via stake(stockSeasonId, fixtureId, outcome, amount)
  */
-export type QuickStakeVariant = "factory" | "match";
+export type QuickStakeVariant = "factory" | "match" | "stock-match" | "stock-target";
 
 export interface QuickStakeOutcome {
   index: number;
   label: string;
-  /** 0–100 share of staked volume, used only for the thin pool bar. */
+  /** 0-100 share of staked volume, used only for the thin pool bar. */
   share: number;
   odds?: number | null;
   total: bigint;
@@ -87,7 +108,7 @@ function potentialWin(
   return quote ? { win: Number(quote.payout) / 1e18, multiple: quote.multiplier } : { win: 0, multiple: 0 };
 }
 
-// ── the sheet ───────────────────────────────────────────────────────
+// The sheet
 
 export function QuickStakeSheet({
   marketId,
@@ -102,7 +123,7 @@ export function QuickStakeSheet({
   variant = "factory",
   onClose,
 }: {
-  /** Factory: market id. Match: fixture id (global id is derived inside). */
+  /** Factory: market id. Match / stock-match: fixture id. */
   marketId: bigint;
   marketKey?: string;
   factoryAddress?: `0x${string}`;
@@ -121,16 +142,23 @@ export function QuickStakeSheet({
   const [amountStr, setAmountStr] = useState("25");
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
-  /** "form" → direct submit; "confirm" → explicit step for large stakes. */
+  /** "form" is direct submit; "confirm" is the explicit step for large stakes. */
   const [stage, setStage] = useState<"form" | "confirm">("form");
 
   const amountNum = Number(amountStr) || 0;
   const amountWei = BigInt(Math.round(amountNum * 1e18));
 
-  // Allowance read (approve defensively when unknown — approve is idempotent).
+  // The stock pool is a separate contract from the crypto pool, so the
+  // allowance must be checked against the stock pool for stock stakes.
+  // Crypto variants keep their existing spender (factoryAddress).
+  const isStockMatch = variant === "stock-match";
+  const isStockTarget = variant === "stock-target";
+  const allowanceSpender = isStockMatch ? STOCK_CONTRACTS.predictionPool : isStockTarget ? STOCK_MARKET_FACTORY_ADDRESS : factoryAddress;
+
+  // Allowance read (approve defensively when unknown, approve is idempotent).
   useEffect(() => {
     let alive = true;
-    if (!playerAddress || !CONTRACTS.tickToken || !factoryAddress) {
+    if (!playerAddress || !CONTRACTS.tickToken || !allowanceSpender) {
       setAllowance(null);
       return;
     }
@@ -139,27 +167,27 @@ export function QuickStakeSheet({
         address: CONTRACTS.tickToken,
         abi: TICK_TOKEN_ABI,
         functionName: "allowance",
-        args: [playerAddress, factoryAddress],
+        args: [playerAddress, allowanceSpender],
       })
       .then((v) => alive && setAllowance(v as bigint))
       .catch(() => alive && setAllowance(null));
     return () => { alive = false; };
-  }, [playerAddress, factoryAddress]);
+  }, [playerAddress, allowanceSpender]);
 
   const needsApproval = amountWei > 0n && (allowance === null || allowance < amountWei);
   const balanceOk = balance === null || amountWei <= balance;
-  const minTick = variant === "match" ? MIN_STAKE_TICK : FACTORY_MIN_STAKE_TICK;
-  const valid = amountNum >= minTick && balanceOk && (variant === "match" || feesBps !== null);
+  const minTick = isStockMatch ? STOCK_MIN_STAKE_TICK : isStockTarget ? STOCK_FACTORY_MIN_STAKE_TICK : variant === "match" ? MIN_STAKE_TICK : FACTORY_MIN_STAKE_TICK;
+  const valid = amountNum >= minTick && balanceOk && (variant === "match" || isStockMatch || feesBps !== null);
   const balanceTick = balance !== null ? Number(balance) / 1e18 : null;
 
   const est = useMemo(
     () =>
       outcome
-        ? variant === "match"
+        ? variant === "match" || isStockMatch
           ? (() => { const stake = BigInt(Math.round(amountNum * 1e18)); const side = (outcomeTotals[outcome.index] ?? 0n) + stake; if (stake <= 0n || side <= 0n) return { win: 0, multiple: 0 }; const pool = (totalStaked + stake + seedAmount) * BigInt(10_000 - PLATFORM_FEE_BPS) / 10_000n; const win = Number(stake * pool / side) / 1e18; return { win, multiple: win / amountNum }; })()
           : potentialWin(amountNum, outcomeTotals[outcome.index] ?? 0n, totalStaked, seedAmount, feesBps)
         : { win: 0, multiple: 0 },
-    [amountNum, outcome, outcomeTotals, totalStaked, seedAmount, feesBps, variant]
+    [amountNum, outcome, outcomeTotals, totalStaked, seedAmount, feesBps, variant, isStockMatch]
   );
 
   async function submit() {
@@ -170,8 +198,8 @@ export function QuickStakeSheet({
       setStage("confirm");
       return;
     }
-    const isMatch = variant === "match";
-    const spender = isMatch ? CONTRACTS.predictionPool : factoryAddress;
+    const isMatch = variant === "match" || isStockMatch;
+    const spender = isStockMatch ? STOCK_CONTRACTS.predictionPool : isStockTarget ? STOCK_MARKET_FACTORY_ADDRESS : isMatch ? CONTRACTS.predictionPool : factoryAddress;
     if (!spender) {
       toast.error("Staking contract is not deployed on this network.");
       return;
@@ -179,7 +207,7 @@ export function QuickStakeSheet({
     const label = outcome.label;
     const amountTick = amountNum;
     const onStakeHashed = (hash: string) => {
-      // Fires at BROADCAST — the receipt can take seconds; the UI never
+      // Fires at BROADCAST, the receipt can take seconds; the UI never
       // blocks on it. Queries reconcile whenever it lands.
       toast.success("Stake submitted ⚡", {
         detail: `${amountTick.toLocaleString()} TICK on ${label}`,
@@ -187,8 +215,8 @@ export function QuickStakeSheet({
       });
       onClose();
     };
-    // Improvement B — approval buffer: when an approve is needed we grant
-    // max(amount × 10, 10k TICK) instead of the exact amount, so subsequent
+    // Improvement B, approval buffer: when an approve is needed we grant
+    // max(amount x 10, 10k TICK) instead of the exact amount, so subsequent
     // stakes skip the approve entirely. On smart wallets the approve+stake
     // calls land as ONE batched userOp; on embedded wallets they run as
     // sequential sponsored txs (nonce-ordered, approve mines first).
@@ -196,25 +224,41 @@ export function QuickStakeSheet({
       const floor = BigInt(10_000) * 10n ** 18n;
       const scaled = amountWei * 10n;
       // Cap the buffer at the balance (faucet-limited) to avoid pointless
-      // oversized grants — a 10k buffer is plenty for repeated staking.
+      // oversized grants, a 10k buffer is plenty for repeated staking.
       if (balance !== null && balance < floor) return balance > amountWei ? balance : amountWei;
       return scaled > floor ? scaled : floor;
     })();
-    const stakeCall = isMatch
+    const stakeCall = isStockTarget
       ? {
-          address: CONTRACTS.predictionPool as `0x${string}`,
-          abi: PREDICTION_POOL_ABI,
-          functionName: "stake",
-          args: [SEASON_ID, marketId, BigInt(outcome.index), amountWei],
-          label: "Stake",
-        }
-      : {
-          address: factoryAddress,
-          abi: MARKET_FACTORY_ABI,
+          address: STOCK_MARKET_FACTORY_ADDRESS as `0x${string}`,
+          abi: STOCK_MARKET_FACTORY_ABI,
           functionName: "stake",
           args: [marketId, BigInt(outcome.index), amountWei],
           label: "Stake",
-        };
+        }
+      : isStockMatch
+      ? {
+          address: STOCK_CONTRACTS.predictionPool as `0x${string}`,
+          abi: STOCK_PREDICTION_POOL_ABI,
+          functionName: "stake",
+          args: [STOCK_SEASON_ID, marketId, BigInt(outcome.index), amountWei],
+          label: "Stake",
+        }
+      : isMatch
+        ? {
+            address: CONTRACTS.predictionPool as `0x${string}`,
+            abi: PREDICTION_POOL_ABI,
+            functionName: "stake",
+            args: [SEASON_ID, marketId, BigInt(outcome.index), amountWei],
+            label: "Stake",
+          }
+        : {
+            address: factoryAddress,
+            abi: MARKET_FACTORY_ABI,
+            functionName: "stake",
+            args: [marketId, BigInt(outcome.index), amountWei],
+            label: "Stake",
+          };
     try {
       clearError();
       if (needsApproval) {
@@ -231,7 +275,7 @@ export function QuickStakeSheet({
           ],
           { label: "Approve & stake", onHashed: onStakeHashed }
         );
-        // Local allowance state now covers future stakes — no re-read wait.
+        // Local allowance state now covers future stakes, no re-read wait.
         setAllowance(approvalBuffer);
       } else {
         await writeBatch([stakeCall], { label: "Stake", onHashed: onStakeHashed });
@@ -239,6 +283,10 @@ export function QuickStakeSheet({
       // Reconcile optimistically shown pools + balance.
       void queryClient.invalidateQueries({ queryKey: qks.market(marketKey ?? marketId.toString()) });
       void queryClient.invalidateQueries({ queryKey: qks.markets });
+      if (isStockTarget) {
+        void queryClient.invalidateQueries({ queryKey: qks.stockMarkets });
+        void queryClient.invalidateQueries({ queryKey: qks.stockMarket(marketId) });
+      }
       void queryClient.invalidateQueries({
         queryKey: qks.balance(playerAddress.toLowerCase()),
       });
@@ -268,7 +316,7 @@ export function QuickStakeSheet({
         </button>
 
         {stage === "confirm" ? (
-          /* Explicit confirm step — only for stakes ≥ CONFIRM_THRESHOLD_TICK */
+          /* Explicit confirm step, only for stakes at or above CONFIRM_THRESHOLD_TICK */
           <LargeStakeConfirm amount={amountNum.toLocaleString()} outcome={outcome.label} busy={busy} onBack={() => setStage("form")} onConfirm={submit} />
         ) : (
           <>
@@ -285,7 +333,11 @@ export function QuickStakeSheet({
             <div className="mt-3 flex items-center justify-between rounded-xl border border-[#2E7CF6]/30 bg-[#2E7CF6]/10 px-3 py-2.5">
               <div className="flex min-w-0 items-center gap-3">
                 {outcome.teamId !== null ? (
-                  <TeamBadge teamId={outcome.teamId} size={34} showName={false} />
+                  isStockMatch ? (
+                    <StockTeamBadge teamId={outcome.teamId} size={34} showName={false} />
+                  ) : (
+                    <TeamBadge teamId={outcome.teamId} size={34} showName={false} />
+                  )
                 ) : (
                   <span className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#2E7CF6]/15 font-display text-xs font-extrabold text-[#2E7CF6]">
                     {outcome.index + 1}
@@ -383,7 +435,7 @@ export function QuickStakeSheet({
                     Est. payout if it wins
                   </span>
                   <span className="font-display text-base font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {est.win > 0 ? `${est.win.toLocaleString(undefined, { maximumFractionDigits: 1 })} TICK` : "—"}
+                    {est.win > 0 ? `${est.win.toLocaleString(undefined, { maximumFractionDigits: 1 })} TICK` : "–"}
                     {est.multiple >= 1 && (
                       <span className="ml-1.5 text-xs font-bold opacity-70">{est.multiple.toFixed(2)}×</span>
                     )}
@@ -439,21 +491,26 @@ export function QuickStakeSheet({
   );
 }
 
-// ── card chips ──────────────────────────────────────────────────────
+// Card chips
 
 /**
- * Quick-stake chips for a market card. Renders the top 3 outcomes by pool
- * share. Desktop: fades in on card hover. Mobile: always visible.
+ * Quick-stake chips for a market or fixture card. Renders the top 3 outcomes
+ * by pool share. Desktop: fades in on card hover. Mobile: always visible.
  * Each chip opens the QuickStakeSheet via `onPick`.
+ * Pass league="stocks" for stock fixtures so the chips show stock team
+ * badges; stock teamIds 0 to 11 overlap crypto teamIds, so the crypto
+ * badge would show the wrong coin.
  */
 export function QuickStakeChips({
   outcomes,
   bettingOpen,
   onPick,
+  league = "crypto",
 }: {
   outcomes: QuickStakeOutcome[];
   bettingOpen: boolean;
   onPick: (o: QuickStakeOutcome) => void;
+  league?: "crypto" | "stocks";
 }) {
   if (!bettingOpen || outcomes.length === 0) return null;
   const top = outcomes.slice(0, 3);
@@ -480,10 +537,14 @@ export function QuickStakeChips({
             "hover:border-[#2E7CF6] hover:bg-[#2E7CF6]/15 hover:text-[#1D4ED8]",
             "dark:border-[#2E7CF6]/30 dark:bg-[#2E7CF6]/10 dark:text-zinc-200 dark:hover:border-[#2E7CF6] dark:hover:text-[#7db3ff]"
           )}
-          title={`Quick-stake on ${o.label}${o.odds != null ? ` — projected ${formatMarketOdds(o.odds)} for 10 TICK` : ""}`}
+          title={`Quick-stake on ${o.label}${o.odds != null ? `, projected ${formatMarketOdds(o.odds)} for 10 TICK` : ""}`}
         >
           {o.teamId !== null ? (
-            <TeamBadge teamId={o.teamId} size={16} showName={false} />
+            league === "stocks" ? (
+              <StockTeamBadge teamId={o.teamId} size={16} showName={false} />
+            ) : (
+              <TeamBadge teamId={o.teamId} size={16} showName={false} />
+            )
           ) : (
             <span className="text-[9px] font-extrabold text-[#2E7CF6]">{o.index + 1}</span>
           )}

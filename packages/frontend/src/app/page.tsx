@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Trophy, Zap } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
 import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
+import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_ORACLE_ABI, STOCK_SEASON_ID, type StockApiFixture, type StockApiPrice } from "../lib/stockContracts";
 import { useMarkets } from "../lib/query/useMarkets";
 import { useTeams } from "../hooks/useTeams";
 import { useTickr } from "../hooks/useTickr";
@@ -16,7 +17,10 @@ import { useCupOutrightTotals } from "../hooks/useCupPool";
 import { CupMatchCard, cupMatchStatus } from "../components/CupMatchCard";
 import { SpreadFixtureBadges } from "../components/SpreadFixtureBadges";
 import { LeagueTable, LeagueTableSkeleton } from "../components/LeagueTable";
-import { FixtureCard, fixtureStatus } from "../components/FixtureCard";
+import { FixtureCard, fixtureStatus, type LiveFixtureUpdate } from "../components/FixtureCard";
+import { StockFixtureCard, stockFixtureStatus } from "../components/StockFixtureCard";
+import { useStockLiveFeed } from "../hooks/useStockLiveFeed";
+import { stockScoreline } from "../lib/stockFormat";
 import { Countdown } from "../components/Countdown";
 import { formatTick } from "../lib/format";
 import type { MarketSummary } from "../lib/chainDirect";
@@ -36,6 +40,8 @@ import { TargetCardStatus } from "../components/TargetCardStatus";
 import { marketOdds, formatMarketOdds, isHighPayout } from "../lib/marketOdds";
 import { useMarketFees } from "../lib/query/useMarketFees";
 import { useFactoryEvents } from "../lib/query/useFactoryEvents";
+import { useStockMarkets } from "../lib/query/useStockMarkets";
+import { stockCardDataFromSummary, StockMarketCard } from "../components/StockMarketCard";
 
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
@@ -132,7 +138,7 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
   }
   const closeTime = market.bettingCloseTime * 1000;
   // Quick-stake chips: same outcome set shown on the card, resolved to team
-  // ids where the template encodes one (Top Gainer / Champion map index→team).
+  // ids where the template encodes one (Top Gainer / Champion map index to team).
   const isOpen = open(market);
   const [quickPick, setQuickPick] = useState<QuickStakeOutcome | null>(null);
   const quickOutcomes: QuickStakeOutcome[] = market.outcomeTotals.map((amount, index) => {
@@ -276,25 +282,68 @@ function LiveFixtureCard({ fixture, prices }: { fixture: ApiFixture; prices: Rec
   </Link>;
 }
 
+/**
+ * Live stock fixture card for the home page. Mirrors LiveFixtureCard,
+ * but the kickoff NAV snapshot comes from the StockPriceOracle and the
+ * live NAV prices come from useStockLiveFeed, namespaced by stock
+ * teamId, never from the crypto price map. The score uses
+ * stockScoreline (1 goal = 0.05%), never the crypto 0.5% helper.
+ * StockFixtureCard renders the card itself, including its quick-stake
+ * chips once the match is stakable, so this wrapper only supplies the
+ * live score.
+ */
+function LiveStockFixtureCard({ fixture, prices, liveUpdate }: { fixture: StockApiFixture; prices: Record<number, StockApiPrice>; liveUpdate?: LiveFixtureUpdate }) {
+  const [snapshot, setSnapshot] = useState<{ homeStart: bigint; awayStart: bigint } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!STOCK_CONTRACTS.priceOracle) return;
+    getPublicClient().readContract({
+      address: STOCK_CONTRACTS.priceOracle as `0x${string}`,
+      abi: STOCK_PRICE_ORACLE_ABI,
+      functionName: "getSnapshot",
+      args: [STOCK_SEASON_ID, BigInt(fixture.fixtureId)],
+    }).then((raw) => {
+      const s = raw as { homeStart: bigint; awayStart: bigint; startSubmitted: boolean };
+      if (alive && s.startSubmitted) setSnapshot({ homeStart: s.homeStart, awayStart: s.awayStart });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [fixture.fixtureId]);
+  if (!fixture.home || !fixture.away) return null;
+  const pct = (start: bigint, price: string | null | undefined) => {
+    if (start <= 0n || price === null || price === undefined) return null;
+    const startPrice = Number(start) / 1e8;
+    const currentPrice = Number(price);
+    return startPrice > 0 && Number.isFinite(currentPrice) ? ((currentPrice - startPrice) / startPrice) * 100 : null;
+  };
+  const h = pct(snapshot?.homeStart ?? 0n, prices[fixture.home.teamId]?.price);
+  const a = pct(snapshot?.awayStart ?? 0n, prices[fixture.away.teamId]?.price);
+  const liveScore: [number, number] | null = h === null || a === null ? null : (() => { const s = stockScoreline(h, a); return [s.homeGoals, s.awayGoals] as [number, number]; })();
+  return <StockFixtureCard fixture={fixture} liveUpdate={liveUpdate} liveScore={liveScore} />;
+}
+
 export default function HomePage() {
   useFactoryEvents();
   const { markets, isLoading } = useMarkets();
+  const stockMarketQuery = useStockMarkets();
   const { matches: cupMatches, status: cupStatus, error: cupError, reload: reloadCup } = useCupBracket(cupConfigured);
   const { totals: cupTotals } = useCupOutrightTotals(cupConfigured);
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
+  const { fixtureUpdates: stockUpdates, prices: stockPrices } = useStockLiveFeed(true);
   const [cupNow, setCupNow] = useState(() => Date.now());
   useEffect(() => { const timer = window.setInterval(() => setCupNow(Date.now()), 15_000); return () => window.clearInterval(timer); }, []);
   const teams = teamData ?? [];
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
+  const [stockFixtures, setStockFixtures] = useState<StockApiFixture[]>([]);
   const [table, setTable] = useState<ApiTableRow[] | null>(null);
   useEffect(() => {
     let live = true;
     const loadFixtures = () => { api.fixtures().then((v) => { if (live) setFixtures(v); }).catch(() => {}); };
+    const loadStockFixtures = () => { stockApi.fixtures().then((v) => { if (live) setStockFixtures(v); }).catch(() => {}); };
     const loadTable = () => { api.table().then((v) => { if (live) setTable(v); }).catch(() => {}); };
-    loadFixtures(); loadTable();
-    const fixtureTimer = window.setInterval(loadFixtures, 15_000);
+    loadFixtures(); loadStockFixtures(); loadTable();
+    const fixtureTimer = window.setInterval(() => { loadFixtures(); loadStockFixtures(); }, 15_000);
     const dataTimer = window.setInterval(() => { if (!table || table.length === 0) loadTable(); }, 15_000);
     return () => { live = false; window.clearInterval(fixtureTimer); window.clearInterval(dataTimer); };
   }, [table?.length]);
@@ -321,6 +370,8 @@ export default function HomePage() {
   const featured = useMemo(() => (markets ?? []).filter((m) => (m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION) && m.state === 0), [markets]);
   const liveMatches = fixtures.filter((f) => fixtureStatus(f) === "live");
   const upcoming = fixtures.filter((f) => { const s = fixtureStatus(f); return s === "upcoming" || s === "scheduled"; }).sort((a, b) => Date.parse(a.kickoff ?? a.scheduledKickoff ?? "") - Date.parse(b.kickoff ?? b.scheduledKickoff ?? "")).slice(0, 6);
+  const liveStock = stockFixtures.filter((f) => stockFixtureStatus(f, stockUpdates[f.fixtureId]) === "live");
+  const upcomingStock = stockFixtures.filter((f) => { const s = stockFixtureStatus(f, stockUpdates[f.fixtureId]); return s === "upcoming" || s === "tba"; }).sort((a, b) => Date.parse(a.kickoff ?? a.windowStart) - Date.parse(b.kickoff ?? b.windowStart)).slice(0, 6);
   const closing = [...sorted.map((market) => ({ market, closesAt: market.bettingCloseTime * 1000 })), ...(cupOpen && finalKickoff > 0 ? [{ market: null, closesAt: finalKickoff }] : [])]
     .sort((a, b) => a.closesAt - b.closesAt).slice(0, 12);
   const names = teams.map((t) => ({ symbol: t.symbol }));
@@ -344,9 +395,15 @@ export default function HomePage() {
 
     {upcoming.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming matches" subtitle="The next fixtures on the schedule" href="/fixtures" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcoming.map((f) => <FixtureCard key={f.fixtureId} fixture={f} />)}</div></section>}
 
+    {liveStock.length > 0 && <section><SectionHeading icon={Flame} title="Stock matches in play" subtitle="Live stock performance score, tap a match to stake" href="/fixtures?league=stocks" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{liveStock.map((f) => <LiveStockFixtureCard key={f.fixtureId} fixture={f} prices={stockPrices} liveUpdate={stockUpdates[f.fixtureId]} />)}</div></section>}
+
+    {upcomingStock.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming stock matches" subtitle="The next stock fixtures on the schedule" href="/fixtures?league=stocks" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcomingStock.map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={stockUpdates[f.fixtureId]} />)}</div></section>}
+
     {cupConfigured && <section className="rounded-3xl border border-amber-400/25 bg-gradient-to-br from-amber-500/[.12] via-yellow-500/[.04] to-transparent p-4 dark:border-amber-400/20 sm:p-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[.2em] text-amber-700 dark:text-amber-300"><Trophy className="h-4 w-4" /> Crypto Price World Cup</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white">World Cup matches</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Follow the knockout ties and pick a winner.</p></div><Link href="/cup" className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 hover:underline dark:text-amber-300">View all matches <ArrowRight className="h-4 w-4" /></Link></div>{homeCupMatches.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{homeCupMatches.map((match) => <CupMatchCard key={match.matchId} match={match} now={cupNow} />)}</div> : <div className="rounded-2xl border border-amber-400/15 bg-white/60 p-6 text-center text-sm text-zinc-500 dark:bg-white/[.03]">{cupError ? <>Could not load World Cup matches. <button onClick={() => void reloadCup()} className="font-bold text-amber-700 underline dark:text-amber-300">Retry</button></> : "Loading World Cup matches…"}</div>}</section>}
 
     <section id="trending" className="scroll-mt-32"><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
+
+    {(stockMarketQuery.data?.markets.some((market) => market.state === 0) ?? false) && <section><SectionHeading icon={Target} title="Stock price targets" subtitle="Pick Yes or No on a stock price by a deadline" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{stockMarketQuery.data!.markets.filter((market) => market.state === 0).slice(0, 3).map((market) => <StockMarketCard key={`stock-${market.id}`} market={stockCardDataFromSummary(market)} feesBps={null} quoteAsOf={stockMarketQuery.dataUpdatedAt} />)}</div></section>}
 
     {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div></section>}
   </div>;

@@ -38,6 +38,8 @@ import { useFactoryEvents } from "../../lib/query/useFactoryEvents";
 import { usePriceFeed } from "../../lib/price/usePriceFeed";
 import { useMarketFees } from "../../lib/query/useMarketFees";
 import { MarketCard, type MarketSummary } from "../../components/MarketCard";
+import { useStockMarkets } from "../../lib/query/useStockMarkets";
+import { stockCardDataFromSummary, StockMarketCard } from "../../components/StockMarketCard";
 
 function useMarkets() {
   const { markets: summaries, error: queryError, dataUpdatedAt } = useCachedMarkets();
@@ -65,6 +67,7 @@ function useMarkets() {
 
 export default function MarketsPage() {
   const { markets, error, updatedAt } = useMarkets();
+  const stockMarkets = useStockMarkets();
   const { feesBps } = useMarketFees();
   const { teams } = useTeams();
   const { playerAddress } = useTickr();
@@ -276,6 +279,14 @@ export default function MarketsPage() {
             )}
           </section>}
         </div>
+      )}
+      {(tab === "all" || tab === "featured") && stockMarkets.data?.markets && stockMarkets.data.markets.length > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold"><Users className="h-5 w-5 text-[#2E7CF6]" />Stock price targets <span className="text-sm font-normal text-zinc-500">({stockMarkets.data.markets.filter((m) => m.state === 0).length} open)</span></h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {stockMarkets.data.markets.filter((m) => m.state === 0).map((m) => <StockMarketCard key={`stock-${m.id}`} market={stockCardDataFromSummary(m)} feesBps={null} quoteAsOf={stockMarkets.dataUpdatedAt} />)}
+          </div>
+        </section>
       )}
     </div>
   );

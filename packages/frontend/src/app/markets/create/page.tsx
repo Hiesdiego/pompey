@@ -23,6 +23,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet, Search } from "lucide-react";
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters } from "viem";
@@ -459,6 +460,10 @@ export default function CreateMarketPage() {
         <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">5 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
       </div>
 
+      <Link href="/markets/create/stock" className="surface-card mb-6 flex items-center justify-between gap-4 rounded-2xl p-5 transition hover:border-[#2E7CF6]/40">
+        <span><span className="block text-sm font-extrabold">Create a stock price target</span><span className="mt-1 block text-sm text-zinc-500">Ask whether a tokenized stock will be above or below a target by a deadline.</span></span>
+        <span className="shrink-0 rounded-xl bg-[#2E7CF6] px-4 py-2.5 text-sm font-bold text-white">Stock market →</span>
+      </Link>
       <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
 

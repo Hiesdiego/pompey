@@ -48,6 +48,25 @@ Active Season 1 is the 12-team deployment. TickToken is reused from the crypto l
 
 The old 22-team deployment remains on-chain and untouched. Do not use its addresses for the active season; in particular, its prediction pool is `0xbb270e85c0c0de720290f5d90f4f8a0e6005a4da` and its match registry already contains 231 fixtures.
 
+## Stock Price Target Market Factory (Base Sepolia)
+
+Deployed on November 19, 2026 at block 61011943 (proxy creation transaction `0xd94e19c6a025ee5fe36ac4b5d3f23f26a8f99f35fb518f046e74c8249251dc35`). Proxy initialized atomically; deploy script verified all three configured dependencies after deployment.
+
+| Contract / role | Address |
+| --- | --- |
+| StockMarketFactory implementation | `0x1acebd39109cabf02bdcbc616c1d191d8c1b92bd` |
+| StockMarketFactory proxy | `0x8b7673bb0f04bc52b3f7f8b622969b6be5df3e0c` |
+| TICK token (reused) | `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b` |
+| Treasury / resolver / owner | `0x5219d14dfbcf0be6ec00d6b5188fff353aeb33bf` |
+
+The stock price-target factory is separate from the crypto MarketFactory and the stock league. Market creation adds a 250 TICK seed; a featured market must be created with explicit stock, direction, target and deadline terms before the seed enters its pool.
+
+Featured market seeded on November 19, 2026:
+
+| Market ID | Question | Seed | Creation transaction | Block |
+| --- | --- | --- | --- | --- |
+| `0` | Will NVDAc be above $180.00 by December 20, 2026 at 23:59 UTC? | `250 TICK` | `0x60e3769bb51db201616e1406a9be418c81c55753e308b9a8ed1b674c76c8210a` | `61025190` |
+
 ## Market factory
 
 | Status | Address | Deployment block |
