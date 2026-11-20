@@ -13,11 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Plus,
-  Trophy,
-  Users,
-} from "lucide-react";
+import { Plus, Trophy, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicClient } from "../../hooks/usePublicClient";
 import { useTickr } from "../../hooks/useTickr";
@@ -30,8 +26,6 @@ import {
 } from "../../lib/marketFactory";
 import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../../components/States";
 import { cn } from "../../lib/cn";
-import { CupOutrightMarketCard } from "../../components/CupOutrightMarketCard";
-import { cupConfigured } from "../../lib/cup";
 import { api, type ApiFixture } from "../../lib/api";
 import { useMarkets as useCachedMarkets } from "../../lib/query/useMarkets";
 import { useFactoryEvents } from "../../lib/query/useFactoryEvents";
@@ -162,7 +156,6 @@ export default function MarketsPage() {
   if (!MARKET_FACTORY_ADDRESS && !NEW_MARKET_FACTORY_ADDRESS) {
     return (
       <div className="py-10">
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div>
         <EmptyState
           title="Markets not deployed yet"
           message="The MarketFactory contract hasn't been deployed on this network. Community markets go live with the v0.2 redeploy."
@@ -174,7 +167,6 @@ export default function MarketsPage() {
   if (error) {
     return (
       <div className="py-10">
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><CupOutrightMarketCard /></div>
         <ErrorState message={error} onRetry={() => window.location.reload()} />
       </div>
     );
@@ -202,8 +194,8 @@ export default function MarketsPage() {
 
       <div role="tablist" aria-label="Market filters" className="mb-6 flex flex-wrap gap-2">
         {([
-          ["all", "All markets", unresolved.length + (cupConfigured ? 1 : 0)],
-          ["featured", "Featured", featured.length + (cupConfigured ? 1 : 0)],
+          ["all", "All markets", unresolved.length],
+          ["featured", "Featured", featured.length],
           ["bounty", "Bounty", bounty.length],
           ["winnings", "Winnings", winningsLoading ? "…" : winnings.length],
         ] as const).map(([key, label, count]) => (
@@ -232,7 +224,7 @@ export default function MarketsPage() {
         <SkeletonCards cards={6} />
       ) : tab === "winnings" && claimQuery.isError ? (
         <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />
-      ) : visible.length === 0 && !((tab === "all" || tab === "featured") && cupConfigured) ? (
+      ) : visible.length === 0 ? (
         <EmptyState
           title={tab === "winnings" ? playerAddress ? "No winnings to claim" : "Connect your wallet to view claims" : tab === "bounty" ? "No resolver bounties right now" : tab === "featured" ? "No featured markets right now" : "No unresolved markets right now"}
           message={tab === "winnings" ? playerAddress ? "Resolved markets with unclaimed winnings will appear here." : "Your unclaimed winnings will appear here once your wallet is connected." : tab === "bounty" ? "Markets with stakes will appear here after their end time until they resolve." : "New markets will appear here when they are created."}
@@ -243,14 +235,13 @@ export default function MarketsPage() {
         </div>
       ) : (
         <div role="tabpanel">
-          {(featured.length > 0 || cupConfigured) && (
+          {featured.length > 0 && (
             <section className="mb-10">
               <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
                 <Trophy className="h-5 w-5 text-amber-500" />
                 Featured
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {cupConfigured && <CupOutrightMarketCard />}
                 {featured.map((m) => (
                   <MarketCard key={m.marketKey} market={m} teams={teams ?? []} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} feesBps={feesBps} quoteAsOf={updatedAt} />
                 ))}

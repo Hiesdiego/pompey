@@ -10,10 +10,11 @@ export function Card({ children, gold = false }: { children: ReactNode; gold?: b
   </div>;
 }
 
-export function Brand({ gold = false }: { gold?: boolean }) {
+export function Brand({ gold = false, league = "crypto" }: { gold?: boolean; league?: "crypto" | "stocks" }) {
+  const leagueLines = league === "stocks" ? ["STOCK PRICE", "PREDICTION LEAGUE"] : ["CRYPTO PRICE", "PREDICTION LEAGUE"];
   return <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
     <img src={tickrWordmark} width={154} height={81} alt="TICKR" />
-    <div style={{ display: "flex", flexDirection: "column", gap: 7, color: gold ? "#f5d58a" : "#9ac2ff", fontSize: 18, letterSpacing: 2 }}><span>CRYPTO PRICE</span><span>PREDICTION LEAGUE</span></div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 7, color: gold ? "#f5d58a" : "#9ac2ff", fontSize: 18, letterSpacing: 2 }}>{leagueLines.map((line) => <span key={line}>{line}</span>)}</div>
   </div>;
 }
 

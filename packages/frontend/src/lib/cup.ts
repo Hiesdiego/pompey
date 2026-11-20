@@ -1,12 +1,6 @@
-/**
- * CRYPTO PRICE WORLD CUP — frontend config, ABIs, and static data.
- *
- * Addresses come from NEXT_PUBLIC_CUP_* env vars (see .env.example).
- * ABIs are copied from the deployed Solidity sources (10-field CupMatch).
- */
+/** Legacy contract and asset metadata used for settled claims and old market targets. */
 
 import type { Address } from "viem";
-import { TICK_TOKEN_ABI } from "./contracts";
 
 function envAddress(value: string | undefined): Address | "" {
   const v = (value ?? "").trim();
@@ -19,73 +13,14 @@ const configuredRegistry = envAddress(process.env.NEXT_PUBLIC_CUP_REGISTRY_ADDRE
 const configuredPool = envAddress(process.env.NEXT_PUBLIC_CUP_POOL_ADDRESS);
 
 export const CUP_CONTRACTS = {
-  tickToken: envAddress(process.env.NEXT_PUBLIC_CUP_TICK_TOKEN_ADDRESS),
   registry: configuredRegistry,
-  engine: envAddress(process.env.NEXT_PUBLIC_CUP_ENGINE_ADDRESS),
-  ballot: envAddress(process.env.NEXT_PUBLIC_CUP_BALLOT_ADDRESS),
   pool: configuredPool,
   matchPool: envAddress(process.env.NEXT_PUBLIC_CUP_MATCH_POOL_ADDRESS) ||
     (configuredRegistry.toLowerCase() === LIVE_CUP_REGISTRY ? LIVE_MATCH_POOL : configuredPool),
 } as const;
 
-/** The 2026 Crypto Price World Cup runs Nov 1 through Nov 15 (UTC). */
-export const CUP_FAVORITE_START = Date.parse("2026-11-01T00:00:00Z");
-export const CUP_FAVORITE_END = Date.parse("2026-11-16T00:00:00Z");
-export const CUP_TOURNAMENT_START = CUP_FAVORITE_START + 10 * 60 * 60 * 1000;
-
-/** Published R64 slots; a revealed on-chain kickoff always takes precedence. */
-export function cupScheduledKickoff(matchId: number): number | null {
-  if (matchId < 0 || matchId >= 32) return null;
-  const day = matchId < 12 ? Math.floor(matchId / 6) : 2 + Math.floor((matchId - 12) / 5);
-  const first = day < 2 ? day * 6 : 12 + (day - 2) * 5;
-  return CUP_FAVORITE_START + day * 86_400_000 + (10 + (matchId - first) * 2) * 3_600_000;
-}
-
-export const cupConfigured =
-  CUP_CONTRACTS.registry !== "" &&
-  CUP_CONTRACTS.pool !== "" &&
-  CUP_CONTRACTS.tickToken !== "";
-
-/** On-chain TBD sentinel. */
-export const CUP_TBD = 65535;
-
-/** Match states: 0=Created, 1=Open, 2=Settled, 3=Disputed. */
+/** Retained contract states used to find settled legacy claims. */
 export const CUP_STATE = { Created: 0, Open: 1, Settled: 2, Disputed: 3 } as const;
-
-export function cupMatchBettingOpen(match: { teamA: number; teamB: number; state: number; kickoffMs: number; endMs: number }, now: number, liveStakingEnabled: boolean): boolean {
-  return match.teamA !== CUP_TBD && match.teamB !== CUP_TBD
-    && (match.state === CUP_STATE.Created || match.state === CUP_STATE.Open)
-    && (liveStakingEnabled ? match.endMs === 0 || now < match.endMs - 5 * 60_000 : match.kickoffMs === 0 || now < match.kickoffMs);
-}
-
-export const CUP_MIN_STAKE_TICK = 10;
-export const CUP_FEE_BPS = 700;
-export const CUP_MATCH_DURATION_MS = 60 * 60 * 1000;
-
-export interface CupRound {
-  name: string;
-  short: string;
-  start: number;
-  end: number;
-}
-
-export const CUP_ROUNDS: CupRound[] = [
-  { name: "Round of 64", short: "R64", start: 0, end: 31 },
-  { name: "Round of 32", short: "R32", start: 32, end: 47 },
-  { name: "Round of 16", short: "R16", start: 48, end: 55 },
-  { name: "Quarterfinals", short: "QF", start: 56, end: 59 },
-  { name: "Semifinals", short: "SF", start: 60, end: 61 },
-  { name: "Final", short: "Final", start: 62, end: 62 },
-];
-
-export function cupRoundOf(matchId: number): number {
-  if (matchId < 32) return 0;
-  if (matchId < 48) return 1;
-  if (matchId < 56) return 2;
-  if (matchId < 60) return 3;
-  if (matchId < 62) return 4;
-  return 5;
-}
 
 /** The 64-team field in on-chain registration order (pots 1→4). */
 export const CUP_TEAMS: { teamId: number; symbol: string; pot: number }[] = [
@@ -170,7 +105,7 @@ export function cupTeamName(teamId: number): string {
   return CUP_TEAM_NAMES[teamId] ?? "TBA";
 }
 
-/** TradingView spot pairs. Exceptions follow the Cup oracle's actual asset mapping. */
+/** TradingView pairs retained for markets created with legacy target ids. */
 export function cupChartSymbol(teamId: number): string | null {
   const symbol = CUP_TEAM_SYMBOLS[teamId];
   if (!symbol) return null;
@@ -180,20 +115,9 @@ export function cupChartSymbol(teamId: number): string | null {
   return `BINANCE:${base}USDT`;
 }
 
-export function cupOutrightOpen(matches: { kickoffMs: number }[] | null, tournamentComplete: boolean): boolean {
-  if (!matches || tournamentComplete) return false;
-  const kickoff = matches[62]?.kickoffMs ?? 0;
-  return kickoff === 0 || Date.now() < kickoff;
-}
-
-/** "Winner Match 3" style label for a TBD slot (1-indexed for humans). */
-export function roadToLabel(feederMatchId: number): string {
-  return `Winner Match ${feederMatchId + 1}`;
-}
-
 // ── ABIs (from the deployed sources) ─────────────────────────────────────────
 
-/** CupRegistry reads. CupMatch is the 10-field struct. */
+/** Legacy registry reads for claim availability. */
 export const CUP_REGISTRY_ABI = [
   {
     type: "function",
@@ -240,7 +164,6 @@ export const CUP_REGISTRY_ABI = [
     outputs: [{ type: "uint16" }],
   },
 ] as const;
-
 /** CupPool reads + writes used by the UI. */
 export const CUP_POOL_ABI = [
   { type: "error", name: "AlreadyClaimed", inputs: [] },
@@ -380,5 +303,3 @@ export const CUP_POOL_ABI = [
     outputs: [],
   },
 ] as const;
-
-export { TICK_TOKEN_ABI };

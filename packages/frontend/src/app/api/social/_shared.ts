@@ -8,7 +8,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabaseServer";
 import { currentSeasonId } from "@/lib/seasonServer";
 import { ACTIVE_CHAIN_ID } from "@/lib/contracts";
-import { getCupLeaderboard } from "@/lib/cupLeaderboardServer";
 
 /** Returns { db } or { response } (503 when Supabase isn't configured). */
 export function dbOr503(): { db: SupabaseClient } | { response: Response } {
@@ -21,8 +20,6 @@ export interface ProfileDto {
   walletAddress: string;
   username: string;
   favouriteTeamId: number;
-  cupFavouriteTeamId: number | null;
-  wcPoints: number | null;
   bio: string;
   stats: {
     marketsBacked: number;
@@ -39,7 +36,6 @@ interface ProfileRow {
   username: string;
   username_set_season: number;
   favourite_team_id: number;
-  cup_favourite_team_id: number | null;
   favourite_team_set_season: number;
   bio: string;
 }
@@ -68,12 +64,6 @@ export async function profileWithStats(
   if (profileError) throw new Error(`profile query failed: ${profileError.message}`);
   if (!p) return null;
   const row = p as ProfileRow;
-  // Keep core profiles readable until the optional Cup migration is applied.
-  const { data: cupRow } = await db.from("profiles")
-    .select("cup_favourite_team_id")
-    .eq("wallet_address", wallet)
-    .maybeSingle();
-
   const states = new Map<string, string>();
   const pageSize = 500;
   for (let offset = 0; ; offset += pageSize) {
@@ -96,21 +86,11 @@ export async function profileWithStats(
     .eq("creator", wallet);
   if (marketsError) throw new Error(`profile markets query failed: ${marketsError.message}`);
   const stateValues = [...states.values()];
-  let wcPoints: number | null = null;
-  try {
-    const cupScores = await getCupLeaderboard();
-    wcPoints = cupScores.find((score) => score.walletAddress === wallet)?.points ?? 0;
-  } catch (error) {
-    console.error("[social] WC points unavailable:", error);
-  }
-
   return {
     dto: {
       walletAddress: row.wallet_address,
       username: row.username,
       favouriteTeamId: row.favourite_team_id,
-      cupFavouriteTeamId: cupRow?.cup_favourite_team_id ?? null,
-      wcPoints,
       bio: row.bio ?? "",
       stats: {
         marketsBacked: states.size,

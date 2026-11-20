@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
 import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
 import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_ORACLE_ABI, STOCK_SEASON_ID, type StockApiFixture, type StockApiPrice } from "../lib/stockContracts";
@@ -10,11 +10,6 @@ import { useMarkets } from "../lib/query/useMarkets";
 import { useTeams } from "../hooks/useTeams";
 import { useTickr } from "../hooks/useTickr";
 import { TeamBadge } from "../components/TeamBadge";
-import { CupOutrightMarketCard } from "../components/CupOutrightMarketCard";
-import { CUP_TBD, cupConfigured, cupOutrightOpen, cupScheduledKickoff } from "../lib/cup";
-import { useCupBracket } from "../hooks/useCupBracket";
-import { useCupOutrightTotals } from "../hooks/useCupPool";
-import { CupMatchCard, cupMatchStatus } from "../components/CupMatchCard";
 import { SpreadFixtureBadges } from "../components/SpreadFixtureBadges";
 import { LeagueTable, LeagueTableSkeleton } from "../components/LeagueTable";
 import { FixtureCard, fixtureStatus, type LiveFixtureUpdate } from "../components/FixtureCard";
@@ -227,19 +222,10 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
 }
 
 function FeaturedCarousel({ markets, teams, fixtures, prices, priceFresh, loading }: { markets: MarketSummary[]; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; loading: boolean }) {
-  const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const count = markets.length + (cupConfigured ? 1 : 0);
-  useEffect(() => { if (count < 2 || paused) return; const timer = window.setInterval(() => setIndex((i) => (i + 1) % count), 7000); return () => window.clearInterval(timer); }, [count, paused]);
-  if (!count && loading) return <div className={`${card} min-h-[390px] animate-pulse rounded-3xl p-8`} aria-label="Loading featured markets" />;
-  if (!count) return <div className={`${card} flex min-h-64 flex-col justify-center p-8`}><Sparkles className="h-6 w-6 text-[#2E7CF6]" /><h2 className="mt-4 font-display text-xl font-bold">No featured markets are open</h2><p className="mt-1 text-sm text-zinc-500">Top Gainer and Season Champion markets will appear here when available.</p></div>;
-  const current = index % count;
-  const market = markets[current];
-  return <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocusCapture={() => setPaused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false); }}>
-    {market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured /> : <CupOutrightMarketCard featured />}
-    {count > 1 && <div className="absolute bottom-5 right-6 z-10 flex items-center gap-2 sm:bottom-9 sm:right-8"><button aria-label="Previous featured market" onClick={() => setIndex((i) => (i - 1 + count) % count)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronLeft className="h-4 w-4" /></button><span className="min-w-10 text-center text-xs font-bold tabular-nums text-zinc-500">{current + 1} / {count}</span><button aria-label="Next featured market" onClick={() => setIndex((i) => (i + 1) % count)} className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white/90 text-zinc-700 shadow dark:border-white/10 dark:bg-[#141a23] dark:text-white"><ChevronRight className="h-4 w-4" /></button></div>}
-    <div className="mt-3 flex justify-center gap-1.5">{Array.from({ length: count }, (_, i) => <button key={i} aria-label={`Show featured market ${i + 1}`} onClick={() => setIndex(i)} className={`h-1.5 rounded-full transition-all ${i === current ? "w-7 bg-amber-500" : "w-1.5 bg-zinc-300 dark:bg-zinc-700"}`} />)}</div>
-  </div>;
+  const market = markets[0];
+  if (!market && loading) return <div className={`${card} min-h-[390px] animate-pulse rounded-3xl p-8`} aria-label="Loading featured markets" />;
+  if (!market) return <div className={`${card} flex min-h-64 flex-col justify-center p-8`}><Sparkles className="h-6 w-6 text-[#2E7CF6]" /><h2 className="mt-4 font-display text-xl font-bold">No featured markets are open</h2><p className="mt-1 text-sm text-zinc-500">Top Gainer and Season Champion markets will appear here when available.</p></div>;
+  return <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured />;
 }
 
 function SectionHeading({ icon: Icon, title, subtitle, href }: { icon: typeof Flame; title: string; subtitle: string; href?: string }) {
@@ -325,14 +311,10 @@ export default function HomePage() {
   useFactoryEvents();
   const { markets, isLoading } = useMarkets();
   const stockMarketQuery = useStockMarkets();
-  const { matches: cupMatches, status: cupStatus, error: cupError, reload: reloadCup } = useCupBracket(cupConfigured);
-  const { totals: cupTotals } = useCupOutrightTotals(cupConfigured);
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
   const { fixtureUpdates: stockUpdates, prices: stockPrices } = useStockLiveFeed(true);
-  const [cupNow, setCupNow] = useState(() => Date.now());
-  useEffect(() => { const timer = window.setInterval(() => setCupNow(Date.now()), 15_000); return () => window.clearInterval(timer); }, []);
   const teams = teamData ?? [];
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
   const [stockFixtures, setStockFixtures] = useState<StockApiFixture[]>([]);
@@ -348,31 +330,13 @@ export default function HomePage() {
     return () => { live = false; window.clearInterval(fixtureTimer); window.clearInterval(dataTimer); };
   }, [table?.length]);
   const sorted = useMemo(() => [...(markets ?? [])].filter(open).sort((a, b) => Number(pool(b) - pool(a))), [markets]);
-  const cupOpen = cupConfigured && cupOutrightOpen(cupMatches, cupStatus?.tournamentComplete ?? false);
-  const cupPool = Object.values(cupTotals ?? {}).reduce((sum, amount) => sum + amount, 0n);
-  const finalKickoff = cupMatches?.[62]?.kickoffMs ?? 0;
-  const homeCupMatches = useMemo(() => {
-    if (!cupMatches) return [];
-    const eligible = cupStatus?.drawExecuted
-      ? cupMatches.filter((match) => match.teamA !== CUP_TBD && match.teamB !== CUP_TBD)
-      : cupMatches.slice(0, 32);
-    const priority = { live: 0, upcoming: 1, awaiting: 2, disputed: 3, settled: 4 };
-    return [...eligible].sort((a, b) => {
-      const byStatus = priority[cupMatchStatus(a, cupNow)] - priority[cupMatchStatus(b, cupNow)];
-      if (byStatus) return byStatus;
-      const aKickoff = a.kickoffMs || cupScheduledKickoff(a.matchId) || Number.MAX_SAFE_INTEGER;
-      const bKickoff = b.kickoffMs || cupScheduledKickoff(b.matchId) || Number.MAX_SAFE_INTEGER;
-      return cupMatchStatus(a, cupNow) === "settled" ? bKickoff - aKickoff : aKickoff - bKickoff;
-    }).slice(0, 6);
-  }, [cupMatches, cupStatus?.drawExecuted, cupNow]);
-  const trendingMarkets = [...sorted.map((market) => ({ market, amount: pool(market) })), ...(cupOpen ? [{ market: null, amount: cupPool }] : [])]
-    .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0).slice(0, 6);
+  const trendingMarkets = sorted.slice(0, 6);
   const featured = useMemo(() => (markets ?? []).filter((m) => (m.templateId === TEMPLATES.TOP_GAINER || m.templateId === TEMPLATES.CHAMPION) && m.state === 0), [markets]);
   const liveMatches = fixtures.filter((f) => fixtureStatus(f) === "live");
   const upcoming = fixtures.filter((f) => { const s = fixtureStatus(f); return s === "upcoming" || s === "scheduled"; }).sort((a, b) => Date.parse(a.kickoff ?? a.scheduledKickoff ?? "") - Date.parse(b.kickoff ?? b.scheduledKickoff ?? "")).slice(0, 6);
   const liveStock = stockFixtures.filter((f) => stockFixtureStatus(f, stockUpdates[f.fixtureId]) === "live");
   const upcomingStock = stockFixtures.filter((f) => { const s = stockFixtureStatus(f, stockUpdates[f.fixtureId]); return s === "upcoming" || s === "tba"; }).sort((a, b) => Date.parse(a.kickoff ?? a.windowStart) - Date.parse(b.kickoff ?? b.windowStart)).slice(0, 6);
-  const closing = [...sorted.map((market) => ({ market, closesAt: market.bettingCloseTime * 1000 })), ...(cupOpen && finalKickoff > 0 ? [{ market: null, closesAt: finalKickoff }] : [])]
+  const closing = sorted.map((market) => ({ market, closesAt: market.bettingCloseTime * 1000 }))
     .sort((a, b) => a.closesAt - b.closesAt).slice(0, 12);
   const names = teams.map((t) => ({ symbol: t.symbol }));
 
@@ -399,12 +363,10 @@ export default function HomePage() {
 
     {upcomingStock.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming stock matches" subtitle="The next stock fixtures on the schedule" href="/fixtures?league=stocks" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcomingStock.map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={stockUpdates[f.fixtureId]} />)}</div></section>}
 
-    {cupConfigured && <section className="rounded-3xl border border-amber-400/25 bg-gradient-to-br from-amber-500/[.12] via-yellow-500/[.04] to-transparent p-4 dark:border-amber-400/20 sm:p-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[.2em] text-amber-700 dark:text-amber-300"><Trophy className="h-4 w-4" /> Crypto Price World Cup</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white">World Cup matches</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Follow the knockout ties and pick a winner.</p></div><Link href="/cup" className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 hover:underline dark:text-amber-300">View all matches <ArrowRight className="h-4 w-4" /></Link></div>{homeCupMatches.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{homeCupMatches.map((match) => <CupMatchCard key={match.matchId} match={match} now={cupNow} />)}</div> : <div className="rounded-2xl border border-amber-400/15 bg-white/60 p-6 text-center text-sm text-zinc-500 dark:bg-white/[.03]">{cupError ? <>Could not load World Cup matches. <button onClick={() => void reloadCup()} className="font-bold text-amber-700 underline dark:text-amber-300">Retry</button></> : "Loading World Cup matches…"}</div>}</section>}
-
-    <section id="trending" className="scroll-mt-32"><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets && !cupOpen ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
+    <section id="trending" className="scroll-mt-32"><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map((market) => <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 
     {(stockMarketQuery.data?.markets.some((market) => market.state === 0) ?? false) && <section><SectionHeading icon={Target} title="Stock price targets" subtitle="Pick Yes or No on a stock price by a deadline" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{stockMarketQuery.data!.markets.filter((market) => market.state === 0).slice(0, 3).map((market) => <StockMarketCard key={`stock-${market.id}`} market={stockCardDataFromSummary(market)} feesBps={null} quoteAsOf={stockMarketQuery.dataUpdatedAt} />)}</div></section>}
 
-    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => market ? <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} /> : <CupOutrightMarketCard key="cup-outright" />)}</div></section>}
+    {closing.length > 0 && <section><SectionHeading icon={Clock3} title="Closing soon" subtitle="A final chance to take a position" href="/markets" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{closing.map(({ market }) => <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div></section>}
   </div>;
 }

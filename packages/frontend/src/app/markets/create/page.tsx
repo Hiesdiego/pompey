@@ -48,7 +48,7 @@ import { cn } from "../../../lib/cn";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
-import { LEAGUE_TARGET_COINS, TARGET_COINS } from "../../../lib/targetCoins";
+import { LEAGUE_TARGET_COINS } from "../../../lib/targetCoins";
 import { formatPriceTargetTimeUtc, priceTargetQuestion } from "../../../lib/priceTargetQuestion";
 import { stockMarketApi, STOCK_MARKET_FACTORY_ABI, STOCK_MARKET_FACTORY_ADDRESS, STOCK_CREATION_SEED_TICK, MAX_TARGET_TIME, directionFromAbove, parseNavPrice, scaleTargetPrice, stockDisplaySymbol, stockPriceTargetQuestion, type StockListItem } from "../../../lib/stockMarketContracts";
 import { STOCK_TEAMS } from "../../../lib/stockTeams";
@@ -132,8 +132,7 @@ export default function CreateMarketPage() {
   const publicClient = getPublicClient();
   const { teams } = useTeams();
   const { prices, status: priceFeedStatus } = usePriceFeed(true);
-  const [cupTargetsEnabled, setCupTargetsEnabled] = useState(false);
-  const targetCoins = cupTargetsEnabled ? TARGET_COINS : LEAGUE_TARGET_COINS;
+  const targetCoins = LEAGUE_TARGET_COINS;
   const { write: writeApprove, status: approveStatus } = useContractWrite();
   const { write: writeCreate, status: createStatus } = useContractWrite();
   const { ready: walletReady } = useContractWrite();
@@ -181,17 +180,6 @@ export default function CreateMarketPage() {
   const [createdTerms, setCreatedTerms] = useState<Set<string>>(new Set());
   const [termsLoading, setTermsLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!NEW_MARKET_FACTORY_ADDRESS) return;
-    let active = true;
-    publicClient.readContract({
-      address: NEW_MARKET_FACTORY_ADDRESS,
-      abi: [{ type: "function", name: "CUP_TARGET_COUNT", stateMutability: "pure", inputs: [], outputs: [{ type: "uint16" }] }] as const,
-      functionName: "CUP_TARGET_COUNT",
-    }).then((count) => { if (active) setCupTargetsEnabled(Number(count) >= 64); }).catch(() => { if (active) setCupTargetsEnabled(false); });
-    return () => { active = false; };
-  }, [publicClient]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);

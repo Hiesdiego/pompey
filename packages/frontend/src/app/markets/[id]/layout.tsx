@@ -7,6 +7,7 @@ import { backendUrl, siteUrl } from "../../api/social/og/_shared";
 import { targetCoinById } from "../../../lib/targetCoins";
 import { marketFromRoute } from "../../../lib/marketFactory";
 import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
+import { isStockMarketRoute, stockDisplaySymbol, stockPriceTargetQuestion } from "../../../lib/stockMarketContracts";
 
 export const revalidate = 60;
 
@@ -68,6 +69,32 @@ async function marketQuestion(marketId: bigint, factory: `0x${string}`): Promise
   }
 }
 
+interface StockMarketMetadata {
+  name?: string;
+  symbol: string;
+  targetPrice: string;
+  above: boolean;
+  endTime: number;
+}
+
+async function stockMarketMetadata(id: string): Promise<StockMarketMetadata | null> {
+  try {
+    const marketId = id.slice(2);
+    const response = await fetch(`${backendUrl()}/api/stocks/markets/${marketId}`, {
+      next: { revalidate: 60 },
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      data?: { market?: StockMarketMetadata };
+      market?: StockMarketMetadata;
+    };
+    return payload.data?.market ?? payload.market ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -76,11 +103,21 @@ export async function generateMetadata({
   const { id } = await params;
   const site = siteUrl();
   const route = marketFromRoute(id);
-  const question = route ? await marketQuestion(route.id, route.factory) : null;
-  const title = question ? `${question} — TICKR` : `Market ${id} — TICKR`;
+  const isStock = isStockMarketRoute(id);
+  const stock = isStock ? await stockMarketMetadata(id.slice(2)) : null;
+  const question = stock
+    ? stockPriceTargetQuestion(stockDisplaySymbol(stock.symbol), stock.targetPrice, stock.above, stock.endTime * 1000)
+    : route ? await marketQuestion(route.id, route.factory) : null;
+  const title = question
+    ? `${question} — TICKR`
+    : isStock ? `Stock Price Target Market — TICKR` : `Market ${id} — TICKR`;
   const description = question
-    ? `${question} Predict crypto prices on TICKR.`
-    : "Crypto Price Prediction League.";
+    ? stock
+      ? `${question} Predict stock price targets on TICKR. Markets settle against the stock's published NAV at the deadline.`
+      : `${question} Predict crypto prices on TICKR.`
+    : isStock
+      ? "Stock price target markets on TICKR. Predict whether a stock NAV will finish above or below its target."
+      : "Crypto Price Prediction League.";
 
   const safeId = encodeURIComponent(id);
   const ogImage = `${site}/api/social/og/market/${safeId}?v=2&title=${encodeURIComponent(question ?? "TICKR prediction market")}`;

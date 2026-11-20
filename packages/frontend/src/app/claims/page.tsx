@@ -24,7 +24,7 @@ import { TeamBadge } from "../../components/TeamBadge";
 import { MARKET_FACTORY_ABI, MARKET_FACTORY_ADDRESS, TEMPLATE_NAMES } from "../../lib/marketFactory";
 import { scanMarketClaims, type ClaimableMarket } from "../../lib/marketClaims";
 import { scanCupClaims, type ClaimableCupMatch } from "../../lib/cupClaims";
-import { CUP_POOL_ABI, cupTeamName } from "../../lib/cup";
+import { CUP_POOL_ABI } from "../../lib/cup";
 
 interface ClaimableMatch {
   kind: "match";
@@ -180,7 +180,7 @@ export default function ClaimsPage() {
             abi: CUP_POOL_ABI,
             functionName: "claimMatch",
             args: [c.matchId],
-            label: `Claim cup match ${c.matchId + 1}`,
+            label: `Claim archived match ${c.matchId + 1}`,
           });
         } else {
           if (!CONTRACTS.predictionPool) throw new Error("PredictionPool address not configured.");
@@ -372,23 +372,22 @@ export default function ClaimsPage() {
                 </span>
               </Link>
             ) : c.kind === "cup" ? (
-              <Link
+              <div
                 key={`cup-${c.poolAddress}-${c.matchId}`}
-                href={`/cup/match/${c.matchId}`}
-                className="glass card-interactive flex items-center gap-4 rounded-2xl p-4"
+                className="glass flex items-center gap-4 rounded-2xl p-4"
               >
                 <div className="flex flex-1 flex-col gap-1">
                   <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                    {cupTeamName(c.teamA)} vs {cupTeamName(c.teamB)}
+                    Archived match {c.matchId + 1}
                   </span>
                   <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Cup match {c.matchId + 1} · Winnings · {formatTick(c.amount)} TICK
+                    Legacy winnings · {formatTick(c.amount)} TICK
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-[#1D9E75]/12 px-3 py-1 text-xs font-bold text-[#0f7a55] dark:text-[#7fe0bd]">
                   Claim winnings
                 </span>
-              </Link>
+              </div>
             ) : (
               <Link
                 key={`match-${c.fixture.seasonId}-${c.fixture.fixtureId}`}

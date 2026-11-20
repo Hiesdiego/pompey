@@ -58,7 +58,10 @@ export async function GET(
 ) {
   try {
     const fallbackTitle = new URL(req.url).searchParams.get("title") || "TICKR match";
-    const response = await renderMatchCard(await params, fallbackTitle);
+    const league = new URL(req.url).searchParams.get("league");
+    const response = league === "stocks"
+      ? await renderStockMatchCard(await params, fallbackTitle)
+      : await renderMatchCard(await params, fallbackTitle);
     if (!(response instanceof ImageResponse)) return response;
     return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
   } catch (error) {
@@ -66,6 +69,75 @@ export async function GET(
     const fallback = await fallbackMatchCard(new URL(req.url).searchParams.get("title") || "TICKR match");
     return new Response(await fallback.arrayBuffer(), { status: fallback.status, headers: fallback.headers });
   }
+}
+
+interface StockFixtureDto {
+  fixtureId: string;
+  home: { name: string; symbol: string } | null;
+  away: { name: string; symbol: string } | null;
+  matchdayIndex: number;
+  kickoff: string | null;
+  settled: boolean;
+  voided?: boolean;
+  homeGoals?: number | null;
+  awayGoals?: number | null;
+}
+
+interface StockPoolDto {
+  totalHome: string;
+  totalDraw: string;
+  totalAway: string;
+  seed: string;
+}
+
+async function renderStockMatchCard({ id }: { id: string }, fallbackTitle: string) {
+  if (!isNumericId(id)) return new Response("Match not found", { status: 404 });
+  const base = backendUrl();
+  const [fixture, pool] = await Promise.all([
+    fetchJson<StockFixtureDto>(`${base}/api/stocks/fixtures/${id}`),
+    fetchJson<StockPoolDto>(`${base}/api/stocks/fixtures/${id}/pool`),
+  ]);
+  if (!fixture?.home || !fixture?.away) return await fallbackMatchCard(fallbackTitle);
+
+  const settled = fixture.settled;
+  const score = fixture.homeGoals != null && fixture.awayGoals != null
+    ? [fixture.homeGoals, fixture.awayGoals] as const
+    : null;
+  const winner = score ? score[0] > score[1] ? 0 : score[1] > score[0] ? 2 : 1 : null;
+  const totalPool = BigInt(pool?.totalHome ?? "0") + BigInt(pool?.totalDraw ?? "0") + BigInt(pool?.totalAway ?? "0") + BigInt(pool?.seed ?? "0");
+  const kickoffLabel = fixture.kickoff ? new Date(fixture.kickoff).toUTCString().slice(0, 22) : "TBA";
+  const c = OG_COLORS;
+
+  return new ImageResponse(
+    (
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Brand league="stocks" />
+          <div style={{ fontSize: 24, fontWeight: 700, color: settled ? c.greenLight : c.amber, background: settled ? "rgba(29,158,117,.15)" : "rgba(245,158,11,.15)", padding: "10px 24px", borderRadius: 999 }}>
+            {settled ? "FULL TIME" : `MATCHDAY ${fixture.matchdayIndex + 1}`}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 48 }}>
+          <TeamBlock name={fixture.home.name} symbol={fixture.home.symbol} logo={null} highlight={winner === 0} dim={winner !== null && winner !== 0} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            {score ? <div style={{ fontSize: 96, fontWeight: 900, letterSpacing: 4 }}>{score[0]}–{score[1]}</div> : <div style={{ fontSize: 64, fontWeight: 800, color: c.zinc400 }}>{settled ? "FT" : "VS"}</div>}
+            {settled && <div style={{ fontSize: 21, color: c.greenLight }}>{winner === 0 ? `${fixture.home.symbol} wins` : winner === 2 ? `${fixture.away.symbol} wins` : winner === 1 ? "Draw" : fixture.voided ? "Voided · stakes refunded" : "Result pending"}</div>}
+            {!settled && <div style={{ fontSize: 22, color: c.zinc400 }}>{kickoffLabel}</div>}
+          </div>
+          <TeamBlock name={fixture.away.name} symbol={fixture.away.symbol} logo={null} highlight={winner === 2} dim={winner !== null && winner !== 2} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 26, color: c.zinc400 }}>{settled ? <>Full-time score: <span style={{ color: c.greenLight, fontWeight: 800 }}>{score ? `${score[0]}–${score[1]}` : fixture.voided ? "VOID" : "FT"}</span></> : <>Pool: <span style={{ color: c.white, fontWeight: 800 }}>{formatTickShort(totalPool)} TICK</span></>}</div>
+          <div style={{ fontSize: 22, color: c.zinc500 }}>{ogBaseUrl().replace(/^https?:\/\//, "")}/stocks/match/{id}</div>
+        </div>
+      </Card>
+    ),
+    {
+      width: OG_WIDTH,
+      height: OG_HEIGHT,
+      headers: { "Cache-Control": settled ? OG_FINAL_CACHE : OG_LIVE_CACHE },
+    }
+  );
 }
 
 
