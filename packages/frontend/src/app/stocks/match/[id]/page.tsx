@@ -1,110 +1,101 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import { useParams } from "next/navigation";
+import { ArrowLeft, Loader2 } from "lucide-react";
+import {
+  STOCK_CONTRACTS,
+  STOCK_PRICE_ORACLE_ABI,
+  STOCK_MATCH_REGISTRY_ABI,
+  STOCK_SEASON_ID,
+  stockApi,
+  type StockApiFixture,
+  type StockApiPool,
+} from "../../../../lib/stockContracts";
+import { formatTick, isoToMs } from "../../../../lib/format";
+import {
+  formatSignedPctStock,
+  forfeitScoreline,
+  isVolatileStock,
+  stockRoundWave,
+  stockScoreline,
+} from "../../../../lib/stockFormat";
+import { stockBettingCloseMs, stockMatchEndMs } from "../../../../lib/stockMatchConfig";
+import { useTickr } from "../../../../hooks/useTickr";
+import { useTickBalance } from "../../../../hooks/useTickBalance";
+import { useStockLiveFeed } from "../../../../hooks/useStockLiveFeed";
+import { getPublicClient } from "../../../../hooks/usePublicClient";
+import { stockFixtureStatus, type StockFixtureStatus } from "../../../../components/StockFixtureCard";
+import { StockTeamBadge } from "../../../../components/StockLeagueTable";
+import { StockLiveMatchPanel } from "../../../../components/StockLiveMatchPanel";
+import { StockPostMatchPanel, type StockFullSnapshot } from "../../../../components/StockPostMatchPanel";
+import { StockOracleAuditCard } from "../../../../components/StockOracleAuditCard";
+import { StockPreMatchBriefing } from "../../../../components/StockPreMatchBriefing";
+import { StockScoringExplainer } from "../../../../components/StockScoringExplainer";
+import { Countdown } from "../../../../components/Countdown";
+import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../../../components/States";
+import { ShareButtons } from "../../../../components/ShareButtons";
+
 /**
  * Stock match page.
  *
  * Target location in the repo:
  *   packages/frontend/src/app/stocks/match/[id]/page.tsx
  *
- * Mirrors the crypto match page (spec P3.6 to P3.8): pre-match staking,
- * live % bars, post-match result plus claim. State derives from the
- * fixture (backend) merged with live updates, plus the
- * StockPriceOracle kickoff snapshot on-chain.
+ * This page mirrors the crypto match detail page
+ * (packages/frontend/src/app/match/[id]/page.tsx) section for
+ * section, in the same order, with the same layout classes: back
+ * link, SectionTitle plus ShareButtons, score and status header
+ * card, PreMatchBriefing, stake button opening a modal, live panel,
+ * post-match panel, oracle audit card, PoolOddsChart, awaiting
+ * card, in-play banner plus odds, stake modal. The only sanctioned
+ * addition is the StockScoringExplainer, rendered once after the
+ * odds blocks, because stock scoring (1 goal = 0.05%) differs from
+ * crypto and users must be able to read how it works on this page.
  *
- * Stock differences, all locked:
+ * Stock differences, all locked, all contained in the stock
+ * components and helpers this page imports:
  *   - Contracts: STOCK_CONTRACTS, STOCK_PREDICTION_POOL_ABI,
- *     STOCK_PRICE_ORACLE_ABI, STOCK_MATCH_REGISTRY_ABI, STOCK_SEASON_ID.
- *   - Scoring: 1 goal = 0.05% (5 bps), integer basis point math, 0.03%
- *     is the first scoring move, max 10 goals, no-negative scorelines,
- *     via stockFormat.ts. The live board and the final board both use
- *     stockScoreline, never the crypto 0.5% helper.
- *   - Window: 1 hour from stockMatchConfig.ts (60 min fallback, never
- *     the stale 45-minute shared constant). Betting closes 5 minutes
- *     before full time, same as crypto.
- *   - Feed: Chainlink NAV via the stock oracle. Price rule, user
- *     approved Nov 18 2026: the last NAV within the 24h heartbeat
- *     counts as the end price when the feed is healthy but quiet. That
- *     rule does NOT fix a team with no NAV at all, which is why Season
- *     1 has 12 teams. The audit card says so plainly.
- *   - Forfeit: a settled forfeit shows 3-0 with a FORFEIT pill and the
- *     forfeiting side named. A void shows VOID and notes stakes are
- *     refunded. Both are settled states, claims follow the pool result.
- *   - Stake and claim panels are inline here as StockStakePanel and
- *     StockPostMatchPanel. The crypto StakePanel and PostMatchPanel are
- *     bound to the crypto pool and season, so they cannot be reused
- *     without edits. When the team extracts a shared panel, these two
- *     inline panels are the stock spec to copy from.
- *   - OracleAuditCard does not exist in the repo at origin/main bad5ca6,
- *     so the audit box is inline here as StockAuditCard. It shows the
- *     kickoff and full time NAV values, the feed name, and the stale
- *     state. Do not claim an audit card exists elsewhere.
- *   - On-chain fixture read: STOCK_MATCH_REGISTRY_ABI lists the full
- *     10-field getFixture tuple, including voided and matchEndTimestamp.
- *     The 22-team frontend ABI omitted both, so the old code read the
- *     settled word as a timestamp. This page reads kickoffTimestamp and
+ *     STOCK_PRICE_ORACLE_ABI, STOCK_MATCH_REGISTRY_ABI,
+ *     STOCK_SEASON_ID. The crypto StakePanel, PostMatchPanel and
+ *     OracleAuditCard are bound to the crypto pool and season, so
+ *     this page uses their stock mirrors (StockStakePanel,
+ *     StockPostMatchPanel, StockOracleAuditCard, plus
+ *     StockPreMatchBriefing and StockLiveMatchPanel). The crypto
+ *     files are untouched.
+ *   - Scoring: 1 goal = 0.05% (5 bps), integer basis point math,
+ *     0.03% is the first scoring move, max 10 goals, no-negative
+ *     scorelines, via stockFormat.ts. The live board and the final
+ *     board both use stockScoreline, never the crypto 0.5% helper.
+ *   - Window: 1 hour from stockMatchConfig.ts. Betting closes 5
+ *     minutes before full time, same as crypto.
+ *   - Feed: Chainlink NAV via the stock oracle, prices namespaced
+ *     by stock teamId through useStockLiveFeed. Stock teamIds 0 to
+ *     11 overlap crypto teamIds, so stock prices are never read
+ *     from the crypto price map. NAV only publishes on a 0.5% move
+ *     or a 24h heartbeat, so the crypto 60-second freshness rule
+ *     cannot apply here: a live price that exists is the latest
+ *     validated NAV, and pricesFresh means both teams have one.
+ *   - Forfeit: a settled forfeit shows 3-0 with a FORFEIT pill.
+ *     A void shows VOID and stakes are refunded through the stock
+ *     pool claim(), which handles void refunds. The stock pool has
+ *     no claimVoid function, so nothing here calls it.
+ *   - On-chain fixture read: STOCK_MATCH_REGISTRY_ABI lists the
+ *     full 10-field getFixture tuple, including voided and
+ *     matchEndTimestamp. This page reads kickoffTimestamp and
  *     matchEndTimestamp by name only, never by tuple index.
- *
- * League switcher: All / Crypto / Stocks pills at the top link to the
- * matching fixtures views, same control as standings and fixtures.
- *
- * Prices: useStockLiveFeed supplies live stock prices, namespaced by
- * stock teamId. Stock teamIds 0 to 11 overlap crypto teamIds, so stock
- * prices are never read from the crypto price map. No second
- * /api/prices poll is added here.
- *
- * Rounds: 22 rounds, Nov 26 to Dec 16 2026. Rounds 21 and 22 share
- * Dec 16, the double-header finale, morning and evening waves.
  *
  * All timestamps are UTC.
  */
 
-"use client";
+type OddsPoint = { pcts: [number, number, number]; raw: [string, string, string] };
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Loader2, Trophy, Wallet } from "lucide-react";
-import type { Address } from "viem";
-import { PLATFORM_FEE_BPS } from "@tickr/shared/constants";
-import {
-  STOCK_CONTRACTS,
-  STOCK_PREDICTION_POOL_ABI,
-  STOCK_PRICE_ORACLE_ABI,
-  STOCK_MATCH_REGISTRY_ABI,
-  STOCK_SEASON_ID,
-  stockGlobalFixtureId,
-  stockApi,
-  type StockApiFixture,
-  type StockApiPool,
-} from "../../../../lib/stockContracts";
-import { TICK_TOKEN_ABI, MIN_STAKE_TICK } from "../../../../lib/contracts";
-import { STOCK_MATCH_MS, stockBettingCloseMs, stockMatchEndMs } from "../../../../lib/stockMatchConfig";
-import {
-  formatSignedPctStock,
-  formatUtcDateTime,
-  forfeitScoreline,
-  stockRoundWave,
-  stockScoreline,
-} from "../../../../lib/stockFormat";
-import { formatTick, isoToMs, parseTickInput, OUTCOME_LABELS, OUTCOME_SHORT } from "../../../../lib/format";
-import { useTickr } from "../../../../hooks/useTickr";
-import { useTickBalance } from "../../../../hooks/useTickBalance";
-import { useStockLiveFeed } from "../../../../hooks/useStockLiveFeed";
-import { getPublicClient } from "../../../../hooks/usePublicClient";
-import { useContractWrite } from "../../../../hooks/useContractWrite";
-import { stockFixtureStatus, type StockFixtureStatus } from "../../../../components/StockFixtureCard";
-import { StockTeamBadge } from "../../../../components/StockLeagueTable";
-import { StockScoringExplainer } from "../../../../components/StockScoringExplainer";
-import { PoolBars } from "../../../../components/PoolBars";
-import { Countdown } from "../../../../components/Countdown";
-import { SectionTitle, LoadingState, ErrorState, EmptyState } from "../../../../components/States";
-import { cn } from "../../../../lib/cn";
-
-export interface StockFullSnapshot {
-  homeStart: bigint;
-  awayStart: bigint;
-  homeEnd: bigint;
-  awayEnd: bigint;
-  endSubmitted: boolean;
-}
+const StockStakeModal = dynamic(
+  () => import("../../../../components/StockStakePanel").then((module) => module.StockStakeModal),
+  { ssr: false, loading: () => null }
+);
 
 function pctOf(start: bigint, end: bigint): number | null {
   if (start <= 0n || end <= 0n) return null;
@@ -114,307 +105,25 @@ function pctOf(start: bigint, end: bigint): number | null {
   return ((e - s) / s) * 100;
 }
 
-/* ── Stock stake panel (inline, stock pool only) ─────────────────────── */
-
-function StockStakePanel({
-  fixture,
-  pool,
-  playerAddress,
-  balance,
-  authenticated,
-  onLogin,
-  onStaked,
-}: {
-  fixture: StockApiFixture;
-  pool: StockApiPool | null;
-  playerAddress: Address | null;
-  balance: bigint | null;
-  authenticated: boolean;
-  onLogin: () => void;
-  onStaked: () => void;
-}) {
-  const [outcome, setOutcome] = useState<number>(0);
-  const [amountStr, setAmountStr] = useState("10");
-  const [step, setStep] = useState<"idle" | "approving" | "staking" | "done">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [allowance, setAllowance] = useState<bigint | null>(null);
-  const { write } = useContractWrite();
-  const fixtureId = BigInt(fixture.fixtureId);
-  const amount = useMemo(() => parseTickInput(amountStr), [amountStr]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!playerAddress || !STOCK_CONTRACTS.tickToken || !STOCK_CONTRACTS.predictionPool) {
-      setAllowance(null);
-      return;
-    }
-    getPublicClient()
-      .readContract({
-        address: STOCK_CONTRACTS.tickToken,
-        abi: TICK_TOKEN_ABI,
-        functionName: "allowance",
-        args: [playerAddress, STOCK_CONTRACTS.predictionPool],
-      })
-      .then((v) => {
-        if (alive) setAllowance(v as bigint);
-      })
-      .catch(() => {
-        if (alive) setAllowance(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [playerAddress, step]);
-
-  const totals = pool
-    ? [BigInt(pool.totalHome), BigInt(pool.totalDraw), BigInt(pool.totalAway)]
-    : [0n, 0n, 0n];
-  const seed = pool ? BigInt(pool.seed ?? "0") : 0n;
-  const totalPool = (pool ? BigInt(pool.totalPool) : 0n) + seed;
-  const estimatedPayout = useMemo(() => {
-    if (!amount || totalPool < 0n) return null;
-    const w = totals[outcome];
-    const distributable = ((totalPool + amount) * BigInt(10_000 - PLATFORM_FEE_BPS)) / 10_000n;
-    return (amount * distributable) / (w + amount);
-  }, [amount, outcome, totals, totalPool]);
-
-  const needsApproval = amount !== null && (allowance === null || allowance < amount);
-  const balanceOk = amount !== null && balance !== null && balance >= amount;
-  const busy = step === "approving" || step === "staking";
-
-  const handleStake = async () => {
-    setError(null);
-    if (!playerAddress) {
-      setError("Connect your wallet first.");
-      return;
-    }
-    if (!STOCK_CONTRACTS.tickToken || !STOCK_CONTRACTS.predictionPool) {
-      setError("Stock contract addresses not configured, fill in .env.local.");
-      return;
-    }
-    if (!amount) {
-      setError("Enter a valid stake amount.");
-      return;
-    }
-    if (amount < BigInt(MIN_STAKE_TICK) * 10n ** 18n) {
-      setError(`Minimum stake is ${MIN_STAKE_TICK} TICK.`);
-      return;
-    }
-    if (!balanceOk) {
-      setError("Insufficient TICK balance, use the faucet in the header.");
-      return;
-    }
-    try {
-      if (needsApproval) {
-        setStep("approving");
-        await write({
-          to: STOCK_CONTRACTS.tickToken,
-          abi: TICK_TOKEN_ABI,
-          functionName: "approve",
-          args: [STOCK_CONTRACTS.predictionPool, amount],
-          label: "TICK approval",
-        });
-      }
-      setStep("staking");
-      await write({
-        to: STOCK_CONTRACTS.predictionPool,
-        abi: STOCK_PREDICTION_POOL_ABI,
-        functionName: "stake",
-        args: [STOCK_SEASON_ID, fixtureId, outcome, amount],
-        label: "Stake",
-      });
-      setStep("done");
-      onStaked();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setStep("idle");
-    }
+function PoolOddsChart({ pool, history }: { pool: StockApiPool | null; history: OddsPoint[] }) {
+  const raw = pool ? [pool.totalHome, pool.totalDraw, pool.totalAway] as [string, string, string] : ["0", "0", "0"];
+  const sum = raw.reduce((total, value) => total + BigInt(value), 0n);
+  const current = raw.map((value) => sum > 0n ? Number(BigInt(value) * 10_000n / sum) / 100 : 0) as [number, number, number];
+  const points = history.length ? history : [{ pcts: current, raw }];
+  const colors = ["#20b887", "#eab308", "#ef5350"];
+  const labels = ["Home", "Draw", "Away"];
+  const line = (index: number) => {
+    const samples = points.length === 1 ? [points[0], points[0]] : points;
+    return samples.map((point, i) => `${i ? "L" : "M"}${(i / Math.max(1, samples.length - 1)) * 600},${150 - point.pcts[index] * 1.3}`).join(" ");
   };
-
-  if (!authenticated) {
-    return (
-      <div className="glass flex flex-col items-center gap-3 rounded-2xl p-8 text-center">
-        <Wallet className="h-8 w-8 text-zinc-400 dark:text-zinc-600" />
-        <p className="font-display font-semibold text-zinc-800 dark:text-zinc-200">
-          Sign in to stake on this stock match
-        </p>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Privy login is gasless, your smart wallet covers transaction fees.
-        </p>
-        <button
-          onClick={onLogin}
-          className="rounded-xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-6 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_28px_rgba(46,124,246,.55)] active:scale-[.97]"
-        >
-          Sign in
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="glass rounded-2xl p-5">
-      <h3 className="mb-4 font-display text-base font-bold text-zinc-900 dark:text-white">
-        Place your stake
-      </h3>
-      {fixture.home && fixture.away && (
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {[
-            { label: OUTCOME_SHORT[0], sub: fixture.home.name, o: 0 },
-            { label: OUTCOME_SHORT[1], sub: OUTCOME_LABELS[1], o: 1 },
-            { label: OUTCOME_SHORT[2], sub: fixture.away.name, o: 2 },
-          ].map((opt) => (
-            <button
-              key={opt.o}
-              onClick={() => setOutcome(opt.o)}
-              disabled={busy}
-              className={cn(
-                "rounded-xl border-2 px-2 py-3 text-center transition-all active:scale-[.97]",
-                outcome === opt.o
-                  ? "border-[#2E7CF6] bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
-                  : "border-black/10 bg-black/[.02] text-zinc-500 hover:border-[#2E7CF6]/40 dark:border-white/10 dark:bg-white/[.03] dark:text-zinc-400"
-              )}
-            >
-              <div className="font-display text-xl font-bold">{opt.label}</div>
-              <div className="truncate text-[11px] opacity-80">{opt.sub}</div>
-            </button>
-          ))}
-        </div>
-      )}
-      {pool && (
-        <div className="mb-4">
-          <PoolBars pool={pool} compact />
-          <p className="mt-2 font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
-            Pool total: {formatTick(totalPool)} TICK, includes {formatTick(seed)} TICK seeded liquidity, {PLATFORM_FEE_BPS / 100}% platform fee
-          </p>
-        </div>
-      )}
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-        Amount (TICK), min {MIN_STAKE_TICK}
-      </label>
-      <div className="flex gap-2">
-        <input
-          value={amountStr}
-          onChange={(e) => setAmountStr(e.target.value)}
-          inputMode="decimal"
-          disabled={busy}
-          className="w-full rounded-xl border border-black/10 bg-black/[.03] px-3 py-2.5 font-display tabular-nums text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-[#2E7CF6] focus:ring-2 focus:ring-[#2E7CF6]/40 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-zinc-600"
-          placeholder="10"
-        />
-        {["10", "50", "100"].map((q) => (
-          <button
-            key={q}
-            onClick={() => setAmountStr(q)}
-            disabled={busy}
-            className="rounded-xl border border-black/10 px-3 text-sm font-semibold text-zinc-600 transition-all hover:border-[#2E7CF6]/60 hover:text-[#1D4ED8] active:scale-95 dark:border-white/10 dark:text-zinc-300"
-          >
-            {q}
-          </button>
-        ))}
-        <button
-          onClick={() => setAmountStr(balance !== null ? String(balance / 10n ** 18n) : "0")}
-          disabled={busy}
-          className="rounded-xl border border-black/10 px-3 text-sm font-semibold text-zinc-600 transition-all hover:border-[#2E7CF6]/60 hover:text-[#1D4ED8] active:scale-95 dark:border-white/10 dark:text-zinc-300"
-        >
-          MAX
-        </button>
-      </div>
-      <p className="mt-1 font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
-        Balance: {balance === null ? "–" : `${formatTick(balance)} TICK`}
-      </p>
-      {estimatedPayout !== null && amount !== null && (
-        <div className="mt-3 rounded-xl border border-[#2E7CF6]/20 bg-[#2E7CF6]/6 p-3 text-sm dark:bg-[#2E7CF6]/8">
-          <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
-            <span>Est. payout if {OUTCOME_LABELS[outcome].toLowerCase()} wins</span>
-            <span className="font-display font-bold tabular-nums text-[#1D4ED8] dark:text-[#7fe0bd]">
-              {formatTick(estimatedPayout)} TICK
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-600">
-            Estimate only, final odds move as others stake. Winners split the pool minus fee.
-          </p>
-        </div>
-      )}
-      {step === "done" && (
-        <p className="mt-3 rounded-xl bg-[#1D9E75]/12 p-3 text-sm font-medium text-[#0f7a55] dark:bg-[#1D9E75]/15 dark:text-[#7fe0bd]">
-          Stake placed, good luck! Pool totals update live below.
-        </p>
-      )}
-      {error && (
-        <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </p>
-      )}
-      <button
-        onClick={handleStake}
-        disabled={busy || amount === null || !balanceOk}
-        className={cn(
-          "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
-          busy || amount === null || !balanceOk
-            ? "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
-            : "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_36px_rgba(46,124,246,.6)]"
-        )}
-      >
-        {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-        {step === "approving" ? "Approving TICK…" : step === "staking" ? "Staking…" : `Stake ${amount ? formatTick(amount, 0) : ""} TICK`}
-      </button>
-      <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
-        Gasless, sent from your smart wallet, sponsored by TICKR.
-      </p>
-    </div>
-  );
+  const totalPool = pool ? BigInt(pool.totalPool) + BigInt(pool.seed ?? "0") : 0n;
+  return <div className="glass rounded-3xl p-5 sm:p-6">
+    <div className="mb-4 flex items-start justify-between"><div><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-[#2E7CF6]">Live market</p><h3 className="mt-1 font-display text-lg font-extrabold">Match odds</h3></div><div className="text-right"><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Total pool</p><p className="font-display text-sm font-bold tabular-nums">{formatTick(totalPool)} TICK</p></div></div>
+    <div className="rounded-2xl border border-black/[.06] bg-black/[.02] px-2 py-3 dark:border-white/[.07] dark:bg-white/[.02]"><svg viewBox="0 0 600 160" preserveAspectRatio="none" className="h-40 w-full" aria-label="Home, draw and away odds movement"><defs>{colors.map((color, i) => <linearGradient key={i} id={`stockOddsGlow${i}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={color} stopOpacity=".2" /><stop offset="1" stopColor={color} stopOpacity="0" /></linearGradient>)}</defs>{[20, 60, 100, 140].map((y) => <line key={y} x1="0" x2="600" y1={y} y2={y} stroke="currentColor" className="text-zinc-300/50 dark:text-zinc-700/60" strokeDasharray="3 8" />)}{[0, 1, 2].map((i) => <g key={i}><path d={`${line(i)} L600 160 L0 160 Z`} fill={`url(#stockOddsGlow${i})`} /><path d={line(i)} fill="none" stroke={colors[i]} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></g>)}</svg></div>
+    <div className="mt-4 grid grid-cols-3 gap-2">{labels.map((label, i) => <div key={label} className="rounded-xl border border-black/[.06] bg-white/60 p-3 dark:border-white/[.07] dark:bg-white/[.025]"><div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500"><i className="h-2 w-2 rounded-full" style={{ backgroundColor: colors[i] }} />{label}</div><p className="mt-1 font-display text-lg font-extrabold tabular-nums">{current[i].toFixed(0)}%</p></div>)}</div>
+    <p className="mt-3 text-[10px] text-zinc-400">Live odds based on the current share of stakes.</p>
+  </div>;
 }
-
-/* ── Stock audit card (inline, OracleAuditCard does not exist in repo) ── */
-
-function StockAuditCard({
-  fixture,
-  snapshot,
-}: {
-  fixture: StockApiFixture;
-  snapshot: StockFullSnapshot | null;
-}) {
-  const fmtNav = (v: bigint) => `$${(Number(v) / 10 ** 8).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return (
-    <div className="glass rounded-2xl p-5">
-      <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-        Price audit, Chainlink NAV
-      </h3>
-      {!snapshot ? (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Kickoff snapshot not yet on-chain. Bars appear once the backend submits start NAV values. When the feed is healthy but quiet, the last NAV within the 24h heartbeat counts as the end price. A team with no NAV at all cannot play, which is why Season 1 has 12 teams.
-        </p>
-      ) : (
-        <dl className="space-y-2 text-sm tabular-nums">
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">{fixture.home?.name} at kickoff</dt>
-            <dd className="font-semibold text-zinc-900 dark:text-white">{fmtNav(snapshot.homeStart)}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">{fixture.away?.name} at kickoff</dt>
-            <dd className="font-semibold text-zinc-900 dark:text-white">{fmtNav(snapshot.awayStart)}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">{fixture.home?.name} at full time</dt>
-            <dd className="font-semibold text-zinc-900 dark:text-white">
-              {snapshot.endSubmitted ? fmtNav(snapshot.homeEnd) : "pending"}
-            </dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">{fixture.away?.name} at full time</dt>
-            <dd className="font-semibold text-zinc-900 dark:text-white">
-              {snapshot.endSubmitted ? fmtNav(snapshot.awayEnd) : "pending"}
-            </dd>
-          </div>
-        </dl>
-      )}
-      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-        Feed: Chainlink NAV, 1 goal = 0.05%, 1-hour window, max 10 goals, 3% volatile cap. When the feed is healthy but quiet, the last NAV within the 24h heartbeat counts as the end price.
-      </p>
-    </div>
-  );
-}
-
-/* ── Page ─────────────────────────────────────────────────────────────── */
 
 export default function StockMatchPage() {
   const params = useParams();
@@ -425,17 +134,15 @@ export default function StockMatchPage() {
 
   const [fixture, setFixture] = useState<StockApiFixture | null>(null);
   const [pool, setPool] = useState<StockApiPool | null>(null);
+  const [poolHistory, setPoolHistory] = useState<OddsPoint[]>([]);
   const [snapshot, setSnapshot] = useState<StockFullSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [bettingCloseMs, setBettingCloseMs] = useState<number | null>(null);
   const [matchEndMs, setMatchEndMs] = useState<number | null>(null);
   const [bettingOpen, setBettingOpen] = useState(false);
-  const [stakes, setStakes] = useState<[bigint, bigint, bigint] | null>(null);
-  const [claimed, setClaimed] = useState<boolean | null>(null);
-  const [claimBusy, setClaimBusy] = useState(false);
-  const [claimError, setClaimError] = useState<string | null>(null);
-  const { write } = useContractWrite();
+  const [stakeOpen, setStakeOpen] = useState(false);
+  const [stakeOpening, setStakeOpening] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1_000);
@@ -494,11 +201,34 @@ export default function StockMatchPage() {
     }
   }, [id]);
 
+  const refreshBettingWindow = useCallback(async () => {
+    if (!STOCK_CONTRACTS.matchRegistry) return;
+    try {
+      const open = await getPublicClient().readContract({
+        address: STOCK_CONTRACTS.matchRegistry as `0x${string}`,
+        abi: STOCK_MATCH_REGISTRY_ABI,
+        functionName: "isBettingOpen",
+        args: [BigInt(id)],
+      });
+      setBettingOpen(Boolean(open));
+    } catch {
+
+    }
+  }, [id]);
+
   const loadPool = useCallback(async () => {
     try {
-      setPool(await stockApi.pool(id));
+      const p = await stockApi.pool(id);
+      setPool(p);
+      const raw = [p.totalHome, p.totalDraw, p.totalAway] as [string, string, string];
+      const total = raw.reduce((sum, value) => sum + BigInt(value), 0n);
+      const pcts = raw.map((value) => total > 0n ? Number(BigInt(value) * 10_000n / total) / 100 : 0) as [number, number, number];
+      setPoolHistory((previous) => {
+        if (previous.at(-1)?.raw.every((value, i) => value === raw[i])) return previous;
+        return [...previous.slice(-59), { pcts, raw }];
+      });
     } catch {
-      /* pool may 404 before first stake, non-fatal */
+
     }
   }, [id]);
 
@@ -525,7 +255,7 @@ export default function StockMatchPage() {
         });
       }
     } catch {
-      /* oracle read failed, panels degrade gracefully */
+
     }
   }, [id]);
 
@@ -546,6 +276,16 @@ export default function StockMatchPage() {
   }, [loadFixture, loadPool, loadSnapshot]);
 
   useEffect(() => {
+    if (!fixture || fixture.settled || fixture.voided) return;
+    const timer = setInterval(() => {
+      void loadFixture().catch((e: Error) => {
+        if (e.name !== "AbortError") setError(e.message);
+      });
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [fixture, loadFixture]);
+
+  useEffect(() => {
     if (fixtureUpdates[id]) {
       void loadFixture().catch((e: Error) => {
         if (e.name !== "AbortError") setError(e.message);
@@ -557,89 +297,34 @@ export default function StockMatchPage() {
   useEffect(() => {
     if (!fixture) return;
     const status = stockFixtureStatus(fixture, fixtureUpdates[id]);
-    if (status === "settled" || status === "forfeit" || status === "voided") return;
-    const t = setInterval(loadPool, 8_000);
-    return () => clearInterval(t);
+    if (status !== "live" && !fixture.settled) return;
+    void loadSnapshot();
+    if (fixture.settled) return;
+    const timer = window.setInterval(() => void loadSnapshot(), 10_000);
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixture, fixtureUpdates[id], loadPool]);
+  }, [fixture, fixtureUpdates[id], loadSnapshot]);
 
   useEffect(() => {
-    if (!fixture || !STOCK_CONTRACTS.predictionPool || !playerAddress) return;
-    if (stockFixtureStatus(fixture, fixtureUpdates[id]) !== "settled" &&
-        stockFixtureStatus(fixture, fixtureUpdates[id]) !== "forfeit") return;
-    const client = getPublicClient();
-    const fixtureId = BigInt(fixture.fixtureId);
-    const contracts = [0, 1, 2].map((o) => ({
-      address: STOCK_CONTRACTS.predictionPool as Address,
-      abi: STOCK_PREDICTION_POOL_ABI,
-      functionName: "getStake" as const,
-      args: [STOCK_SEASON_ID, fixtureId, playerAddress, o] as const,
-    }));
-    let alive = true;
-    Promise.all([
-      client.multicall({ contracts }),
-      client.readContract({
-        address: STOCK_CONTRACTS.predictionPool as Address,
-        abi: STOCK_PREDICTION_POOL_ABI,
-        functionName: "claimed",
-        args: [stockGlobalFixtureId(STOCK_SEASON_ID, fixtureId), playerAddress],
-      }),
-    ])
-      .then(([stakeRes, claimedRes]) => {
-        if (!alive) return;
-        setStakes([
-          (stakeRes[0].result ?? 0n) as bigint,
-          (stakeRes[1].result ?? 0n) as bigint,
-          (stakeRes[2].result ?? 0n) as bigint,
-        ]);
-        setClaimed(claimedRes as boolean);
-      })
-      .catch(() => {
-        if (alive) {
-          setStakes(null);
-          setClaimed(null);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, [fixture, fixtureUpdates[id], playerAddress]);
+    if (!fixture) return;
+    if (fixture.settled || fixture.voided) return;
+    const t = setInterval(loadPool, 8_000);
+    return () => clearInterval(t);
+  }, [fixture, loadPool]);
+
+  useEffect(() => {
+    if (!fixture || stockFixtureStatus(fixture, fixtureUpdates[id]) !== "live") return;
+    void refreshBettingWindow();
+    const t = setInterval(() => void refreshBettingWindow(), 1_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixture, id, refreshBettingWindow]);
 
   const handleStaked = useCallback(() => {
     loadPool();
     refreshBalance();
   }, [loadPool, refreshBalance]);
-
-  const handleClaim = async () => {
-    setClaimError(null);
-    if (!STOCK_CONTRACTS.predictionPool) {
-      setClaimError("Stock contract addresses not configured.");
-      return;
-    }
-    setClaimBusy(true);
-    try {
-      await write({
-        to: STOCK_CONTRACTS.predictionPool,
-        abi: STOCK_PREDICTION_POOL_ABI,
-        functionName: "claim",
-        args: [STOCK_SEASON_ID, BigInt(id)],
-        label: "Claim payout",
-      });
-      setClaimed(true);
-      handleStaked();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setClaimError(
-        msg.includes("NothingToClaim")
-          ? "Nothing to claim on this match."
-          : msg.includes("AlreadyClaimed")
-            ? "Already claimed."
-            : msg
-      );
-    } finally {
-      setClaimBusy(false);
-    }
-  };
+  const handleStakeModalReady = useCallback(() => setStakeOpening(false), []);
 
   if (error) {
     return (
@@ -662,7 +347,7 @@ export default function StockMatchPage() {
   const liveUpdate = fixtureUpdates[id];
   const rawKickoffMs = liveUpdate?.kickoffMs ?? isoToMs(fixture.kickoff);
   const kickoffMs = rawKickoffMs && rawKickoffMs > 0 ? rawKickoffMs : null;
-  const effectiveMatchEndMs = matchEndMs ?? (kickoffMs !== null ? kickoffMs + STOCK_MATCH_MS : null);
+  const effectiveMatchEndMs = matchEndMs ?? (kickoffMs !== null ? stockMatchEndMs(kickoffMs) : null);
   const baseStatus: StockFixtureStatus = stockFixtureStatus(fixture, liveUpdate);
   const status: StockFixtureStatus =
     baseStatus === "settled" || baseStatus === "forfeit" || baseStatus === "voided"
@@ -672,30 +357,37 @@ export default function StockMatchPage() {
           ? "live"
           : "awaiting"
         : baseStatus;
+  const windowEndMs = effectiveMatchEndMs;
   const effectiveBettingCloseMs = bettingCloseMs ?? stockBettingCloseMs(effectiveMatchEndMs);
-  const winning = pool?.winningOutcome ?? null;
-  const hasStake = stakes !== null && stakes.some((s) => s > 0n);
-  const won = winning !== null && stakes !== null && stakes[winning] > 0n;
   const wave = stockRoundWave(fixture.matchdayIndex);
 
-  // Live prices are namespaced stock prices (useStockLiveFeed, keyed by
-  // stock teamId). StockApiPrice.price is a string or null, Number()
-  // converts it. A null price means no live NAV yet, bars wait.
-  const homePctLive =
-    snapshot && prices[fixture.home.teamId]?.price
-      ? ((Number(prices[fixture.home.teamId].price) - Number(snapshot.homeStart) / 10 ** 8) /
-          (Number(snapshot.homeStart) / 10 ** 8)) * 100
+  // Live NAV in USD, keyed by stock teamId. StockApiPrice.price is a
+  // string or null, Number() converts it. A null price means no live
+  // NAV yet. NAV publishes on a 0.5% move or a 24h heartbeat, so the
+  // crypto 60-second freshness rule cannot apply: a price that exists
+  // is the latest validated NAV.
+  const homeLiveNav = prices[fixture.home.teamId]?.price ? Number(prices[fixture.home.teamId].price) : null;
+  const awayLiveNav = prices[fixture.away.teamId]?.price ? Number(prices[fixture.away.teamId].price) : null;
+  const pricesFresh = homeLiveNav !== null && awayLiveNav !== null;
+  const livePrices: Record<number, number | null> = {
+    [fixture.home.teamId]: homeLiveNav,
+    [fixture.away.teamId]: awayLiveNav,
+  };
+  const homeMove = status === "settled" || status === "forfeit"
+    ? snapshot?.endSubmitted ? pctOf(snapshot.homeStart, snapshot.homeEnd) : null
+    : status === "live" && pricesFresh && snapshot
+      ? pctOf(snapshot.homeStart, BigInt(Math.round(homeLiveNav! * 10 ** 8)))
       : null;
-  const awayPctLive =
-    snapshot && prices[fixture.away.teamId]?.price
-      ? ((Number(prices[fixture.away.teamId].price) - Number(snapshot.awayStart) / 10 ** 8) /
-          (Number(snapshot.awayStart) / 10 ** 8)) * 100
+  const awayMove = status === "settled" || status === "forfeit"
+    ? snapshot?.endSubmitted ? pctOf(snapshot.awayStart, snapshot.awayEnd) : null
+    : status === "live" && pricesFresh && snapshot
+      ? pctOf(snapshot.awayStart, BigInt(Math.round(awayLiveNav! * 10 ** 8)))
       : null;
-  const liveScore =
-    homePctLive !== null && awayPctLive !== null
-      ? stockScoreline(homePctLive, awayPctLive)
-      : null;
+  const volatile = (homeMove !== null && isVolatileStock(homeMove)) || (awayMove !== null && isVolatileStock(awayMove));
 
+  const liveScore = homeMove !== null && awayMove !== null
+    ? stockScoreline(homeMove, awayMove)
+    : null;
   const finalScore: [number, number] | null = (() => {
     if (fixture.voided) return null;
     if (fixture.forfeit) {
@@ -714,6 +406,14 @@ export default function StockMatchPage() {
     const s = stockScoreline(hp, ap);
     return [s.homeGoals, s.awayGoals];
   })();
+  const score = status === "live"
+    ? liveScore ? [liveScore.homeGoals, liveScore.awayGoals] as [number, number] : null
+    : status === "settled" || status === "forfeit"
+      ? finalScore
+      : null;
+  const auditScoreline = (status === "settled" || status === "forfeit") && finalScore
+    ? { homeGoals: finalScore[0], awayGoals: finalScore[1] }
+    : null;
 
   return (
     <div>
@@ -723,284 +423,91 @@ export default function StockMatchPage() {
       >
         <ArrowLeft className="h-4 w-4" /> Stock fixtures
       </Link>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {[
-          { label: "All", href: "/fixtures" },
-          { label: "Crypto", href: "/fixtures?league=crypto" },
-          { label: "Stocks", href: "/fixtures?league=stocks" },
-        ].map((p) => (
-          <Link
-            key={p.label}
-            href={p.href}
-            className={cn(
-              "rounded-xl px-4 py-1.5 text-sm font-semibold",
-              p.label === "Stocks"
-                ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white"
-                : "glass text-zinc-500 hover:text-[#1D4ED8] dark:text-zinc-400"
-            )}
-          >
-            {p.label}
-          </Link>
-        ))}
+
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SectionTitle title={`Stocks · Round ${fixture.matchdayIndex + 1}${wave ? `, ${wave} wave` : ""}`} />
+        {fixture.home && fixture.away && (
+          <ShareButtons path={`/stocks/match/${fixture.fixtureId}`} text={`${fixture.home.name} vs ${fixture.away.name} - predict the winner on TICKR`} compact />
+        )}
       </div>
 
-      <SectionTitle title={`Stocks, Round ${fixture.matchdayIndex + 1}`} />
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
-        Kickoff {formatUtcDateTime(fixture.kickoff)}, all times UTC. 1 goal = 0.05%, 1-hour window, Chainlink NAV.
-        {wave !== null && ` Dec 16 double-header finale, ${wave} wave.`}
-      </p>
-
-      <div className="glass relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8">
-        <div
-          className="pointer-events-none absolute left-1/2 top-0 h-40 w-[36rem] -translate-x-1/2 rounded-full bg-[#2E7CF6]/12 blur-3xl dark:bg-[#2E7CF6]/18"
-          aria-hidden
-        />
-        <div className="relative grid grid-cols-3 items-center gap-2 text-center">
-          <div className="flex flex-col items-center gap-2">
-            <StockTeamBadge teamId={fixture.home.teamId} size={56} showName={false} />
-            <p className="font-display font-bold text-zinc-900 dark:text-white">{fixture.home.name}</p>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
-              HOME, {fixture.home.symbol}
-            </p>
-          </div>
-          <div>
-            {status === "tba" || status === "upcoming" || status === "scheduled" ? (
-              <>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">Kickoff in</p>
-                <Countdown target={kickoffMs} className="text-gradient text-2xl font-bold md:text-3xl" />
-                {kickoffMs === null && <p className="text-sm text-zinc-500">TBA</p>}
-              </>
-            ) : status === "live" && liveScore ? (
-              <p className="font-display text-3xl font-bold tabular-nums text-zinc-900 dark:text-white">
-                {liveScore.homeGoals}
-                <span className="mx-1 text-zinc-300 dark:text-zinc-600">:</span>
-                {liveScore.awayGoals}
-              </p>
-            ) : status === "settled" || status === "forfeit" ? (
-              <p className="font-display text-3xl font-bold tabular-nums text-zinc-900 dark:text-white">
-                {finalScore ? `${finalScore[0]}:${finalScore[1]}` : "FT"}
-              </p>
-            ) : status === "voided" ? (
-              <p className="font-display text-2xl font-bold text-zinc-900 dark:text-white">VOID</p>
-            ) : (
-              <p className="font-display text-2xl font-bold text-zinc-900 dark:text-white">FT</p>
-            )}
-            {status === "live" && (
-              <p className="mt-1 text-xs font-bold uppercase tracking-widest text-red-500">Live</p>
-            )}
-            {status === "forfeit" && (
-              <p className="mt-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold text-amber-600 dark:text-amber-300">
-                FORFEIT
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <StockTeamBadge teamId={fixture.away.teamId} size={56} showName={false} />
-            <p className="font-display font-bold text-zinc-900 dark:text-white">{fixture.away.name}</p>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
-              AWAY, {fixture.away.symbol}
-            </p>
-          </div>
+      <div className="relative mb-6 overflow-hidden rounded-[2rem] border border-black/[.08] bg-white p-5 text-zinc-900 shadow-[0_28px_80px_rgba(8,17,29,.12)] dark:border-white/10 dark:bg-[#09111d] dark:text-white dark:shadow-[0_28px_80px_rgba(8,17,29,.28)] sm:p-8">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(46,124,246,.12),transparent_58%)] dark:bg-[radial-gradient(ellipse_at_50%_0%,rgba(46,124,246,.25),transparent_58%)]" />
+        <div className="relative mb-7 flex items-center justify-between">
+          <div><p className="text-[10px] font-extrabold uppercase tracking-[.24em] text-zinc-500 dark:text-white/45">Stock League · Season 1 · Round {fixture.matchdayIndex + 1}</p><div className="mt-2 flex items-center gap-2">{status === "live" ? <span className="inline-flex items-center gap-2 rounded-full bg-red-500/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-300"><i className="h-2 w-2 animate-pulse rounded-full bg-red-500 dark:bg-red-400" /> In play</span> : status === "settled" || status === "forfeit" ? <><span className="rounded-full bg-zinc-500/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-zinc-600 dark:bg-white/10 dark:text-white/75">Full time</span>{status === "forfeit" && <span className="rounded-full bg-amber-500/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-200">Forfeit</span>}</> : status === "voided" ? <span className="rounded-full bg-zinc-500/20 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-300">Voided</span> : status === "awaiting" ? <span className="rounded-full bg-amber-400/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-200">Finalizing</span> : <span className="rounded-full bg-[#2E7CF6]/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-700 dark:bg-[#2E7CF6]/20 dark:text-blue-200">Upcoming</span>}</div></div>
+          <div className="text-right">{status === "upcoming" || status === "tba" ? <><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 dark:text-white/45">Kickoff in</p>{kickoffMs !== null ? <Countdown target={kickoffMs} className="mt-1 font-display text-xl font-extrabold tabular-nums text-zinc-900 dark:text-white" /> : <p className="mt-1 font-display text-xl font-extrabold">TBA</p>}</> : status === "live" ? <><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 dark:text-white/45">Time remaining</p>{effectiveMatchEndMs !== null ? <Countdown target={effectiveMatchEndMs} className="mt-1 font-display text-xl font-extrabold tabular-nums text-zinc-900 dark:text-white" /> : <span>–</span>}</> : <p className="font-display text-sm font-bold text-zinc-500 dark:text-white/65">{status === "settled" || status === "forfeit" ? "MATCH COMPLETE" : status === "voided" ? "MATCH VOIDED" : "AWAITING RESULT"}</p>}</div>
         </div>
-        {status === "forfeit" && (
-          <p className="relative mt-4 text-center text-sm text-amber-600 dark:text-amber-300">
-            Forfeit 3-0. One side had no performance for this period, so the opponent wins 3-0 automatically.
-          </p>
-        )}
-        {status === "voided" && (
-          <p className="relative mt-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            Void. Both sides had no performance for this period, stakes are refunded.
-          </p>
-        )}
-        {status === "live" && liveScore?.volatile && (
-          <p className="relative mt-4 text-center text-sm text-amber-600 dark:text-amber-300">
-            Volatile move above 3%, capped at 10 goals and flagged for circuit breaker review.
-          </p>
-        )}
+        {status === "live" && <p className="relative mb-4 text-center text-[11px] text-zinc-500 dark:text-white/55"><span className="font-bold text-[#1D4ED8] dark:text-[#7db3ff]">ⓘ PLS</span> means projected live score. It follows live NAV changes and can change until the final oracle result.</p>}
+        <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-8">
+          <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:text-left"><StockTeamBadge teamId={fixture.home.teamId} size={56} showName={false} /><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold text-zinc-900 dark:text-white sm:text-lg">{fixture.home.name}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500 dark:text-white/45">HOME · {fixture.home.symbol}</p></div></div>
+          <div className="min-w-[112px] rounded-2xl border border-black/[.08] bg-black/[.03] px-4 py-3 text-center shadow-inner dark:border-white/10 dark:bg-white/[.06] sm:min-w-[160px] sm:px-6 sm:py-4"><p className="font-display text-4xl font-black tracking-tight tabular-nums sm:text-6xl">{status === "live" || status === "settled" || status === "forfeit" ? score ? `${score[0]}–${score[1]}` : "– : –" : "VS"}</p><p className="mt-1 text-[9px] font-extrabold uppercase tracking-[.22em] text-zinc-500 dark:text-white/40">{status === "settled" || status === "forfeit" ? "Final score" : status === "live" ? "PLS" : status === "awaiting" ? "Result pending" : status === "voided" ? "No result" : "Kickoff soon"}</p></div>
+          <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:justify-end sm:text-right"><div className="min-w-0"><p className="truncate font-display text-sm font-extrabold text-zinc-900 dark:text-white sm:text-lg">{fixture.away.name}</p><p className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500 dark:text-white/45">AWAY · {fixture.away.symbol}</p></div><StockTeamBadge teamId={fixture.away.teamId} size={56} showName={false} /></div>
+        </div>
+        <div className="relative mt-6 flex items-center justify-between border-t border-black/[.08] pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-white/10 dark:text-white/40"><span>Real price performance</span><span>{status === "live" && homeMove !== null && awayMove !== null ? `${formatSignedPctStock(homeMove)} · ${formatSignedPctStock(awayMove)}` : "TICKR Stock League"}</span></div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        <div className="space-y-6 lg:col-span-3">
-          {status === "settled" || status === "forfeit" ? (
-            <div className="glass rounded-2xl p-5">
-              <div className="mb-4 flex items-center justify-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-[0_0_18px_rgba(251,191,36,.4)]">
-                  <Trophy className="h-4 w-4 text-white" />
-                </span>
-                <h3 className="font-display text-base font-bold text-zinc-900 dark:text-white">Full time</h3>
-              </div>
-              {winning !== null && (
-                <p className="mb-4 text-center text-sm text-zinc-500 dark:text-zinc-300">
-                  Result:{" "}
-                  <span className="font-display font-bold text-zinc-900 dark:text-white">
-                    {winning === 0 ? `${fixture.home.name} win` : winning === 2 ? `${fixture.away.name} win` : "Draw"}
-                  </span>{" "}
-                  <span className="text-zinc-400 dark:text-zinc-500">
-                    ({OUTCOME_SHORT[winning]}, {OUTCOME_LABELS[winning]})
-                  </span>
-                </p>
-              )}
-              {playerAddress && stakes === null && (
-                <p className="text-center text-sm text-zinc-500">Checking your stakes…</p>
-              )}
-              {playerAddress && stakes !== null && !hasStake && (
-                <p className="text-center text-sm text-zinc-500">You didn&apos;t stake on this match.</p>
-              )}
-              {playerAddress && hasStake && claimed === false && (
-                <div className="rounded-2xl border border-black/8 bg-black/[.03] p-4 dark:border-white/8 dark:bg-white/[.03]">
-                  <p className="mb-1 font-display text-sm tabular-nums text-zinc-600 dark:text-zinc-300">
-                    Your stakes:{" "}
-                    {stakes.map((s, i) => (s > 0n ? `${OUTCOME_SHORT[i]} ${formatTick(s)}` : null)).filter(Boolean).join(" · ")}{" "}
-                    TICK
-                  </p>
-                  <p className={cn("mb-3 text-sm font-semibold", won ? "text-[#0f7a55] dark:text-[#7fe0bd]" : "text-zinc-500 dark:text-zinc-400")}>
-                    {won ? "You won, claim your payout!" : "No win this time."}
-                  </p>
-                  <button
-                    onClick={handleClaim}
-                    disabled={claimBusy}
-                    className={cn(
-                      "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all active:scale-[.98]",
-                      claimBusy
-                        ? "cursor-not-allowed bg-zinc-300 dark:bg-zinc-700"
-                        : "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] shadow-[0_0_24px_rgba(46,124,246,.45)] hover:shadow-[0_0_36px_rgba(46,124,246,.6)]"
-                    )}
-                  >
-                    {claimBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {claimBusy ? "Claiming…" : "Claim payout"}
-                  </button>
-                </div>
-              )}
-              {playerAddress && hasStake && claimed === true && (
-                <p className="flex items-center justify-center gap-2 text-sm font-medium text-[#0f7a55] dark:text-[#7fe0bd]">
-                  <CheckCircle2 className="h-4 w-4" /> Claimed
-                </p>
-              )}
-              {claimError && (
-                <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-200">
-                  {claimError}
-                </p>
-              )}
-            </div>
-          ) : status === "voided" ? (
-            <div className="glass rounded-2xl p-8 text-center">
-              <p className="font-display text-lg font-bold text-zinc-900 dark:text-white">Void</p>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Both sides had no performance for this period. Stakes are refunded, no points are awarded.
-              </p>
-            </div>
-          ) : status === "live" ? (
-            <div className="space-y-6">
-              <div className="glass rounded-2xl border-red-500/25! p-5">
-                <p className="mb-4 text-sm font-bold uppercase tracking-widest text-red-500">Live, 1 goal = 0.05%</p>
-                {[
-                  { name: fixture.home.name, pct: homePctLive, teamId: fixture.home.teamId },
-                  { name: fixture.away.name, pct: awayPctLive, teamId: fixture.away.teamId },
-                ].map((row) => (
-                  <div key={row.teamId} className="mb-4 last:mb-0">
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span className="font-medium text-zinc-700 dark:text-zinc-200">{row.name}</span>
-                      <span className="font-display font-bold tabular-nums text-zinc-900 dark:text-white">
-                        {row.pct === null ? "waiting for price…" : formatSignedPctStock(row.pct)}
-                      </span>
-                    </div>
-                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/8 dark:bg-white/8">
-                      <div
-                        className={cn(
-                          "h-full rounded-full transition-all duration-1000",
-                          row.pct === null
-                            ? "bg-zinc-400"
-                            : row.pct >= 0
-                              ? "bg-gradient-to-r from-[#1D9E75] to-[#34d399]"
-                              : "bg-gradient-to-r from-red-500 to-red-400"
-                        )}
-                        style={{ width: `${row.pct === null ? 0 : Math.max(2, Math.min(100, Math.abs(row.pct) * 100))}%` }}
-                      />
-                    </div>
-                    {prices[row.teamId]?.price && (
-                      <p className="mt-1 font-display text-[11px] tabular-nums text-zinc-400 dark:text-zinc-600">
-                        Live NAV: ${Number(prices[row.teamId]?.price ?? 0).toLocaleString("en-US")}, {prices[row.teamId]?.source ?? "Chainlink NAV"}
-                      </p>
-                    )}
-                  </div>
-                ))}
-                {!snapshot && (
-                  <p className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-500">
-                    Kickoff snapshot not yet on-chain, bars appear once the backend submits start NAV values.
-                  </p>
-                )}
-              </div>
-              {bettingOpen && effectiveBettingCloseMs !== null && effectiveBettingCloseMs > now ? (
-                <div className="glass rounded-2xl border-emerald-500/25! p-6">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-display text-sm font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
-                      <span className="live-badge mr-2">Live</span> In-play betting open
-                    </h3>
-                    <span className="text-right text-xs text-zinc-500">
-                      <span className="block">Closes in <Countdown target={effectiveBettingCloseMs} /></span>
-                      <span className="block">Ends in <Countdown target={effectiveMatchEndMs} /></span>
-                    </span>
-                  </div>
-                  <StockStakePanel
-                    fixture={fixture}
-                    pool={pool}
-                    playerAddress={playerAddress}
-                    balance={balance}
-                    authenticated={authenticated}
-                    onLogin={login}
-                    onStaked={handleStaked}
-                  />
-                </div>
-              ) : bettingOpen ? (
-                <p className="text-center text-sm text-amber-600 dark:text-amber-400">
-                  In-play betting closes 5 minutes before full time.
-                </p>
-              ) : null}
-            </div>
-          ) : status === "awaiting" ? (
-            <div className="glass rounded-2xl border-amber-500/25! p-8 text-center">
-              <p className="font-display text-lg font-bold text-zinc-900 dark:text-white">Full time</p>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                The window has closed, the result is being finalized on-chain.
-              </p>
-            </div>
+      {(status === "upcoming" || status === "scheduled" || status === "tba") && (
+        <StockPreMatchBriefing fixture={fixture} pool={pool} />
+      )}
+
+      {(status === "upcoming" ||
+        status === "scheduled" ||
+        status === "tba" ||
+        (status === "live" &&
+          bettingOpen &&
+          effectiveBettingCloseMs !== null &&
+          effectiveBettingCloseMs > now)) && (
+        <button
+          onClick={() => {
+            setStakeOpening(true);
+            setStakeOpen(true);
+          }}
+          disabled={stakeOpening}
+          aria-busy={stakeOpening}
+          className="mb-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] px-4 py-3.5 font-display text-base font-extrabold text-white shadow-[0_0_28px_rgba(46,124,246,.4)] transition-all hover:shadow-[0_0_40px_rgba(46,124,246,.55)] active:scale-[.98] disabled:cursor-wait disabled:opacity-80"
+        >
+          {stakeOpening ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+              Loading stake form…
+            </>
           ) : (
-            <StockStakePanel
-              fixture={fixture}
-              pool={pool}
-              playerAddress={playerAddress}
-              balance={balance}
-              authenticated={authenticated}
-              onLogin={login}
-              onStaked={handleStaked}
-            />
+            "Stake on this match"
           )}
-          <StockScoringExplainer compact />
-        </div>
+        </button>
+      )}
 
-        <div className="space-y-6 lg:col-span-2">
-          <div className="glass rounded-2xl p-5">
-            <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-              Pool, live
-            </h3>
-            {pool ? (
-              <PoolBars pool={pool} />
-            ) : (
-              <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                No stakes yet, be the first to move the odds.
-              </p>
-            )}
-            <div className="mt-4 border-t border-black/8 pt-3 text-xs text-zinc-500 dark:border-white/8 dark:text-zinc-500">
-              <p className="font-medium text-[#1D4ED8] dark:text-[#7db3ff]">
-                Seeded liquidity: {pool ? formatTick(BigInt(pool.seed ?? "0")) : "250"} TICK
-              </p>
-              <p>Window: {formatUtcDateTime(fixture.windowStart)}</p>
-              <p className="mt-1">Outcome 1 = home win, X = draw, 2 = away win</p>
-            </div>
-          </div>
-          <StockAuditCard fixture={fixture} snapshot={snapshot} />
-        </div>
+      {status === "live" && <div className="mb-6"><StockLiveMatchPanel fixture={fixture} snapshot={snapshot ? { homeStart: snapshot.homeStart, awayStart: snapshot.awayStart } : null} livePrices={livePrices} pricesFresh={pricesFresh} projectedScore={score} windowEndMs={windowEndMs} volatile={volatile} /></div>}
+      {(status === "settled" || status === "forfeit" || status === "voided") && <div className="mb-6"><StockPostMatchPanel fixture={fixture} pool={pool} snapshot={snapshot} playerAddress={playerAddress} onClaimed={handleStaked} /></div>}
+      {(status === "settled" || status === "forfeit") && <StockOracleAuditCard fixture={fixture} snapshot={snapshot} scoreline={auditScoreline} />}
+      {(status === "settled" || status === "forfeit") && <div className="mb-6"><PoolOddsChart pool={pool} history={poolHistory} /></div>}
+      {status === "awaiting" && <div className="glass mb-6 rounded-3xl border-amber-500/25! p-5 text-center"><p className="font-display text-lg font-bold">The match window has ended</p><p className="mt-1 text-sm text-zinc-500">Final oracle prices are being confirmed on-chain.</p></div>}
+
+      {(status === "live" || status === "awaiting") && <div className="mb-6">
+        {status === "live" && bettingOpen && effectiveBettingCloseMs !== null && effectiveBettingCloseMs > now ? <div className="mb-3 flex items-center justify-between rounded-2xl border border-red-500/20 bg-red-500/[.06] px-4 py-3"><p className="text-xs font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400">In-play betting open</p><p className="text-right text-[10px] text-zinc-500">Closes in <Countdown target={effectiveBettingCloseMs} /></p></div> : status === "live" && bettingOpen ? <p className="mb-3 text-center text-xs text-amber-600">In-play betting closes five minutes before full time.</p> : null}
+        <PoolOddsChart pool={pool} history={poolHistory} />
+      </div>}
+
+      <div className="mb-6">
+        <StockScoringExplainer compact />
       </div>
+
+      {stakeOpen && (
+        <StockStakeModal
+          fixture={fixture}
+          pool={pool}
+          playerAddress={playerAddress}
+          balance={balance}
+          authenticated={authenticated}
+          onLogin={login}
+          onStaked={handleStaked}
+          onReady={handleStakeModalReady}
+          onClose={() => {
+            setStakeOpening(false);
+            setStakeOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

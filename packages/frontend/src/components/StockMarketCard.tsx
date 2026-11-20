@@ -4,34 +4,21 @@
  * Target location in the repo:
  *   packages/frontend/src/components/StockMarketCard.tsx
  *
- * This mirrors components/MarketCard.tsx for the crypto TARGET template
- * exactly: same outer surface-card shell, same header row (template
- * chip plus status pill), same question typography, same Yes/No rows
- * with live multipliers from lib/marketOdds, the same pool-share bar,
- * the same "Projected for 10 TICK" caption and the same footer with a
- * countdown and the arrow affordance. Two deliberate differences, both
- * from the locked spec:
- *   1. The stock logo (StockLogo) sits in the coin logo slot where the
- *      crypto card renders TeamBadge for the target coin.
- *   2. NO pool size is shown. The crypto card footer prints the total
- *      pool; the stock card footer prints the deadline in UTC instead,
- *      per the spec ("NO pool size shown on the card, deadline in UTC").
- *      The detail page still shows the pool, exactly like crypto.
+ * This uses the same price target card layout as MarketCard's crypto
+ * TARGET template. The stock logo occupies the crypto asset badge slot.
  *
  * Multipliers are computed with the same marketOdds call the crypto
  * card uses (10 TICK reference stake, post-fee, seed included), so a
  * stock card and a crypto card with the same pools quote identically.
  *
- * Quick stake: the crypto card's QuickStakeSheet hardcodes
- * MARKET_FACTORY_ABI, so it cannot stake on the stock factory. Rather
- * than fork a second sheet, the stock card links to the detail page
- * where the stake flow mirrors crypto exactly. See the delivery report.
+ * Quick stake uses the shared QuickStakeSheet with the stock factory
+ * address and stock-target variant.
  */
 
 "use client";
 
 import Link from "next/link";
-import { Target, Clock, ArrowUpRight } from "lucide-react";
+import { Trophy, Clock, ArrowUpRight } from "lucide-react";
 import {
   STOCK_MARKET_FACTORY_ADDRESS,
   stockMarketRouteKey,
@@ -39,10 +26,11 @@ import {
   stockDisplaySymbol,
   type StockMarketSummary,
 } from "../lib/stockMarketContracts";
-import { formatUtcDateTime, formatUtcTime } from "../lib/utcTime";
+import { formatUtcTime } from "../lib/utcTime";
 import { Countdown } from "./Countdown";
 import { ShareButtons } from "./ShareButtons";
 import { StockLogo } from "./StockLogo";
+import { formatTick } from "../lib/format";
 import { marketOdds, formatMarketOdds, isHighPayout } from "../lib/marketOdds";
 import { useMarketFees } from "../lib/query/useMarketFees";
 import { useState } from "react";
@@ -141,7 +129,7 @@ export function StockMarketCard({
   return (
     <div className="group relative flex h-full flex-col">
       <div className="absolute right-3 top-3 z-20">
-        <ShareButtons path={`/markets/${market.marketKey}`} text={`${question}, predict on TICKR`} compact />
+        <ShareButtons path={`/markets/${market.marketKey}`} text={`${question} — predict on TICKR`} compact />
       </div>
       <Link
         href={`/markets/${market.marketKey}`}
@@ -150,9 +138,9 @@ export function StockMarketCard({
         <div className="relative flex items-center justify-between gap-3">
           <span className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[.16em] text-[#2E7CF6]">
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#2E7CF6]/10">
-              <Target className="h-4 w-4" />
+              <Trophy className="h-4 w-4" />
             </span>
-            Stock Price Target
+            Price Target
           </span>
           <span
             className={`mr-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider ${statusClass}`}
@@ -164,15 +152,10 @@ export function StockMarketCard({
         <h3 className="relative mt-5 font-display text-lg font-bold leading-tight tracking-tight text-zinc-950 dark:text-white">
           {question}
         </h3>
-        {/* Stock logo in the coin logo slot, exactly where MarketCard renders TeamBadge for TARGET. */}
+        {/* Stock logo occupies the same target asset slot used by the crypto card. */}
         <div className="relative mt-4 flex items-center gap-3">
           <StockLogo symbol={market.symbol} iconUrl={market.iconUrl} size={40} />
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-bold text-zinc-800 dark:text-zinc-100">{market.name}</span>
-            <span className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              {stockDisplaySymbol(market.symbol)} · Target stock
-            </span>
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target stock</span>
         </div>
         <div className="relative mt-5 grid grid-cols-1 gap-2.5">
           {ranked.map(({ amount, index }) => {
@@ -236,12 +219,7 @@ export function StockMarketCard({
           className="relative mt-auto flex items-center justify-between gap-3 border-t border-black/[.06] pt-4 dark:border-white/[.07]"
           style={{ marginTop: 18 }}
         >
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Deadline</p>
-            <p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">
-              {formatUtcDateTime(Number(market.endTime) * 1000)}
-            </p>
-          </div>
+          <div><p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Total pool</p><p className="mt-0.5 font-display text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white">{formatTick(market.totalStaked + market.seedAmount)} <span className="text-xs font-semibold text-zinc-500">TICK</span></p></div>
           {bettingOpen ? (
             <div className="flex items-center gap-1.5 text-xs font-semibold tabular-nums text-zinc-500">
               <Clock className="h-3.5 w-3.5" />

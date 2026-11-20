@@ -58,6 +58,7 @@
 import { EventEmitter } from "node:events";
 import { stockConfig } from "../stockConfig.js";
 import { logger } from "../lib/logger.js";
+import { describeFetchFailure } from "../lib/fetchError.js";
 import { STOCK_TEAMS } from "./stockTeams.js";
 
 export interface NavTick {
@@ -340,7 +341,7 @@ export class StockNavPoller extends EventEmitter {
           signal: AbortSignal.timeout(15_000),
         });
       } catch (err) {
-        throw new Error(`NAV API fetch failed: ${String(err)}`);
+        throw new Error(`NAV API fetch failed: ${describeFetchFailure(err)}`, { cause: err });
       }
       this.meter.calls++;
       const bodyText = await res.text();

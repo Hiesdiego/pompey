@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
 import { api, type ApiFixture } from "../../lib/api";
-import { stockApi, type StockApiFixture } from "../../lib/stockContracts";
-import { stockMatchdayDate, stockRoundLabel, stockRoundWave, STOCK_DOUBLE_HEADER_DATE, STOCK_TOTAL_ROUNDS, utcDayKey } from "../../lib/stockFormat";
+import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_DECIMALS, STOCK_PRICE_ORACLE_ABI, STOCK_SEASON_ID, type StockApiFixture } from "../../lib/stockContracts";
+import { stockMatchdayDate, stockRoundLabel, stockRoundWave, stockScoreline, STOCK_DOUBLE_HEADER_DATE, STOCK_TOTAL_ROUNDS, utcDayKey } from "../../lib/stockFormat";
 import { FixtureCard, fixtureStatus } from "../../components/FixtureCard";
-import { StockFixtureCard } from "../../components/StockFixtureCard";
+import { StockFixtureCard, stockFixtureStatus } from "../../components/StockFixtureCard";
 import { StockScoringExplainer } from "../../components/StockScoringExplainer";
 import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../../components/States";
 import { cn } from "../../lib/cn";
@@ -49,7 +49,7 @@ export default function FixturesPage() {
   const [cryptoDay, setCryptoDay] = useState<number | null>(null);
   const [stockDay, setStockDay] = useState<number | null>(null);
   const { prices } = usePriceFeed(true);
-  const { fixtureUpdates } = useStockLiveFeed(true);
+  const { fixtureUpdates, prices: stockPrices } = useStockLiveFeed(true);
 
   useEffect(() => {
     const requestedLeague = new URLSearchParams(window.location.search).get("league");
@@ -104,6 +104,29 @@ export default function FixturesPage() {
     return () => { alive = false; };
   }, [scoreIds]);
 
+  // Stock snapshots: only live stock fixtures, and settled stock fixtures
+  // whose API scoreline is missing, need an on-chain read. Settled stock
+  // cards normally show homeGoals and awayGoals from /api/stocks/fixtures,
+  // so they need no snapshot at all. Live cards have no goals yet, so the
+  // page derives the livescore from the kickoff snapshot plus live NAV
+  // prices, exactly like scoreFor does for crypto.
+  const stockScoreIds = useMemo(() => (stockFixtures ?? []).filter((f) => {
+    const status = stockFixtureStatus(f, fixtureUpdates[f.fixtureId]);
+    if (status === "live") return true;
+    if (status !== "settled" && status !== "forfeit") return false;
+    return f.homeGoals === null || f.homeGoals === undefined || f.awayGoals === null || f.awayGoals === undefined;
+  }).map((f) => f.fixtureId).join(","), [stockFixtures, fixtureUpdates]);
+  const [stockSnapshots, setStockSnapshots] = useState<Record<string, FixtureSnapshot>>({});
+  useEffect(() => {
+    if (!stockScoreIds || !STOCK_CONTRACTS.priceOracle) return;
+    let alive = true;
+    Promise.all(stockScoreIds.split(",").map(async (id) => {
+      try { const result = await getPublicClient().readContract({ address: STOCK_CONTRACTS.priceOracle as `0x${string}`, abi: STOCK_PRICE_ORACLE_ABI, functionName: "getSnapshot", args: [STOCK_SEASON_ID, BigInt(id)] }); return [id, result as unknown as FixtureSnapshot] as const; }
+      catch { return [id, null] as const; }
+    })).then((results) => { if (alive) setStockSnapshots((old) => ({ ...old, ...Object.fromEntries(results.filter((r): r is readonly [string, FixtureSnapshot] => r[1] !== null)) })); });
+    return () => { alive = false; };
+  }, [stockScoreIds]);
+
   const scoreFor = (fixture: ApiFixture): [number, number] | null => {
     if (!fixture.home || !fixture.away) return null;
     const status = fixtureStatus(fixture); const snapshot = snapshots[fixture.fixtureId];
@@ -119,6 +142,37 @@ export default function FixturesPage() {
     return h === null || a === null ? null : normalizeScoreline(roundPctLikeOracle(h), roundPctLikeOracle(a));
   };
 
+  const stockScoreFor = (fixture: StockApiFixture): [number, number] | null => {
+    if (!fixture.home || !fixture.away) return null;
+    const status = stockFixtureStatus(fixture, fixtureUpdates[fixture.fixtureId]);
+    // Settled cards show the API scoreline; only derive one here when the
+    // API sent no goals. Upcoming, TBD and awaiting cards show no score.
+    if (status === "settled" || status === "forfeit") {
+      if (fixture.homeGoals !== null && fixture.homeGoals !== undefined && fixture.awayGoals !== null && fixture.awayGoals !== undefined) return null;
+    } else if (status !== "live") {
+      return null;
+    }
+    const snapshot = stockSnapshots[fixture.fixtureId];
+    if (!snapshot?.startSubmitted) return null;
+    const pct = (start: bigint, current: number | null) => {
+      if (current === null || start <= 0n) return null;
+      const startPrice = Number(start) / 10 ** STOCK_PRICE_DECIMALS;
+      return startPrice > 0 ? ((current - startPrice) / startPrice) * 100 : null;
+    };
+    const live = status === "live";
+    const homePrice = live
+      ? (stockPrices[fixture.home.teamId]?.price ? Number(stockPrices[fixture.home.teamId].price) : null)
+      : (snapshot.endSubmitted ? Number(snapshot.homeEnd) / 10 ** STOCK_PRICE_DECIMALS : null);
+    const awayPrice = live
+      ? (stockPrices[fixture.away.teamId]?.price ? Number(stockPrices[fixture.away.teamId].price) : null)
+      : (snapshot.endSubmitted ? Number(snapshot.awayEnd) / 10 ** STOCK_PRICE_DECIMALS : null);
+    const h = pct(snapshot.homeStart, homePrice);
+    const a = pct(snapshot.awayStart, awayPrice);
+    if (h === null || a === null) return null;
+    const scored = stockScoreline(h, a);
+    return [scored.homeGoals, scored.awayGoals];
+  };
+
   if (error) return <div className="py-10"><ErrorState message={error} onRetry={() => window.location.reload()} /></div>;
   const loading = !cryptoFixtures || !stockFixtures || cryptoDay === null || stockDay === null;
 
@@ -130,14 +184,14 @@ export default function FixturesPage() {
     <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto and stock fixtures, grouped by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
     {loading ? <SkeletonCards cards={6} /> : filter === "all" ? timeline.length === 0 ? <EmptyState title="No fixtures available." /> : <div className="space-y-9">{timeline.map(([day, matches]) => <section key={day}>
       <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {matches.length} fixtures</span></h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <div key={`crypto-${entry.fixture.fixtureId}`}><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#2E7CF6]">Crypto · Matchday {entry.fixture.matchdayIndex + 1}</p><FixtureCard fixture={entry.fixture} /></div> : <div key={`stock-${entry.fixture.fixtureId}`}><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Stocks · Round {entry.fixture.matchdayIndex + 1}{stockRoundWave(entry.fixture.matchdayIndex) ? ` · ${stockRoundWave(entry.fixture.matchdayIndex)}` : ""}</p><StockFixtureCard fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} /></div>)}</div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <FixtureCard key={`crypto-${entry.fixture.fixtureId}`} fixture={entry.fixture} /> : <StockFixtureCard key={`stock-${entry.fixture.fixtureId}`} fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} liveScore={stockScoreFor(entry.fixture)} />)}</div>
     </section>)}</div> : filter === "crypto" ? <>
       {cryptoDay !== null && <DayPager values={cryptoDays} selected={cryptoDay} onChange={setCryptoDay} />}
       {cryptoDays.find(([day]) => day === cryptoDay) ? <><h2 className="mb-4 font-display text-base font-bold">Matchday {cryptoDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{activeCrypto.length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{activeCrypto.map((f) => <FixtureCard key={f.fixtureId} fixture={f} score={scoreFor(f)} />)}</div></> : <EmptyState title="No fixtures for this matchday." />}
     </> : <>
       {stockDay !== null && <DayPager values={stockDays} selected={stockDay} onChange={setStockDay} stock />}
       {stockDay !== null && stockMatchdayDate(stockDay) === STOCK_DOUBLE_HEADER_DATE && stockRoundWave(stockDay) && <p className="mb-5 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">Dec 16 hosts rounds 21 and 22 in two waves, morning and evening.</p>}
-      {stockDays.find(([day]) => day === stockDay) ? <><h2 className="mb-4 font-display text-base font-bold">Round {stockDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{stockMatchdayDate(stockDay!)} UTC · {stockDays.find(([day]) => day === stockDay)?.[1].length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{(stockDays.find(([day]) => day === stockDay)?.[1] ?? []).map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={fixtureUpdates[f.fixtureId]} />)}</div></> : <EmptyState title="No fixtures for this round." />}
+      {stockDays.find(([day]) => day === stockDay) ? <><h2 className="mb-4 font-display text-base font-bold">Round {stockDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{stockMatchdayDate(stockDay!)} UTC · {stockDays.find(([day]) => day === stockDay)?.[1].length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{(stockDays.find(([day]) => day === stockDay)?.[1] ?? []).map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={fixtureUpdates[f.fixtureId]} liveScore={stockScoreFor(f)} />)}</div></> : <EmptyState title="No fixtures for this round." />}
       <div className="mt-8"><StockScoringExplainer compact /></div>
     </>}
   </div>;

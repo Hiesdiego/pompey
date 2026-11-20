@@ -79,6 +79,7 @@ import { stockMarketConfig } from "../stockMarketConfig.js";
 import { logger } from "../lib/logger.js";
 import { meter } from "../lib/net.js";
 import { priceToScaled } from "../lib/priceMath.js";
+import { describeFetchFailure } from "../lib/fetchError.js";
 
 /** One row of GET /api/stocks/list. Field names are the locked API
  *  contract; the frontend is built against exactly these. */
@@ -555,7 +556,7 @@ export class StockListService extends EventEmitter {
           signal: AbortSignal.timeout(15_000),
         });
       } catch (err) {
-        throw new Error(`stock list API fetch failed: ${String(err)}`);
+        throw new Error(`stock list API fetch failed: ${describeFetchFailure(err)}`, { cause: err });
       }
       this.meterStats.calls++;
       meter.count("stock_list_calls", 1);

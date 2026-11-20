@@ -23,6 +23,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet, Search } from "lucide-react";
@@ -49,6 +50,9 @@ import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
 import { LEAGUE_TARGET_COINS, TARGET_COINS } from "../../../lib/targetCoins";
 import { formatPriceTargetTimeUtc, priceTargetQuestion } from "../../../lib/priceTargetQuestion";
+import { stockMarketApi, STOCK_MARKET_FACTORY_ABI, STOCK_MARKET_FACTORY_ADDRESS, STOCK_CREATION_SEED_TICK, MAX_TARGET_TIME, directionFromAbove, parseNavPrice, scaleTargetPrice, stockDisplaySymbol, stockPriceTargetQuestion, type StockListItem } from "../../../lib/stockMarketContracts";
+import { STOCK_TEAMS } from "../../../lib/stockTeams";
+import { StockLogo } from "../../../components/StockLogo";
 
 const TEMPLATE_IDS = [
   TEMPLATES.TOP_GAINER,
@@ -59,6 +63,29 @@ const TEMPLATE_IDS = [
 ];
 
 const TEMPLATE_ICONS = [Trophy, Crown, Swords, Target, BarChart3];
+const FEATURED_STOCK_TICKERS = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"];
+const STOCK_ROSTER_FALLBACK: StockListItem[] = STOCK_TEAMS.map((team) => ({
+  symbol: team.symbol,
+  name: team.name,
+  contractAddress: team.tokenContract,
+  decimals: team.decimals,
+  multiplier: 1,
+  iconUrl: team.logoPath,
+  navPrice: null,
+  navUpdatedAt: null,
+  hasNav: false,
+}));
+
+function normalizeStockSearchValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function stockMatchesSearch(stock: StockListItem, query: string) {
+  const needle = normalizeStockSearchValue(query);
+  if (!needle) return true;
+  return [stock.name, stock.symbol, stockDisplaySymbol(stock.symbol), stock.contractAddress]
+    .some((value) => normalizeStockSearchValue(value).includes(needle));
+}
 
 function utcDateTimeFromMs(ms: number) {
   return new Date(ms).toISOString().slice(0, 16);
@@ -134,6 +161,20 @@ export default function CreateMarketPage() {
   const [targetMax] = useState(() => utcDateTimeFromMs(Date.UTC(2026, 11, 31, 23, 59)));
   const [targetTime, setTargetTime] = useState(() => utcDateTimeFromMs(ceilToMinute(Date.now() + 2 * 3_600_000)));
   const [targetAbove, setTargetAbove] = useState(true);
+  const [targetAssetType, setTargetAssetType] = useState<"crypto" | "stock">("crypto");
+  const [stockSymbol, setStockSymbol] = useState("");
+  const [stockSearch, setStockSearch] = useState("");
+  const stockListQuery = useQuery({ queryKey: ["stockTargetList"], queryFn: stockMarketApi.list, staleTime: 60_000, refetchInterval: 60_000 });
+  const apiStockList = stockListQuery.data ?? [];
+  const stockListIsFallback = apiStockList.length === 0;
+  const stockList = stockListIsFallback ? STOCK_ROSTER_FALLBACK : apiStockList;
+  const selectedStock = stockList.find((stock) => stock.symbol === stockSymbol);
+  const featuredStocks = FEATURED_STOCK_TICKERS
+    .map((ticker) => stockList.find((stock) => stockDisplaySymbol(stock.symbol).toUpperCase() === ticker))
+    .filter((stock): stock is StockListItem => Boolean(stock));
+  const filteredStocks = useMemo(() => stockList
+    .filter((stock) => stockMatchesSearch(stock, stockSearch))
+    .sort((a, b) => Number(b.hasNav) - Number(a.hasNav) || stockDisplaySymbol(a.symbol).localeCompare(stockDisplaySymbol(b.symbol))), [stockList, stockSearch]);
   const [spreadFixture, setSpreadFixture] = useState("0");
   const [spreadPoints, setSpreadPoints] = useState("5");
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
@@ -293,8 +334,18 @@ export default function CreateMarketPage() {
       if (templateId === TEMPLATES.CHAMPION && championAlreadyCreated) {
         throw new Error("The season champion market has already been created");
       }
-      if (templateId === TEMPLATES.TARGET && !targetCoins.some((coin) => coin.teamId === Number(targetTeam))) {
-        throw new Error("Select an available coin");
+      if (templateId === TEMPLATES.TARGET) {
+        if (targetAssetType === "crypto" && !targetCoins.some((coin) => coin.teamId === Number(targetTeam))) throw new Error("Select an available coin");
+        if (targetAssetType === "stock") {
+          if (!STOCK_MARKET_FACTORY_ADDRESS) throw new Error("Stock price targets are not available on this network");
+          if (stockListQuery.isPending) throw new Error("Loading stock tokens and current NAV prices…");
+          if (stockListIsFallback) throw new Error("The backend has no live stock NAV data right now. Stock targets are paused until its price feed reconnects.");
+          if (!stockList.some((stock) => stock.hasNav)) throw new Error("No stock currently has a live NAV. Stock targets are paused until prices return.");
+          if (!selectedStock) throw new Error("Choose a stock with a current NAV to continue.");
+          if (!selectedStock.hasNav) throw new Error(`${stockDisplaySymbol(selectedStock.symbol)} has no current NAV and cannot be used yet.`);
+          const at = Math.floor(parseUtcDateTime(targetTime).getTime() / 1000);
+          if (!Number.isFinite(at) || at <= Date.now() / 1000 + 3600 || at > MAX_TARGET_TIME) throw new Error("Deadline must be at least 1 hour out and before 2027 UTC");
+        }
       }
       if (templateId === TEMPLATES.SPREAD) {
         const opt = fixtureOptions.find((o) => String(o.fixture.fixtureId) === spreadFixture);
@@ -330,6 +381,11 @@ export default function CreateMarketPage() {
     targetPrice,
     targetTime,
     targetAbove,
+    targetAssetType,
+    selectedStock,
+    stockListQuery.isPending,
+    stockListIsFallback,
+    stockList,
     spreadFixture,
     spreadPoints,
     matchdayCards,
@@ -354,7 +410,9 @@ export default function CreateMarketPage() {
   const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
   const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
   const previewTitle = templateId === TEMPLATES.TARGET
-    ? targetPrice ? priceTargetQuestion(selectedTeam?.name ?? "this coin", Number(targetPrice), targetAbove, parseUtcDateTime(targetTime)) : "Set a target price to preview the question"
+    ? targetPrice ? targetAssetType === "stock"
+      ? selectedStock && Number.isFinite(Number(targetPrice)) && Number(targetPrice) > 0 ? stockPriceTargetQuestion(stockDisplaySymbol(selectedStock.symbol), scaleTargetPrice(Number(targetPrice)), targetAbove, parseUtcDateTime(targetTime)) : selectedStock ? "Enter a target price to preview the question" : "Choose a stock to preview your question"
+      : priceTargetQuestion(selectedTeam?.name ?? "this coin", Number(targetPrice), targetAbove, parseUtcDateTime(targetTime)) : "Set a target price to preview the question"
     : templateId === TEMPLATES.SPREAD
       ? `Will ${selectedFixture?.home?.symbol ?? "home"} cover a ${spreadPoints} goal spread against ${selectedFixture?.away?.symbol ?? "away"}?`
       : templateId === TEMPLATES.TOP_GAINER
@@ -365,6 +423,20 @@ export default function CreateMarketPage() {
 
   async function handleCreate() {
     if (templateId === null || !address || !publicClient || paramsError) return;
+    if (templateId === TEMPLATES.TARGET && targetAssetType === "stock") {
+      if (!selectedStock || !STOCK_MARKET_FACTORY_ADDRESS) return;
+      const factory = STOCK_MARKET_FACTORY_ADDRESS;
+      const deadlineSeconds = Math.floor(parseUtcDateTime(targetTime).getTime() / 1000);
+      const seedWei = BigInt(STOCK_CREATION_SEED_TICK) * 10n ** 18n;
+      const stockTarget = Number(targetPrice);
+      const scaledTarget = Number.isFinite(stockTarget) && stockTarget > 0 ? scaleTargetPrice(stockTarget) : 0n;
+      if (scaledTarget <= 0n) return;
+      const allowance = (await publicClient.readContract({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "allowance", args: [address, factory] })) as bigint;
+      if (allowance < seedWei) await writeApprove({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "approve", args: [factory, seedWei] });
+      await writeCreate({ address: factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "createMarket", args: [selectedStock.contractAddress as `0x${string}`, stockDisplaySymbol(selectedStock.symbol), directionFromAbove(targetAbove), scaledTarget, BigInt(deadlineSeconds), (myProfile?.username || creatorName).slice(0, 32)] });
+      router.push("/markets");
+      return;
+    }
     const params = encodeParams(templateId, {
       matchdayIndex,
       teamA,
@@ -460,10 +532,6 @@ export default function CreateMarketPage() {
         <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">5 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
       </div>
 
-      <Link href="/markets/create/stock" className="surface-card mb-6 flex items-center justify-between gap-4 rounded-2xl p-5 transition hover:border-[#2E7CF6]/40">
-        <span><span className="block text-sm font-extrabold">Create a stock price target</span><span className="mt-1 block text-sm text-zinc-500">Ask whether a tokenized stock will be above or below a target by a deadline.</span></span>
-        <span className="shrink-0 rounded-xl bg-[#2E7CF6] px-4 py-2.5 text-sm font-bold text-white">Stock market →</span>
-      </Link>
       <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
 
@@ -545,6 +613,14 @@ export default function CreateMarketPage() {
             targetMax={targetMax}
             currentTargetPrice={prices[selectedTeam?.symbol ?? ""] ?? null}
             priceFeedStatus={priceFeedStatus}
+            stockList={stockList}
+            stockListIsFallback={stockListIsFallback}
+            stockListLoading={stockListQuery.isPending}
+            stockListError={stockListQuery.isError ? stockListQuery.error.message : null}
+            stockFactoryAvailable={Boolean(STOCK_MARKET_FACTORY_ADDRESS)}
+            onRetryStockList={() => void stockListQuery.refetch()}
+            featuredStocks={featuredStocks}
+            filteredStocks={filteredStocks}
             values={{
               matchdayIndex,
               setMatchdayIndex,
@@ -564,6 +640,12 @@ export default function CreateMarketPage() {
               setTargetTime,
               targetAbove,
               setTargetAbove,
+              targetAssetType,
+              setTargetAssetType,
+              stockSymbol,
+              setStockSymbol,
+              stockSearch,
+              setStockSearch,
               spreadFixture,
               setSpreadFixture,
               spreadPoints,
@@ -756,6 +838,14 @@ function TemplateParamsForm({
   targetMax,
   currentTargetPrice,
   priceFeedStatus,
+  stockList,
+  stockListIsFallback,
+  stockListLoading,
+  stockListError,
+  stockFactoryAvailable,
+  onRetryStockList,
+  featuredStocks,
+  filteredStocks,
   values: v,
 }: {
   templateId: number;
@@ -768,6 +858,14 @@ function TemplateParamsForm({
   targetMax: string;
   currentTargetPrice: number | null;
   priceFeedStatus: "live" | "polling" | "stale";
+  stockList: StockListItem[];
+  stockListIsFallback: boolean;
+  stockListLoading: boolean;
+  stockListError: string | null;
+  stockFactoryAvailable: boolean;
+  onRetryStockList: () => void;
+  featuredStocks: StockListItem[];
+  filteredStocks: StockListItem[];
   values: any;
 }) {
   const inputCls =
@@ -884,11 +982,35 @@ function TemplateParamsForm({
   }
 
   if (templateId === TEMPLATES.TARGET) {
+    const selectedStock = stockList.find((stock) => stock.symbol === v.stockSymbol);
+    const stockPrice = parseNavPrice(selectedStock?.navPrice);
     return (
       <div className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Asset type</label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["crypto", "stock"] as const).map((kind) => <button key={kind} type="button" onClick={() => v.setTargetAssetType(kind)} className={`rounded-xl border px-4 py-2.5 text-sm font-bold capitalize ${v.targetAssetType === kind ? "border-[#2E7CF6] bg-[#2E7CF6]/10 text-[#2E7CF6]" : "border-black/10 dark:border-white/10"}`}>{kind}</button>)}
+          </div>
+        </div>
         <div>
-          <label className={labelCls}>Coin</label>
-          <TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={targetCoins} inputCls={inputCls} searchable />
+          {v.targetAssetType === "crypto" ? <><label className={labelCls}>Coin</label><TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={targetCoins} inputCls={inputCls} searchable /></> : <>
+            <label className={labelCls}>Stock token</label>
+            <p className="mb-2 text-xs text-zinc-500">Search by ticker or company name, for example NVDA or NVIDIA. Tokens with a current NAV can be selected.</p>
+            {featuredStocks.length > 0 && <div className="mb-3">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Top stocks</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {featuredStocks.map((stock) => <button key={stock.contractAddress || stock.symbol} type="button" disabled={!stockFactoryAvailable || !stock.hasNav} onClick={() => { v.setStockSymbol(stock.symbol); const nav = parseNavPrice(stock.navPrice); if (nav) v.setTargetPrice(String(nav)); }} className={`flex min-w-0 items-center gap-2 rounded-xl border p-2 text-left hover:border-[#2E7CF6]/50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 ${v.stockSymbol === stock.symbol ? "border-[#2E7CF6] bg-[#2E7CF6]/[.07]" : "border-black/10"}`}><StockLogo symbol={stock.symbol} iconUrl={stock.iconUrl} size={30} /><span className="min-w-0"><span className="block truncate text-xs font-extrabold">{stockDisplaySymbol(stock.symbol)}</span><span className="block truncate text-[10px] text-zinc-500">{stock.hasNav ? `$${Number(stock.navPrice).toLocaleString("en-US", { maximumFractionDigits: 4 })}` : "NAV unavailable"}</span></span></button>)}
+              </div>
+            </div>}
+            <input value={v.stockSearch} onChange={(event) => v.setStockSearch(event.target.value)} aria-label="Search stock tokens by ticker or company name" placeholder="Ticker or company name, e.g. NVDA" className={inputCls} />
+            <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-black/10 dark:border-white/10">
+              {!stockFactoryAvailable && <p className="border-b border-black/[.06] p-3 text-sm text-amber-600 dark:border-white/[.07]">Stock target markets are not configured on this network. Tokens are shown for reference.</p>}
+              {stockListIsFallback && !stockListLoading && <div className="border-b border-black/[.06] p-3 text-xs text-amber-700 dark:border-white/[.07] dark:text-amber-300"><p className="font-bold">Live stock data is unavailable.</p><p className="mt-1">Showing the known stock roster. A current NAV is required before a stock target can be created.</p><button type="button" onClick={onRetryStockList} className="mt-2 font-bold underline">Check again</button></div>}
+              {stockListLoading ? <p className="p-3 text-sm text-zinc-500">Loading stock tokens…</p>
+                : filteredStocks.length === 0 ? <p className="p-3 text-sm text-zinc-500">{v.stockSearch.trim() ? `No stock tokens match “${v.stockSearch.trim()}”. Search by ticker or company name.` : "No stock tokens are currently available."}</p>
+                : <>{stockListError && !stockListIsFallback && <div className="border-b border-black/[.06] p-3 text-sm text-amber-600 dark:border-white/[.07]"><p>Could not refresh stock tokens. Showing the last loaded list.</p><button type="button" onClick={onRetryStockList} className="mt-1 font-bold underline">Try again</button></div>}{filteredStocks.map((stock) => <button key={stock.contractAddress || stock.symbol} type="button" disabled={!stockFactoryAvailable || !stock.hasNav} onClick={() => { v.setStockSymbol(stock.symbol); const nav = parseNavPrice(stock.navPrice); if (nav) v.setTargetPrice(String(nav)); }} className={`flex w-full items-center gap-3 border-b border-black/[.06] p-2.5 text-left last:border-0 hover:bg-black/[.03] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/[.07] ${v.stockSymbol === stock.symbol ? "bg-[#2E7CF6]/[.07]" : ""}`}><StockLogo symbol={stock.symbol} iconUrl={stock.iconUrl} size={32} /><span className="min-w-0"><span className="block truncate text-sm font-bold">{stock.name} ({stockDisplaySymbol(stock.symbol)})</span><span className="block text-xs text-zinc-500">{stock.hasNav ? `$${Number(stock.navPrice).toLocaleString("en-US", { maximumFractionDigits: 6 })} NAV` : "Unavailable · no current NAV"}</span></span></button>)}</>}
+            </div>
+          </>}
         </div>
         <div>
           <label className={labelCls}>Direction</label>
@@ -904,7 +1026,11 @@ function TemplateParamsForm({
         <div>
           <label className={labelCls}>Target price (USD)</label>
           <p className="mb-2 text-xs text-zinc-500" aria-live="polite">
-            {currentTargetPrice !== null
+            {v.targetAssetType === "stock" ? stockListIsFallback
+              ? "The backend has no live stock NAV data. Stock creation is paused until its feed reconnects."
+              : stockPrice !== null && selectedStock
+                ? <>Current {stockDisplaySymbol(selectedStock.symbol)} NAV: <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">${stockPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span> <span className="text-zinc-400">(guide)</span></>
+                : selectedStock ? `${stockDisplaySymbol(selectedStock.symbol)} has no current NAV and cannot be used yet.` : stockList.some((stock) => stock.hasNav) ? "Choose a stock token with a current NAV." : "No stock tokens currently have a live NAV; creation is paused until prices return." : currentTargetPrice !== null
               ? <>Current {targetCoins.find((team) => team.teamId === Number(v.targetTeam))?.symbol ?? "coin"} price: <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">${currentTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span> <span className="text-zinc-400">({priceFeedStatus === "live" ? "live" : priceFeedStatus === "polling" ? "updating" : "stale"} guide)</span></>
               : "Current coin price is loading; it will appear here as a guide."}
           </p>

@@ -1,0 +1,160 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Activity, Radio, Zap } from "lucide-react";
+import { STOCK_PRICE_DECIMALS } from "../lib/stockContracts";
+import { formatSignedPctStock } from "../lib/stockFormat";
+import { cn } from "../lib/cn";
+import { useCountdown } from "./Countdown";
+import type { StockApiFixture } from "../lib/stockContracts";
+import { formatUtcTime } from "../lib/utcTime";
+
+/**
+ * StockLiveMatchPanel, live view for stock fixtures.
+ *
+ * Target location in the repo:
+ *   packages/frontend/src/components/StockLiveMatchPanel.tsx
+ *
+ * This is the stock mirror of the crypto LiveMatchPanel in
+ * ./LiveMatchPanel.tsx: same layout, same match-moment pulse and
+ * history, same per-team % bars with a live NAV line, same footer
+ * notes. Only the data source differs: live NAV prices keyed by
+ * stock teamId (never the crypto price map), NAV at 1e8, and the
+ * stock scoreline passed in from the page.
+ *
+ * Two deliberate differences from crypto, both data-driven:
+ *   1. Bar scale: crypto bars use |pct| * 10, which fits
+ *      multi-percent coin moves. Stock moves in 1 hour are far
+ *      smaller, so these bars use |pct| / 3 * 100, which fills the
+ *      bar at the 3% volatile cap.
+ *   2. No TradingView chart section. The crypto chart widget resolves
+ *      a Binance symbol from a crypto teamId; stock teamIds would
+ *      resolve to the wrong assets, and tokenized stocks have no
+ *      Binance spot chart. Charts stay out until a stock chart source
+ *      is wired, rather than showing a wrong chart.
+ *
+ * Freshness: the page passes pricesFresh when both teams have a live
+ * NAV price. NAV only publishes on a 0.5% move or a 24h heartbeat,
+ * so the crypto 60-second freshness rule cannot apply to stocks;
+ * a price that exists is the latest validated NAV.
+ */
+
+export interface StockSnapshot {
+  homeStart: bigint;
+  awayStart: bigint;
+}
+
+type MatchMoment = { at: number; title: string; score: string };
+
+function pctChange(start: bigint, current: number | null): number | null {
+  if (current === null || start <= 0n) return null;
+  const startNum = Number(start) / 10 ** STOCK_PRICE_DECIMALS;
+  return startNum > 0 ? ((current - startNum) / startNum) * 100 : null;
+}
+
+function leaderOf(score: [number, number]): "home" | "away" | "draw" {
+  return score[0] > score[1] ? "home" : score[1] > score[0] ? "away" : "draw";
+}
+
+function momentTitle(previous: [number, number], next: [number, number], homeName: string, awayName: string): string {
+  const before = leaderOf(previous);
+  const after = leaderOf(next);
+  if (before !== after) {
+    if (after === "draw") return "The projected match is level";
+    return `${after === "home" ? homeName : awayName} takes the projected lead`;
+  }
+  return "Projected score changes";
+}
+
+export function StockLiveMatchPanel({
+  fixture, snapshot, livePrices, pricesFresh, projectedScore, windowEndMs, volatile,
+}: {
+  fixture: StockApiFixture;
+  snapshot: StockSnapshot | null;
+  /** Live NAV in USD, keyed by stock teamId, null when no price yet. */
+  livePrices: Record<number, number | null>;
+  pricesFresh: boolean;
+  projectedScore: [number, number] | null;
+  windowEndMs: number | null;
+  volatile: boolean;
+}) {
+  const { expired } = useCountdown(windowEndMs);
+  const [moments, setMoments] = useState<MatchMoment[]>([]);
+  const [pulse, setPulse] = useState<MatchMoment | null>(null);
+  const latest = useRef<{ home: number | null; away: number | null; score: [number, number] | null }>({ home: null, away: null, score: null });
+  const previousScore = useRef<[number, number] | null>(null);
+
+  const homePct = snapshot && pricesFresh && fixture.home ? pctChange(snapshot.homeStart, livePrices[fixture.home.teamId] ?? null) : null;
+  const awayPct = snapshot && pricesFresh && fixture.away ? pctChange(snapshot.awayStart, livePrices[fixture.away.teamId] ?? null) : null;
+  latest.current = { home: homePct, away: awayPct, score: pricesFresh ? projectedScore : null };
+
+  useEffect(() => {
+    const sample = () => {
+      const { home, away, score } = latest.current;
+      if (home === null || away === null || score === null) {
+        previousScore.current = null;
+        return;
+      }
+      const at = Date.now();
+      const previous = previousScore.current;
+      if (previous && (previous[0] !== score[0] || previous[1] !== score[1])) {
+        const moment = { at, title: momentTitle(previous, score, fixture.home?.name ?? "Home", fixture.away?.name ?? "Away"), score: `${score[0]}–${score[1]}` };
+        setMoments((events) => [moment, ...events].slice(0, 5));
+        setPulse(moment);
+      }
+      previousScore.current = [...score];
+    };
+    sample();
+    const timer = window.setInterval(sample, 5_000);
+    return () => window.clearInterval(timer);
+  }, [fixture]);
+
+  useEffect(() => {
+    if (!pulse) return;
+    const timer = window.setTimeout(() => setPulse(null), 6_000);
+    return () => clearTimeout(timer);
+  }, [pulse]);
+
+  const leader = projectedScore ? leaderOf(projectedScore) : "draw";
+  const home = fixture.home;
+  const away = fixture.away;
+  if (!home || !away) return null;
+
+  return (
+    <div className="glass relative overflow-hidden rounded-3xl border-red-500/20! p-5 shadow-[0_0_45px_rgba(239,68,68,.07)] sm:p-6">
+      <div className="pointer-events-none absolute -right-24 -top-32 h-72 w-72 rounded-full bg-red-500/[.07] blur-3xl" />
+      <div className="relative mb-5 flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/12 px-3 py-1 font-display text-xs font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400"><Radio className="h-3.5 w-3.5" /> LIVE</span>
+        <span className="inline-flex items-center gap-1.5 font-display text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"><Activity className="h-3.5 w-3.5 text-[#2E7CF6]" /> Stock momentum</span>
+        <span className="font-display text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{windowEndMs === null ? "–" : expired ? "Full time, awaiting result" : `Window ends in ${Math.max(0, Math.ceil((windowEndMs - Date.now()) / 60000))}m`}</span>
+      </div>
+
+      {pulse && <div key={pulse.at} className="relative mb-4 flex items-center gap-3 rounded-2xl border border-amber-400/35 bg-amber-400/10 p-3 shadow-[0_0_28px_rgba(251,191,36,.14)] motion-safe:animate-page-in" role="status">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-600 dark:text-amber-300"><Zap className="h-5 w-5" /></span>
+        <div className="min-w-0 flex-1"><p className="text-xs font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-300">Match moment</p><p className="text-sm font-semibold">{pulse.title}</p></div>
+        <strong className="font-display text-xl tabular-nums">{pulse.score}</strong>
+      </div>}
+
+      <div className="space-y-4">
+        {[
+          { team: home, pct: homePct, leading: leader === "home", color: "bg-gradient-to-r from-[#1D9E75] to-[#34d399]" },
+          { team: away, pct: awayPct, leading: leader === "away", color: "bg-gradient-to-r from-[#2E7CF6] to-[#8db4ff]" },
+        ].map((row) => <div key={row.team.teamId}>
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-sm"><span className={cn("font-medium", row.leading ? "text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400")}>{row.team.name}{row.leading && <span className="ml-2 rounded-full bg-[#1D9E75]/12 px-1.5 py-0.5 text-[10px] font-bold text-[#0f7a55] dark:text-[#7fe0bd]">LEADING</span>}</span><span className={cn("font-display font-bold tabular-nums", row.pct === null ? "text-zinc-400" : row.pct >= 0 ? "text-[#0f7a55] dark:text-[#7fe0bd]" : "text-red-500")}>{row.pct === null ? "Waiting for price…" : formatSignedPctStock(row.pct)}</span></div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/8 dark:bg-white/8"><div className={cn("h-full rounded-full transition-all duration-1000 motion-reduce:transition-none", row.color)} style={{ width: `${row.pct === null ? 0 : Math.min(100, Math.max(2, Math.abs(row.pct) / 3 * 100))}%` }} /></div>
+          {pricesFresh && livePrices[row.team.teamId] !== undefined && livePrices[row.team.teamId] !== null && <p className="mt-1 font-display text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">Live NAV: ${(livePrices[row.team.teamId] as number).toLocaleString("en-US")}</p>}
+        </div>)}
+      </div>
+
+      {volatile && <p className="mt-4 text-center text-sm text-amber-600 dark:text-amber-300">Volatile move above 3%, capped at 10 goals and flagged for circuit breaker review.</p>}
+
+      <div className="mt-5 border-t border-black/[.07] pt-4 dark:border-white/[.07]">
+        <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[.18em] text-zinc-500">Projected score moments · this visit</p>
+        {moments.length ? <ol className="space-y-2">{moments.map((moment) => <li key={moment.at} className="flex items-center gap-3 rounded-xl bg-black/[.025] px-3 py-2 text-xs dark:bg-white/[.035]"><time className="shrink-0 tabular-nums text-zinc-500">{formatUtcTime(moment.at)}</time><span className="flex-1">{moment.title}</span><strong className="font-display tabular-nums">{moment.score}</strong></li>)}</ol> : <p className="text-xs text-zinc-500">Moments appear when the projected score changes while you watch.</p>}
+      </div>
+      {!snapshot && <p className="mt-4 text-center text-xs text-zinc-500">Waiting for the on-chain kickoff snapshot.</p>}
+      {snapshot && !pricesFresh && <p className="mt-4 text-center text-xs text-amber-600 dark:text-amber-300">Live NAV updates are delayed. Projected score moments are paused.</p>}
+      <p className="mt-4 text-center text-[11px] text-zinc-500">Live projections can change. The oracle records the final score at full time.</p>
+    </div>
+  );
+}
