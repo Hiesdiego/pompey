@@ -87,7 +87,7 @@ export default function FixturesPage() {
     const groups = new Map<string, TimelineFixture[]>();
     for (const f of cryptoFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "crypto", fixture: f }]); }
     for (const f of stockFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "stocks", fixture: f }]); }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, matches]) => [day, matches.sort((a, b) => new Date(dayTime(a.fixture)).getTime() - new Date(dayTime(b.fixture)).getTime())] as const);
+    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([day, matches]) => [day, matches.sort((a, b) => new Date(dayTime(b.fixture)).getTime() - new Date(dayTime(a.fixture)).getTime())] as const);
   }, [cryptoFixtures, stockFixtures]);
 
   const activeCrypto = filter === "crypto" ? cryptoDays.find(([day]) => day === cryptoDay)?.[1] ?? [] : [];
@@ -184,7 +184,7 @@ export default function FixturesPage() {
     <div className="mb-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Fixture league">
       {(["all", "crypto", "stocks"] as LeagueFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("rounded-xl px-4 py-1.5 text-sm font-semibold", filter === value ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "glass text-zinc-500 dark:text-zinc-400")}>{value === "all" ? "All" : value === "crypto" ? "Crypto" : "Stocks"}</button>)}
     </div>
-    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto and stock fixtures, grouped by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
+    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto and stock fixtures, newest first by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
     {loading ? <SkeletonCards cards={6} /> : filter === "all" ? timeline.length === 0 ? <EmptyState title="No fixtures available." /> : <div className="space-y-9">{timeline.map(([day, matches]) => <section key={day}>
       <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {matches.length} fixtures</span></h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <FixtureCard key={`crypto-${entry.fixture.fixtureId}`} fixture={entry.fixture} score={scoreFor(entry.fixture)} /> : <StockFixtureCard key={`stock-${entry.fixture.fixtureId}`} fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} liveScore={stockScoreFor(entry.fixture)} />)}</div>
