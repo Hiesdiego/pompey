@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
 import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
 import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_ORACLE_ABI, STOCK_SEASON_ID, type StockApiFixture, type StockApiPrice } from "../lib/stockContracts";
@@ -222,10 +222,23 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
 }
 
 function FeaturedCarousel({ markets, teams, fixtures, prices, priceFresh, loading }: { markets: MarketSummary[]; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; loading: boolean }) {
-  const market = markets[0];
+  const [activeIndex, setActiveIndex] = useState(0);
+  const market = markets[activeIndex];
+  useEffect(() => setActiveIndex((index) => Math.min(index, Math.max(0, markets.length - 1))), [markets.length]);
   if (!market && loading) return <div className={`${card} min-h-[390px] animate-pulse rounded-3xl p-8`} aria-label="Loading featured markets" />;
   if (!market) return <div className={`${card} flex min-h-64 flex-col justify-center p-8`}><Sparkles className="h-6 w-6 text-[#2E7CF6]" /><h2 className="mt-4 font-display text-xl font-bold">No featured markets are open</h2><p className="mt-1 text-sm text-zinc-500">Top Gainer and Season Champion markets will appear here when available.</p></div>;
-  return <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured />;
+  return <div aria-roledescription="carousel" aria-label="Featured markets">
+    <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured />
+    {markets.length > 1 && <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-1.5" aria-label={`Market ${activeIndex + 1} of ${markets.length}`}>
+        {markets.map((item, index) => <button key={item.marketKey ?? item.id} type="button" onClick={() => setActiveIndex(index)} aria-label={`Show featured market ${index + 1}`} aria-current={index === activeIndex ? "true" : undefined} className={`h-2 rounded-full transition-all ${index === activeIndex ? "w-6 bg-[#2E7CF6]" : "w-2 bg-zinc-300 dark:bg-zinc-600"}`} />)}
+      </div>
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setActiveIndex((activeIndex - 1 + markets.length) % markets.length)} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Previous featured market"><ChevronLeft className="h-4 w-4" /></button>
+        <button type="button" onClick={() => setActiveIndex((activeIndex + 1) % markets.length)} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Next featured market"><ChevronRight className="h-4 w-4" /></button>
+      </div>
+    </div>}
+  </div>;
 }
 
 function SectionHeading({ icon: Icon, title, subtitle, href }: { icon: typeof Flame; title: string; subtitle: string; href?: string }) {
