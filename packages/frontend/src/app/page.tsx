@@ -14,6 +14,7 @@ import { SpreadFixtureBadges } from "../components/SpreadFixtureBadges";
 import { LeagueTable, LeagueTableSkeleton } from "../components/LeagueTable";
 import { FixtureCard, fixtureStatus, type LiveFixtureUpdate } from "../components/FixtureCard";
 import { StockFixtureCard, stockFixtureStatus } from "../components/StockFixtureCard";
+import { MemeClashCard } from "../components/MemeClashCard";
 import { useStockLiveFeed } from "../hooks/useStockLiveFeed";
 import { stockScoreline } from "../lib/stockFormat";
 import { Countdown } from "../components/Countdown";
@@ -37,6 +38,7 @@ import { useMarketFees } from "../lib/query/useMarketFees";
 import { useFactoryEvents } from "../lib/query/useFactoryEvents";
 import { useStockMarkets } from "../lib/query/useStockMarkets";
 import { stockCardDataFromSummary, StockMarketCard } from "../components/StockMarketCard";
+import { useArenaClashes } from "../lib/query/useArena";
 
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
@@ -324,6 +326,7 @@ export default function HomePage() {
   useFactoryEvents();
   const { markets, isLoading } = useMarkets();
   const stockMarketQuery = useStockMarkets();
+  const arenaClashesQuery = useArenaClashes();
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
@@ -349,6 +352,8 @@ export default function HomePage() {
   const upcoming = fixtures.filter((f) => { const s = fixtureStatus(f); return s === "upcoming" || s === "scheduled"; }).sort((a, b) => Date.parse(a.kickoff ?? a.scheduledKickoff ?? "") - Date.parse(b.kickoff ?? b.scheduledKickoff ?? "")).slice(0, 6);
   const liveStock = stockFixtures.filter((f) => stockFixtureStatus(f, stockUpdates[f.fixtureId]) === "live");
   const upcomingStock = stockFixtures.filter((f) => { const s = stockFixtureStatus(f, stockUpdates[f.fixtureId]); return s === "upcoming" || s === "tba"; }).sort((a, b) => Date.parse(a.kickoff ?? a.windowStart) - Date.parse(b.kickoff ?? b.windowStart)).slice(0, 6);
+  const liveMemes = (arenaClashesQuery.data?.clashes ?? []).filter((c) => c.status === "inplay");
+  const upcomingMemes = (arenaClashesQuery.data?.clashes ?? []).filter((c) => c.status === "upcoming").sort((a, b) => a.windowStart - b.windowStart).slice(0, 6);
   const closing = sorted.map((market) => ({ market, closesAt: market.bettingCloseTime * 1000 }))
     .sort((a, b) => a.closesAt - b.closesAt).slice(0, 12);
   const names = teams.map((t) => ({ symbol: t.symbol }));
@@ -375,6 +380,10 @@ export default function HomePage() {
     {liveStock.length > 0 && <section><SectionHeading icon={Flame} title="Stock matches in play" subtitle="Live stock performance score, tap a match to stake" href="/fixtures?league=stocks" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{liveStock.map((f) => <LiveStockFixtureCard key={f.fixtureId} fixture={f} prices={stockPrices} liveUpdate={stockUpdates[f.fixtureId]} />)}</div></section>}
 
     {upcomingStock.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming stock matches" subtitle="The next stock fixtures on the schedule" href="/fixtures?league=stocks" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcomingStock.map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={stockUpdates[f.fixtureId]} />)}</div></section>}
+
+    {liveMemes.length > 0 && <section><SectionHeading icon={Flame} title="Meme clashes in play" subtitle="Live meme performance score, tap a clash to stake" href="/fixtures?league=memes" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{liveMemes.map((c) => <MemeClashCard key={c.id} clash={c} />)}</div></section>}
+
+    {upcomingMemes.length > 0 && <section><SectionHeading icon={Clock3} title="Upcoming meme clashes" subtitle="The next meme clashes on the schedule" href="/fixtures?league=memes" /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{upcomingMemes.map((c) => <MemeClashCard key={c.id} clash={c} />)}</div></section>}
 
     <section id="trending" className="scroll-mt-32"><SectionHeading icon={Flame} title="Trending markets" subtitle="The biggest pools right now" href="/markets" />{isLoading && !markets ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /><div className={`${card} h-64 animate-pulse`} /></div> : trendingMarkets.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{trendingMarkets.map((market) => <MarketCard key={market.marketKey ?? market.id} market={market} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} />)}</div> : <div className={`${card} p-8 text-center text-sm text-zinc-500`}>No open markets yet. Check back soon.</div>}</section>
 

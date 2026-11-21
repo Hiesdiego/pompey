@@ -64,6 +64,14 @@ import { StockMarketReader } from "./services/stockMarketReader.js";
 import { StockMarketKeeper } from "./services/stockMarketKeeper.js";
 import { StockMarketIndexer } from "./services/stockMarketIndexer.js";
 import { buildStockMarketRouter } from "./api/stockMarketRoutes.js";
+import { arenaConfigured } from "./arenaConfig.js";
+import { ArenaRegistryService } from "./services/arenaRegistryService.js";
+import { ArenaClashReader } from "./services/arenaClashReader.js";
+import { ArenaKeeper } from "./services/arenaKeeper.js";
+import { ArenaCupService } from "./services/arenaCupService.js";
+import { ArenaRatings } from "./services/arenaRatings.js";
+import { ArenaCommentary } from "./services/arenaCommentary.js";
+import { buildArenaRouter } from "./api/arenaRoutes.js";
 
 async function main(): Promise<void> {
 
@@ -184,6 +192,59 @@ async function main(): Promise<void> {
   const stockMarketIndexer = stockMarketEnabled && stockMarketReader
     ? new StockMarketIndexer(db, (marketId) => stockMarketReader?.markMarketDirty(marketId))
     : null;
+  const arenaEnabled = arenaConfigured();
+  const arenaRegistry = arenaEnabled
+    ? new ArenaRegistryService({ stockList: stockListService, db })
+    : null;
+  const arenaRatings = arenaEnabled ? new ArenaRatings(db) : null;
+  const arenaCupService = arenaEnabled
+    ? new ArenaCupService({
+        db,
+        ratings: arenaRatings,
+        getMemes: () => arenaRegistry?.getMemes() ?? [],
+        onTieChanged: (tie) => {
+          if (tie.clashId !== null) arenaReader?.markClashDirty(BigInt(tie.clashId));
+        },
+      })
+    : null;
+  const arenaCommentary = arenaEnabled ? new ArenaCommentary(db, arenaCupService) : null;
+  let arenaKeeper: ArenaKeeper | null = null;
+  const arenaReader = arenaEnabled
+    ? new ArenaClashReader({
+        memeNameLookup: (tokenAddress) => arenaRegistry?.getMemeByAddress(tokenAddress)?.name ?? null,
+        memeLogoLookup: (tokenAddress) => arenaRegistry?.getMemeByAddress(tokenAddress)?.logoUrl ?? null,
+        stockNameLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.name ?? null,
+        stockLogoLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.iconUrl ?? null,
+        store: arenaCupService
+          ? {
+              getTieForClash: async (clashId) => {
+                const tie = await arenaCupService.getTieForClash(clashId);
+                return tie ? { cupId: tie.cupId, round: tie.round, tieIndex: tie.tieIndex } : null;
+              },
+              getFeaturedClashIds: () => arenaCupService.getFeaturedClashIds(),
+            }
+          : null,
+        livePrices: {
+          getStartSnapshots: (clashId) =>
+            arenaKeeper ? arenaKeeper.getStartSnapshots(clashId) : Promise.resolve(null),
+          getMemePriceUsd: (tokenAddress) => arenaRegistry?.getPriceUsd(tokenAddress) ?? null,
+          getStockNavUsd: (tokenAddress) => {
+            const stock = stockListService?.getStockByAddress(tokenAddress);
+            return stock && stock.hasNav && stock.navPrice !== null ? Number(stock.navPrice) : null;
+          },
+        },
+      })
+    : null;
+  arenaKeeper = arenaEnabled && arenaRegistry && arenaReader
+    ? new ArenaKeeper({
+        registry: arenaRegistry,
+        reader: arenaReader,
+        stockList: stockListService,
+        db,
+        cupService: arenaCupService,
+        commentary: arenaCommentary,
+      })
+    : null;
   chainCache.startWarmer();
 
 
@@ -287,6 +348,15 @@ async function main(): Promise<void> {
   if (stockMarketEnabled && stockListService && stockMarketReader) {
     app.use(buildStockMarketRouter({ listService: stockListService, reader: stockMarketReader }));
   }
+  if (arenaEnabled && arenaRegistry && arenaReader) {
+    app.use(buildArenaRouter({
+      registry: arenaRegistry,
+      reader: arenaReader,
+      ratings: arenaRatings,
+      cupService: arenaCupService,
+      commentary: arenaCommentary,
+    }));
+  }
   app.get("/api/cup/matches/:id/commentary", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 0 || id > 62) { res.status(400).json({ error: "Invalid World Cup match" }); return; }
@@ -387,6 +457,19 @@ async function main(): Promise<void> {
     } catch (err) {
       logger.error("[backend] stock market indexer failed to start", { error: String(err) });
     }
+    if (arenaEnabled && arenaRegistry) {
+      arenaRegistry.start();
+    }
+    try {
+      await arenaCommentary?.start();
+    } catch (err) {
+      logger.error("[backend] arena commentary failed to start", { error: String(err) });
+    }
+    try {
+      arenaKeeper?.start();
+    } catch (err) {
+      logger.error("[backend] arena keeper failed to start", { error: String(err) });
+    }
     try {
       await socialIndexer.start();
     } catch (err) {
@@ -410,6 +493,9 @@ async function main(): Promise<void> {
     stockMarketKeeper?.stop();
     stockMarketIndexer?.stop();
     stockListService?.stop();
+    arenaKeeper?.stop();
+    arenaRegistry?.stop();
+    arenaCommentary?.stop();
     lifecycle.stop();
     cupLifecycle?.stop();
     cupCommentary?.stop();

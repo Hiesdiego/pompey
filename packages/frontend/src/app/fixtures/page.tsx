@@ -8,6 +8,9 @@ import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_DECIMALS, STOCK_PRICE_ORACLE_ABI
 import { stockMatchdayDate, stockRoundLabel, stockRoundWave, stockScoreline, STOCK_DOUBLE_HEADER_DATE, STOCK_TOTAL_ROUNDS, utcDayKey } from "../../lib/stockFormat";
 import { FixtureCard, fixtureStatus } from "../../components/FixtureCard";
 import { StockFixtureCard, stockFixtureStatus } from "../../components/StockFixtureCard";
+import { MemeClashCard } from "../../components/MemeClashCard";
+import { useArenaClashes } from "../../lib/query/useArena";
+import type { ClashSummary } from "../../lib/arenaContracts";
 import { StockScoringExplainer } from "../../components/StockScoringExplainer";
 import { SectionTitle, ErrorState, EmptyState, SkeletonCards } from "../../components/States";
 import { cn } from "../../lib/cn";
@@ -17,9 +20,9 @@ import { usePriceFeed } from "../../lib/price/usePriceFeed";
 import { useStockLiveFeed } from "../../hooks/useStockLiveFeed";
 import { normalizeScoreline, roundPctLikeOracle } from "../../lib/format";
 
-type LeagueFilter = "all" | "crypto" | "stocks";
+type LeagueFilter = "all" | "crypto" | "stocks" | "memes";
 type FixtureSnapshot = { homeStart: bigint; awayStart: bigint; homeEnd: bigint; awayEnd: bigint; startSubmitted: boolean; endSubmitted: boolean };
-type TimelineFixture = { kind: "crypto"; fixture: ApiFixture } | { kind: "stocks"; fixture: StockApiFixture };
+type TimelineFixture = { kind: "crypto"; fixture: ApiFixture } | { kind: "stocks"; fixture: StockApiFixture } | { kind: "memes"; clash: ClashSummary };
 
 const REFETCH_MS = 15_000;
 const dayTime = (fixture: ApiFixture | StockApiFixture) => fixture.kickoff ?? ("scheduledKickoff" in fixture ? fixture.scheduledKickoff : null) ?? fixture.windowStart;
@@ -50,10 +53,12 @@ export default function FixturesPage() {
   const [stockDay, setStockDay] = useState<number | null>(null);
   const { prices } = usePriceFeed(true);
   const { fixtureUpdates, prices: stockPrices } = useStockLiveFeed(true);
+  const arenaClashesQuery = useArenaClashes();
+  const arenaClashes = useMemo(() => arenaClashesQuery.data?.clashes ?? [], [arenaClashesQuery.data]);
 
   useEffect(() => {
     const requestedLeague = new URLSearchParams(window.location.search).get("league");
-    if (requestedLeague === "crypto" || requestedLeague === "stocks" || requestedLeague === "all") setFilter(requestedLeague);
+    if (requestedLeague === "crypto" || requestedLeague === "stocks" || requestedLeague === "all" || requestedLeague === "memes") setFilter(requestedLeague);
     let alive = true;
     const load = async () => {
       try {
@@ -87,8 +92,15 @@ export default function FixturesPage() {
     const groups = new Map<string, TimelineFixture[]>();
     for (const f of cryptoFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "crypto", fixture: f }]); }
     for (const f of stockFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "stocks", fixture: f }]); }
-    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([day, matches]) => [day, matches.sort((a, b) => new Date(dayTime(b.fixture)).getTime() - new Date(dayTime(a.fixture)).getTime())] as const);
-  }, [cryptoFixtures, stockFixtures]);
+    for (const c of arenaClashes) { const day = utcDayKey(new Date(c.windowStart * 1000).toISOString()); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "memes", clash: c }]); }
+    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([day, matches]) => [day, matches.sort((a, b) => (b.kind === "memes" ? b.clash.windowStart * 1000 : new Date(dayTime(b.fixture)).getTime()) - (a.kind === "memes" ? a.clash.windowStart * 1000 : new Date(dayTime(a.fixture)).getTime()))] as const);
+  }, [cryptoFixtures, stockFixtures, arenaClashes]);
+
+  const memeTimeline = useMemo(() => {
+    const groups = new Map<string, ClashSummary[]>();
+    for (const c of arenaClashes) { const day = utcDayKey(new Date(c.windowStart * 1000).toISOString()); if (day) groups.set(day, [...(groups.get(day) ?? []), c]); }
+    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([day, list]) => [day, [...list].sort((a, b) => b.windowStart - a.windowStart)] as const);
+  }, [arenaClashes]);
 
   const activeCrypto = filter === "crypto" ? cryptoDays.find(([day]) => day === cryptoDay)?.[1] ?? [] : [];
   // The All timeline uses the same score-bearing cards as the league views,
@@ -182,16 +194,19 @@ export default function FixturesPage() {
   return <div>
     <SectionTitle title="Fixtures" action={<Link href="/standings" className="inline-flex items-center gap-1 text-sm font-semibold text-[#1D4ED8] dark:text-[#7db3ff]"><Table2 className="h-4 w-4" /> League standings</Link>} />
     <div className="mb-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Fixture league">
-      {(["all", "crypto", "stocks"] as LeagueFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("rounded-xl px-4 py-1.5 text-sm font-semibold", filter === value ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "glass text-zinc-500 dark:text-zinc-400")}>{value === "all" ? "All" : value === "crypto" ? "Crypto" : "Stocks"}</button>)}
+      {(["all", "crypto", "stocks", "memes"] as LeagueFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("rounded-xl px-4 py-1.5 text-sm font-semibold", filter === value ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "glass text-zinc-500 dark:text-zinc-400")}>{value === "all" ? "All" : value === "crypto" ? "Crypto" : value === "stocks" ? "Stocks" : "Memes"}</button>)}
     </div>
-    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto and stock fixtures, newest first by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
+    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto, stock and meme fixtures, newest first by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : filter === "memes" ? "Meme clashes from the Stock Meme Arena, newest first by window start date, all times UTC" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
     {loading ? <SkeletonCards cards={6} /> : filter === "all" ? timeline.length === 0 ? <EmptyState title="No fixtures available." /> : <div className="space-y-9">{timeline.map(([day, matches]) => <section key={day}>
       <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {matches.length} fixtures</span></h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <FixtureCard key={`crypto-${entry.fixture.fixtureId}`} fixture={entry.fixture} score={scoreFor(entry.fixture)} /> : <StockFixtureCard key={`stock-${entry.fixture.fixtureId}`} fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} liveScore={stockScoreFor(entry.fixture)} />)}</div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <FixtureCard key={`crypto-${entry.fixture.fixtureId}`} fixture={entry.fixture} score={scoreFor(entry.fixture)} /> : entry.kind === "stocks" ? <StockFixtureCard key={`stock-${entry.fixture.fixtureId}`} fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} liveScore={stockScoreFor(entry.fixture)} /> : <MemeClashCard key={`meme-${entry.clash.id}`} clash={entry.clash} />)}</div>
     </section>)}</div> : filter === "crypto" ? <>
       {cryptoDay !== null && <DayPager values={cryptoDays} selected={cryptoDay} onChange={setCryptoDay} />}
       {cryptoDays.find(([day]) => day === cryptoDay) ? <><h2 className="mb-4 font-display text-base font-bold">Matchday {cryptoDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{activeCrypto.length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{activeCrypto.map((f) => <FixtureCard key={f.fixtureId} fixture={f} score={scoreFor(f)} />)}</div></> : <EmptyState title="No fixtures for this matchday." />}
-    </> : <>
+    </> : filter === "memes" ? memeTimeline.length === 0 ? <EmptyState title="No meme clashes available." /> : <div className="space-y-9">{memeTimeline.map(([day, clashes]) => <section key={day}>
+      <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {clashes.length} clashes</span></h2>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{clashes.map((c) => <MemeClashCard key={`meme-${c.id}`} clash={c} />)}</div>
+    </section>)}</div> : <>
       {stockDay !== null && <DayPager values={stockDays} selected={stockDay} onChange={setStockDay} stock />}
       {stockDay !== null && stockMatchdayDate(stockDay) === STOCK_DOUBLE_HEADER_DATE && stockRoundWave(stockDay) && <p className="mb-5 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">Dec 16 hosts rounds 21 and 22 in two waves, morning and evening.</p>}
       {stockDays.find(([day]) => day === stockDay) ? <><h2 className="mb-4 font-display text-base font-bold">Round {stockDay! + 1}<span className="ml-2 text-sm font-normal text-zinc-500">{stockMatchdayDate(stockDay!)} UTC · {stockDays.find(([day]) => day === stockDay)?.[1].length} matches</span></h2><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{(stockDays.find(([day]) => day === stockDay)?.[1] ?? []).map((f) => <StockFixtureCard key={f.fixtureId} fixture={f} liveUpdate={fixtureUpdates[f.fixtureId]} liveScore={stockScoreFor(f)} />)}</div></> : <EmptyState title="No fixtures for this round." />}

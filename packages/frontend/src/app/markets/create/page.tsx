@@ -525,7 +525,7 @@ export default function CreateMarketPage() {
 
     <div className="relative mb-8 overflow-hidden rounded-[2rem] bg-[#0d224b] p-5 text-white sm:p-10">
         <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#2E7CF6]/40 blur-3xl" />
-        <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">5 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
+        <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">6 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
       </div>
 
       <div className="grid min-w-0 gap-7 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -588,6 +588,22 @@ export default function CreateMarketPage() {
             </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => router.push("/markets/create/meme")}
+            className="group min-h-48 rounded-[1.5rem] border border-black/[.08] bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:border-[#2E7CF6]/50 hover:shadow-[0_15px_40px_rgba(46,124,246,0.12)] dark:border-white/[.08] dark:bg-[#101821]"
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2E7CF6]/10 text-[#2E7CF6] transition-colors group-hover:bg-[#2E7CF6] group-hover:text-white">
+                <Swords className="h-5 w-5" />
+              </span>
+              <span className="rounded-full bg-black/5 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:bg-white/5">Template 6</span>
+            </div>
+            <div className="mb-2 font-display text-base font-bold">Meme clash</div>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Will a BaseStonk meme outperform its paired stock, or another meme on the same stock? The window starts 1 hour after creation and staking closes at window start.
+            </p>
+          </button>
         </div>
       )}
 
