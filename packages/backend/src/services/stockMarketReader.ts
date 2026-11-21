@@ -439,6 +439,24 @@ export class StockMarketReader {
     return this.coalesce("markets", async () => {
       const now = Date.now();
       if (this.marketsCache && now - this.marketsCache.at < stockMarketConfig.cache.marketsTtlMs) {
+        // The stock factory has no indexer wired yet. Check the cheap count
+        // getter while serving the cached list so a newly created market is
+        // visible immediately instead of waiting for the 10-minute TTL.
+        try {
+          const marketCount = Number(await this.publicClient.readContract({
+            address: this.factory,
+            abi: STOCK_MARKET_FACTORY_ABI,
+            functionName: "marketCount",
+          }));
+          if (marketCount !== this.marketsCache.value.markets.length) {
+            const value = await this.fetchMarkets();
+            this.marketsCache = { at: now, value };
+            this.dirtyMarketIds.clear();
+            return value;
+          }
+        } catch {
+          // A warm list remains usable during a temporary count/RPC failure.
+        }
         if (this.dirtyMarketIds.size === 0) return this.marketsCache.value;
         const pending = [...this.dirtyMarketIds];
         const updates = await Promise.all(pending.map(async ([id]) =>

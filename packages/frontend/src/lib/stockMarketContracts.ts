@@ -340,6 +340,13 @@ async function stockMarketGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+function unwrapStockMarketEnvelope(value: unknown): unknown {
+  if (value && typeof value === "object" && !Array.isArray(value) && "data" in value) {
+    return (value as { data?: unknown }).data ?? value;
+  }
+  return value;
+}
+
 function normalizeStockMarket(raw: StockMarketSummary): StockMarketSummary {
   return {
     ...raw,
@@ -355,27 +362,24 @@ function normalizeStockMarket(raw: StockMarketSummary): StockMarketSummary {
  *   GET /api/stocks/list          -> { stocks: StockListItem[] }
  *   GET /api/stocks/markets       -> mirrors GET /api/chain/markets
  *   GET /api/stocks/markets/:id   -> mirrors GET /api/chain/markets/:id
- * The list and detail unwrappers accept both the enveloped shape
- * ({ markets } / { market }) and a bare array / bare object, so a small
- * envelope difference between the chain cache and the stock service
- * never blanks the board.
+ * The API client accepts the standard { ok, data } response envelope,
+ * the inner { markets } / { market } shape, and bare arrays/objects.
  */
 export const stockMarketApi = {
   list: async (): Promise<StockListItem[]> => {
-    const data = await stockMarketGet<{ stocks: StockListItem[] } | StockListItem[]>("/api/stocks/list");
+    const response = await stockMarketGet<unknown>("/api/stocks/list");
+    const data = unwrapStockMarketEnvelope(response) as { stocks?: StockListItem[] } | StockListItem[];
     return Array.isArray(data) ? data : data.stocks ?? [];
   },
   markets: async (): Promise<StockMarketSummary[]> => {
-    const data = await stockMarketGet<{ markets: StockMarketSummary[] } | StockMarketSummary[]>(
-      "/api/stocks/markets"
-    );
+    const response = await stockMarketGet<unknown>("/api/stocks/markets");
+    const data = unwrapStockMarketEnvelope(response) as { markets?: StockMarketSummary[] } | StockMarketSummary[];
     const list = Array.isArray(data) ? data : data.markets ?? [];
     return list.map(normalizeStockMarket);
   },
   market: async (id: string | number | bigint): Promise<StockMarketDetail> => {
-    const data = await stockMarketGet<{ market: StockMarketSummary } | StockMarketSummary>(
-      `/api/stocks/markets/${id.toString()}`
-    );
+    const response = await stockMarketGet<unknown>(`/api/stocks/markets/${id.toString()}`);
+    const data = unwrapStockMarketEnvelope(response) as { market: StockMarketSummary } | StockMarketSummary;
     const market = "market" in data ? data.market : data;
     return normalizeStockMarket(market);
   },

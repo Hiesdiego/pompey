@@ -45,6 +45,8 @@ import {
 import { CONTRACTS, TICK_TOKEN_ABI, SEASON_DISPLAY_NAME } from "../../../lib/contracts";
 import { ErrorState } from "../../../components/States";
 import { cn } from "../../../lib/cn";
+import { queryClient } from "../../../lib/query/queryClient";
+import { qks } from "../../../lib/query/keys";
 import { TeamBadge } from "../../../components/TeamBadge";
 import { api, type ApiFixture } from "../../../lib/api";
 import { usePriceFeed } from "../../../lib/price/usePriceFeed";
@@ -395,7 +397,12 @@ export default function CreateMarketPage() {
 
   const busy = approveStatus === "pending" || createStatus === "pending";
   const selectedTeam = targetCoins.find((team) => team.teamId === Number(targetTeam));
-  const liveTargetPrice = selectedTeam ? prices[selectedTeam.symbol] : undefined;
+  const liveTargetPrice = targetAssetType === "stock"
+    ? selectedStock?.hasNav ? parseNavPrice(selectedStock.navPrice) : null
+    : selectedTeam ? prices[selectedTeam.symbol] : undefined;
+  const liveTargetSymbol = targetAssetType === "stock"
+    ? selectedStock ? stockDisplaySymbol(selectedStock.symbol) : "stock"
+    : selectedTeam?.symbol ?? "coin";
   const selectedFixture = fixtures.find((fixture) => String(fixture.fixtureId) === spreadFixture);
   const previewTitle = templateId === TEMPLATES.TARGET
     ? targetPrice ? targetAssetType === "stock"
@@ -422,6 +429,7 @@ export default function CreateMarketPage() {
       const allowance = (await publicClient.readContract({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "allowance", args: [address, factory] })) as bigint;
       if (allowance < seedWei) await writeApprove({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "approve", args: [factory, seedWei] });
       await writeCreate({ address: factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "createMarket", args: [selectedStock.contractAddress as `0x${string}`, stockDisplaySymbol(selectedStock.symbol), directionFromAbove(targetAbove), scaledTarget, BigInt(deadlineSeconds), (myProfile?.username || creatorName).slice(0, 32)] });
+      await queryClient.invalidateQueries({ queryKey: qks.stockMarkets });
       router.push("/markets");
       return;
     }
@@ -515,13 +523,13 @@ export default function CreateMarketPage() {
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
 
-      <div className="relative mb-8 overflow-hidden rounded-[2rem] bg-[#0d224b] p-7 text-white sm:p-10">
+    <div className="relative mb-8 overflow-hidden rounded-[2rem] bg-[#0d224b] p-5 text-white sm:p-10">
         <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-[#2E7CF6]/40 blur-3xl" />
         <div className="relative"><p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.2em] text-[#93c0ff]"><Sparkles className="h-4 w-4" /> Community markets</p><h1 className="mt-3 max-w-2xl font-display text-4xl font-black leading-tight sm:text-5xl">Put your prediction on the board.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/70">Choose a format, define the result, and seed the pool. Your market goes live after the transaction confirms.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white/10 px-3 py-1.5">5 market formats</span><span className="rounded-full bg-white/10 px-3 py-1.5">Verifiable results</span><span className="rounded-full bg-white/10 px-3 py-1.5">{CREATION_SEED_TICK} TICK seed</span></div></div>
       </div>
 
-      <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div>
+      <div className="grid min-w-0 gap-7 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0">
 
       {/* Step indicator */}
       <div className="mb-8 flex flex-wrap items-center gap-2" aria-label={`Step ${step} of 3`}>
@@ -584,7 +592,7 @@ export default function CreateMarketPage() {
       )}
 
       {step === 2 && templateId !== null && (
-        <div className="rounded-[1.5rem] border border-black/[.08] bg-white p-6 shadow-sm dark:border-white/[.08] dark:bg-[#101821] sm:p-8">
+        <div className="min-w-0 rounded-[1.5rem] border border-black/[.08] bg-white p-4 shadow-sm dark:border-white/[.08] dark:bg-[#101821] sm:p-8">
           <p className="text-xs font-extrabold uppercase tracking-[.17em] text-[#2E7CF6]">Define the result</p>
           <h3 className="mb-1 mt-2 font-display text-2xl font-black">{TEMPLATE_NAMES[templateId]}</h3>
           <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
@@ -733,12 +741,12 @@ export default function CreateMarketPage() {
         </div>
       )}
         </div>
-        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start">
           <div className="overflow-hidden rounded-[1.5rem] border border-[#2E7CF6]/20 bg-gradient-to-br from-[#2E7CF6]/[.08] to-white p-5 dark:to-[#101821]">
             <p className="text-[11px] font-extrabold uppercase tracking-[.17em] text-[#2E7CF6]">Live preview</p>
             <div className="mt-4 flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2E7CF6]/15 text-[#2E7CF6]"><Target className="h-4 w-4" /></span><span className="text-xs font-bold text-zinc-500">{templateId === null ? "Choose a market format" : TEMPLATE_NAMES[templateId]}</span></div>
             <h2 className="mt-4 min-h-20 font-display text-xl font-black leading-snug">{previewTitle}</h2>
-            {templateId === TEMPLATES.TARGET && liveTargetPrice && <div className="mt-2 rounded-xl bg-white/80 p-3 text-sm dark:bg-white/[.05]"><p className="text-xs text-zinc-500">Current {selectedTeam?.symbol} spot price</p><p className="font-bold tabular-nums">${liveTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</p><p className="mt-1 text-xs text-zinc-500">{priceFeedStatus === "stale" ? "Price feed stale" : "Guide only · oracle checkpoint settles"}</p></div>}
+            {templateId === TEMPLATES.TARGET && liveTargetPrice !== null && liveTargetPrice !== undefined && <div className="mt-2 flex min-w-0 items-center gap-3 rounded-xl bg-white/80 p-3 text-sm dark:bg-white/[.05]">{targetAssetType === "stock" && selectedStock && <StockLogo symbol={selectedStock.symbol} iconUrl={selectedStock.iconUrl} size={32} />}<div className="min-w-0"><p className="text-xs text-zinc-500">Current {liveTargetSymbol} {targetAssetType === "stock" ? "NAV" : "spot price"}</p><p className="font-bold tabular-nums">${liveTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}</p><p className="mt-1 text-xs text-zinc-500">{targetAssetType === "stock" ? "Latest NAV · guide only" : priceFeedStatus === "stale" ? "Price feed stale" : "Guide only · oracle checkpoint settles"}</p></div></div>}
             {templateId === TEMPLATES.TARGET && <p className="mt-3 text-xs text-zinc-500">Result checked {formatPriceTargetTimeUtc(parseUtcDateTime(targetTime))}. Betting closes before that checkpoint.</p>}
             {paramsError && step > 1 && <p className="mt-3 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">{paramsError}</p>}
             <div className="mt-5 border-t border-black/[.08] pt-4 text-xs text-zinc-500 dark:border-white/[.08]">Created by {myProfile?.username ? `@${myProfile.username}` : creatorName || "you"}</div>
@@ -972,15 +980,19 @@ function TemplateParamsForm({
   if (templateId === TEMPLATES.TARGET) {
     const selectedStock = stockList.find((stock) => stock.symbol === v.stockSymbol);
     const stockPrice = parseNavPrice(selectedStock?.navPrice);
+    const quickPickPrice = v.targetAssetType === "stock" ? stockPrice : currentTargetPrice;
+    const quickPickAvailable = v.targetAssetType === "stock"
+      ? selectedStock?.hasNav === true && stockPrice !== null
+      : currentTargetPrice !== null && priceFeedStatus !== "stale";
     return (
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2">
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <div className="min-w-0 md:col-span-2">
           <label className={labelCls}>Asset type</label>
           <div className="grid grid-cols-2 gap-2">
             {(["crypto", "stock"] as const).map((kind) => <button key={kind} type="button" onClick={() => v.setTargetAssetType(kind)} className={`rounded-xl border px-4 py-2.5 text-sm font-bold capitalize ${v.targetAssetType === kind ? "border-[#2E7CF6] bg-[#2E7CF6]/10 text-[#2E7CF6]" : "border-black/10 dark:border-white/10"}`}>{kind}</button>)}
           </div>
         </div>
-        <div>
+        <div className="min-w-0">
           {v.targetAssetType === "crypto" ? <><label className={labelCls}>Coin</label><TeamSelect value={v.targetTeam} onChange={v.setTargetTeam} teams={targetCoins} inputCls={inputCls} searchable /></> : <>
             <label className={labelCls}>Stock token</label>
             <p className="mb-2 text-xs text-zinc-500">Search by ticker or company name, for example NVDA or NVIDIA. Tokens with a current NAV can be selected.</p>
@@ -1000,7 +1012,7 @@ function TemplateParamsForm({
             </div>
           </>}
         </div>
-        <div>
+        <div className="min-w-0">
           <label className={labelCls}>Direction</label>
           <select
             value={v.targetAbove ? "above" : "below"}
@@ -1011,7 +1023,7 @@ function TemplateParamsForm({
             <option value="below">Price ends BELOW target (Yes wins)</option>
           </select>
         </div>
-        <div>
+        <div className="min-w-0">
           <label className={labelCls}>Target price (USD)</label>
           <p className="mb-2 text-xs text-zinc-500" aria-live="polite">
             {v.targetAssetType === "stock" ? stockListIsFallback
@@ -1031,9 +1043,9 @@ function TemplateParamsForm({
             placeholder="e.g. 100000"
             className={inputCls}
           />
-          {currentTargetPrice !== null && priceFeedStatus !== "stale" && <div className="mt-2 flex flex-wrap gap-2">{[-10, -5, 5, 10].map((pct) => <button key={pct} type="button" onClick={() => v.setTargetPrice(Number((currentTargetPrice * (1 + pct / 100)).toPrecision(8)).toString())} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{pct > 0 ? "+" : ""}{pct}% from spot</button>)}</div>}
+          {quickPickAvailable && quickPickPrice !== null && <div className="mt-2 flex flex-wrap gap-2">{[-10, -5, 5, 10].map((pct) => <button key={pct} type="button" onClick={() => v.setTargetPrice(Number((quickPickPrice * (1 + pct / 100)).toPrecision(8)).toString())} className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-bold text-zinc-600 hover:border-[#2E7CF6]/50 hover:text-[#2E7CF6] dark:border-white/10 dark:text-zinc-300">{pct > 0 ? "+" : ""}{pct}% from {v.targetAssetType === "stock" ? "NAV" : "spot"}</button>)}</div>}
         </div>
-        <div>
+        <div className="min-w-0">
           <label className={labelCls}>At time (UTC) <span className="font-normal text-zinc-400">(earliest {formatPriceTargetTimeUtc(parseUtcDateTime(targetMin))})</span></label>
           <input
             type="datetime-local"
