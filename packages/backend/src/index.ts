@@ -62,6 +62,7 @@ import { stockMarketConfigured } from "./stockMarketConfig.js";
 import { StockListService } from "./services/stockListService.js";
 import { StockMarketReader } from "./services/stockMarketReader.js";
 import { StockMarketKeeper } from "./services/stockMarketKeeper.js";
+import { StockMarketIndexer } from "./services/stockMarketIndexer.js";
 import { buildStockMarketRouter } from "./api/stockMarketRoutes.js";
 
 async function main(): Promise<void> {
@@ -179,6 +180,9 @@ async function main(): Promise<void> {
     : null;
   const stockMarketKeeper = stockMarketEnabled && stockListService && stockMarketReader
     ? new StockMarketKeeper(stockListService, stockMarketReader, stockPriceFeed ?? undefined)
+    : null;
+  const stockMarketIndexer = stockMarketEnabled && stockMarketReader
+    ? new StockMarketIndexer(db, (marketId) => stockMarketReader?.markMarketDirty(marketId))
     : null;
   chainCache.startWarmer();
 
@@ -379,6 +383,11 @@ async function main(): Promise<void> {
       logger.error("[backend] stock market keeper failed to start", { error: String(err) });
     }
     try {
+      await stockMarketIndexer?.start();
+    } catch (err) {
+      logger.error("[backend] stock market indexer failed to start", { error: String(err) });
+    }
+    try {
       await socialIndexer.start();
     } catch (err) {
       logger.error("[backend] social indexer failed to start", { error: String(err) });
@@ -399,6 +408,7 @@ async function main(): Promise<void> {
     stockNavPoller?.stop();
     stockCheckpointSubmitter?.stop();
     stockMarketKeeper?.stop();
+    stockMarketIndexer?.stop();
     stockListService?.stop();
     lifecycle.stop();
     cupLifecycle?.stop();

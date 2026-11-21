@@ -7,7 +7,14 @@ import { backendUrl, siteUrl } from "../../api/social/og/_shared";
 import { targetCoinById } from "../../../lib/targetCoins";
 import { marketFromRoute } from "../../../lib/marketFactory";
 import { priceTargetQuestion } from "../../../lib/priceTargetQuestion";
-import { isStockMarketRoute, stockDisplaySymbol, stockPriceTargetQuestion } from "../../../lib/stockMarketContracts";
+import {
+  isStockMarketRoute,
+  stockMarketFromRoute,
+  STOCK_MARKET_FACTORY_ABI,
+  normalizeStockMarketInfo,
+  stockDisplaySymbol,
+  stockPriceTargetQuestion,
+} from "../../../lib/stockMarketContracts";
 
 export const revalidate = 60;
 
@@ -69,27 +76,35 @@ async function marketQuestion(marketId: bigint, factory: `0x${string}`): Promise
   }
 }
 
-interface StockMarketMetadata {
-  name?: string;
-  symbol: string;
-  targetPrice: string;
-  above: boolean;
-  endTime: number;
-}
-
-async function stockMarketMetadata(id: string): Promise<StockMarketMetadata | null> {
+// Stock price target markets carry their terms directly on the
+// StockMarketFactory marketInfo tuple (token, symbol, direction,
+// targetPrice, creator, creatorName, createdAt, bettingCloseTime,
+// endTime, voidAfter, outcomeCount), so the question is built from
+// those fields with stockPriceTargetQuestion, the same formatter the
+// stock detail page and the stock market cards use. The read mirrors
+// marketQuestion above: same public client, same try/catch fallback
+// to null, which keeps the generic metadata fallback below intact
+// when the factory read fails or the market does not exist. A market
+// id that was never created reads back as zero values (empty symbol,
+// zero target, zero endTime), so those are treated as missing too.
+async function stockMarketQuestion(marketId: bigint, factory: `0x${string}`): Promise<string | null> {
   try {
-    const marketId = id.slice(2);
-    const response = await fetch(`${backendUrl()}/api/stocks/markets/${marketId}`, {
-      next: { revalidate: 60 },
+    if (!factory) return null;
+    const client = getPublicClient();
+    const info = await client.readContract({
+      address: factory,
+      abi: STOCK_MARKET_FACTORY_ABI,
+      functionName: "marketInfo",
+      args: [marketId],
     });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as {
-      ok?: boolean;
-      data?: { market?: StockMarketMetadata };
-      market?: StockMarketMetadata;
-    };
-    return payload.data?.market ?? payload.market ?? null;
+    const normalized = normalizeStockMarketInfo(info);
+    if (!normalized.symbol || normalized.targetPrice === 0n || normalized.endTime === 0n) return null;
+    return stockPriceTargetQuestion(
+      stockDisplaySymbol(normalized.symbol),
+      normalized.targetPrice,
+      normalized.above,
+      new Date(Number(normalized.endTime) * 1000)
+    );
   } catch {
     return null;
   }
@@ -102,22 +117,19 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
   const site = siteUrl();
-  const route = marketFromRoute(id);
-  const isStock = isStockMarketRoute(id);
-  const stock = isStock ? await stockMarketMetadata(id.slice(2)) : null;
-  const question = stock
-    ? stockPriceTargetQuestion(stockDisplaySymbol(stock.symbol), stock.targetPrice, stock.above, stock.endTime * 1000)
-    : route ? await marketQuestion(route.id, route.factory) : null;
-  const title = question
-    ? `${question} — TICKR`
-    : isStock ? `Stock Price Target Market — TICKR` : `Market ${id} — TICKR`;
+  const stockRoute = isStockMarketRoute(id) ? stockMarketFromRoute(id) : null;
+  const route = stockRoute ? null : marketFromRoute(id);
+  const question = stockRoute
+    ? await stockMarketQuestion(stockRoute.id, stockRoute.factory)
+    : route
+      ? await marketQuestion(route.id, route.factory)
+      : null;
+  const title = question ? `${question} — TICKR` : `Market ${id} — TICKR`;
   const description = question
-    ? stock
-      ? `${question} Predict stock price targets on TICKR. Markets settle against the stock's published NAV at the deadline.`
+    ? stockRoute
+      ? `${question} Predict stock prices on TICKR.`
       : `${question} Predict crypto prices on TICKR.`
-    : isStock
-      ? "Stock price target markets on TICKR. Predict whether a stock NAV will finish above or below its target."
-      : "Crypto Price Prediction League.";
+    : "Crypto Price Prediction League.";
 
   const safeId = encodeURIComponent(id);
   const ogImage = `${site}/api/social/og/market/${safeId}?v=2&title=${encodeURIComponent(question ?? "TICKR prediction market")}`;

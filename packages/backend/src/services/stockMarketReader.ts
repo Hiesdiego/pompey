@@ -32,11 +32,19 @@
  *     the cursor machinery is not copied. Add it here, mirroring
  *     ChainCache.advanceOddsCursor, if a stock odds endpoint is ever
  *     specced.
- *   - NO Supabase dirty feed: ChainCache.markMarketDirty is driven by
- *     the crypto SocialIndexer. No stock market indexer exists yet, so
- *     dirty marks come from the stock market keeper (after a resolve
- *     or void it lands) and from TTL expiry. markMarketDirty() is kept
- *     with the same signature so a future indexer can drive it.
+ *   - Supabase dirty feed, via the stock market indexer:
+ *     StockMarketIndexer (services/stockMarketIndexer.ts) mirrors the
+ *     crypto SocialIndexer: it scans StockMarketFactory logs in
+ *     900-block chunks on a 120s loop, persists its watermark in the
+ *     indexer_state table under the key stock_market_factory, and
+ *     calls markMarketDirty for every MarketCreated, MarketStaked,
+ *     MarketResolved and MarketVoided event, so a stake refreshes
+ *     that market on the next list read instead of waiting out the
+ *     10-minute TTL. The keeper still marks markets dirty directly
+ *     after its own resolves and voids, and TTL expiry remains the
+ *     fallback when the indexer is off (for example when Supabase is
+ *     not configured, which disables the indexer exactly as it
+ *     disables the crypto SocialIndexer).
  *   - The summary carries the DECODED stock terms (token, symbol,
  *     target, direction, question) alongside the crypto fields. The
  *     crypto summary carries abi-encoded `params` and a templateId
@@ -439,24 +447,6 @@ export class StockMarketReader {
     return this.coalesce("markets", async () => {
       const now = Date.now();
       if (this.marketsCache && now - this.marketsCache.at < stockMarketConfig.cache.marketsTtlMs) {
-        // The stock factory has no indexer wired yet. Check the cheap count
-        // getter while serving the cached list so a newly created market is
-        // visible immediately instead of waiting for the 10-minute TTL.
-        try {
-          const marketCount = Number(await this.publicClient.readContract({
-            address: this.factory,
-            abi: STOCK_MARKET_FACTORY_ABI,
-            functionName: "marketCount",
-          }));
-          if (marketCount !== this.marketsCache.value.markets.length) {
-            const value = await this.fetchMarkets();
-            this.marketsCache = { at: now, value };
-            this.dirtyMarketIds.clear();
-            return value;
-          }
-        } catch {
-          // A warm list remains usable during a temporary count/RPC failure.
-        }
         if (this.dirtyMarketIds.size === 0) return this.marketsCache.value;
         const pending = [...this.dirtyMarketIds];
         const updates = await Promise.all(pending.map(async ([id]) =>

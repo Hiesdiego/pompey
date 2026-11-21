@@ -14,6 +14,16 @@ import { TARGET_COINS, targetCoinById } from "@/lib/targetCoins";
 import { marketFromRoute, MARKET_FACTORY_ADDRESS } from "@/lib/marketFactory";
 import { priceTargetQuestion } from "@/lib/priceTargetQuestion";
 import {
+  isStockMarketRoute,
+  stockMarketFromRoute,
+  STOCK_MARKET_FACTORY_ABI,
+  normalizeStockMarketInfo,
+  stockDisplaySymbol,
+  stockPriceTargetQuestion,
+  stockLogoCandidates,
+  type StockListItem,
+} from "@/lib/stockMarketContracts";
+import {
   OG_WIDTH,
   OG_HEIGHT,
   OG_LIVE_CACHE,
@@ -135,6 +145,102 @@ async function artwork(templateId: number, params: `0x${string}`, ranked: number
   return Promise.all(coins.map(async coin => ({ symbol: coin.symbol, logo: await logoDataUrl(coin.cmcId) })));
 }
 
+// Stock price target markets are the stock equivalent of the crypto
+// TARGET template: a single asset, Yes/No outcomes, one piece of art.
+// The helpers below mirror the crypto TARGET artwork path step for
+// step, with the stock logo sources in place of the CoinMarketCap id.
+//
+// The iconUrl for a stock lives on the backend stock list
+// (StockListItem.iconUrl). stockMarketApi in lib/stockMarketContracts
+// cannot be used from this server route: it builds its URL from
+// BACKEND_API_URL in lib/contracts, which is the relative
+// "/backend-api" browser proxy path, and a relative fetch URL throws
+// on the server. So the list is fetched the way this route already
+// fetches backend data server side (the SPREAD fixture fetch above
+// and cupDirectory in ../_cup): backendUrl() plus a revalidate hint
+// and a 5 second timeout. The response unwrapping accepts both the
+// enveloped { stocks } shape and a bare array, exactly like
+// stockMarketApi.list does.
+async function stockIconUrl(symbol: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${backendUrl()}/api/stocks/list`, {
+      next: { revalidate: 60 },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { stocks?: StockListItem[] } | StockListItem[];
+    const list = Array.isArray(data) ? data : data.stocks ?? [];
+    const display = stockDisplaySymbol(symbol);
+    const match = list.find((item) => item?.symbol && stockDisplaySymbol(item.symbol) === display);
+    return match?.iconUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Mirror of imageDataUrl in ../_shared, with the stock logo hosts and
+// the content types the OG renderer can draw. imageDataUrl itself
+// only allows the crypto logo hosts, so it returns null for every
+// stock logo URL. The fetch, timeout, size cap and base64 conversion
+// are copied from it unchanged. Content types are limited to png,
+// jpeg, svg, gif and webp: the DuckDuckGo league logos are .ico
+// files, which the renderer cannot draw, so the walk in
+// stockLogoDataUrl skips them and falls through to the next
+// candidate (the Coinbase PNG icon), the same candidate walk
+// StockLogo performs in the browser on image error. When no
+// candidate yields drawable bytes the logo is null and Coins renders
+// the symbol text inside the same circle, which is the same fallback
+// Coins gives a crypto coin when logoDataUrl returns null.
+const STOCK_LOGO_HOSTS = ["icons.duckduckgo.com", "cdn.simpleicons.org", "metadata.coinbase.com"];
+const STOCK_LOGO_CONTENT_TYPES = ["image/png", "image/jpeg", "image/svg+xml", "image/gif", "image/webp"];
+
+async function stockImageDataUrl(url: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !STOCK_LOGO_HOSTS.includes(parsed.hostname)) return null;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    if (!contentType || !STOCK_LOGO_CONTENT_TYPES.includes(contentType)) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength === 0 || buf.byteLength > 200_000) return null;
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return `data:${contentType};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function stockLogoDataUrl(symbol: string, iconUrl: string | null): Promise<string | null> {
+  for (const candidate of stockLogoCandidates(symbol, iconUrl)) {
+    const data = await stockImageDataUrl(candidate);
+    if (data) return data;
+  }
+  return null;
+}
+
+// Single CoinArt for a stock market, in the same shape the crypto
+// TARGET branch of artwork() returns: one entry, display symbol,
+// logo as a data URL or null. ranked is accepted for parity with
+// artwork() and ignored, exactly as the TARGET branch ignores it:
+// the art for a single asset market is fixed by the asset itself.
+async function stockArtwork(symbol: string, ranked: number[] = []): Promise<CoinArt[]> {
+  void ranked;
+  const iconUrl = await stockIconUrl(symbol);
+  const logo = await stockLogoDataUrl(symbol, iconUrl);
+  return [{ symbol: stockDisplaySymbol(symbol), logo }];
+}
+
 async function marketCard(title: string, status = "PREDICTION MARKET", coins: CoinArt[] = [], outcome?: string) {
   // The metadata title can still identify a target coin when both data sources are unavailable.
   if (!coins.length) {
@@ -155,8 +261,59 @@ async function marketCard(title: string, status = "PREDICTION MARKET", coins: Co
   </Card>, { width: OG_WIDTH, height: OG_HEIGHT, headers: { "Cache-Control": outcome ? OG_FINAL_CACHE : OG_LIVE_CACHE } });
 }
 
+// Stock branch of GET, mirroring the crypto flow below step for
+// step: read marketInfo and marketSettlement from the factory, build
+// the question, read outcomeTotals for both outcomes, derive the
+// ranked outcomes, build the artwork, derive the outcome line from
+// state and winnerBitmap, and render through the same marketCard
+// helper with the same status wording the crypto TARGET template
+// produces ("PRICE TARGET" while open, "RESOLVED" or "VOIDED" once
+// settled). A market id that was never created reads back as zero
+// values from the factory, so it is treated as missing and falls
+// back to the generic card, and any read failure does the same,
+// exactly like the crypto catch block below.
+async function stockMarketCard(req: Request, id: string): Promise<Response> {
+  const stockRoute = stockMarketFromRoute(id);
+  if (!stockRoute) return new Response("Market not found", { status: 404 });
+  let title = new URL(req.url).searchParams.get("title") || "TICKR prediction market";
+  let card: ImageResponse;
+  try {
+    const client = getPublicClient();
+    const [infoRaw, settlementRaw] = await Promise.all([
+      client.readContract({ address: stockRoute.factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "marketInfo", args: [stockRoute.id] }),
+      client.readContract({ address: stockRoute.factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "marketSettlement", args: [stockRoute.id] }),
+    ]);
+    const info = normalizeStockMarketInfo(infoRaw);
+    if (!info.symbol || info.targetPrice === 0n || info.endTime === 0n) throw new Error("Stock market not found");
+    const settlement = settlementRaw as unknown as { state?: number; winnerBitmap?: bigint } & readonly unknown[];
+    const state = Number(settlement.state ?? settlement[2] ?? 0);
+    const winnerBitmap = BigInt(
+      settlement.winnerBitmap ?? (settlement[3] as bigint | number | string | undefined) ?? 0n
+    );
+    title = stockPriceTargetQuestion(stockDisplaySymbol(info.symbol), info.targetPrice, info.above, new Date(Number(info.endTime) * 1000));
+    const labels = ["Yes", "No"];
+    const totals = await Promise.all(labels.map((_, i) => client.readContract({ address: stockRoute.factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "outcomeTotals", args: [stockRoute.id, BigInt(i)] }).catch(() => null)));
+    // Do not invent pool leaders when totals could not be read.
+    const ranked = totals.every(t => t !== null) ? totals.map((total, i) => ({ total: total!, i })).sort((a, b) => a.total > b.total ? -1 : a.total < b.total ? 1 : a.i - b.i).slice(0, 3).map(t => t.i) : [];
+    const coins = await stockArtwork(info.symbol, ranked);
+    const winners = labels.filter((_, i) => (winnerBitmap & (1n << BigInt(i))) !== 0n);
+    const outcome = state === 2 ? "Market voided · stakes returned" : state === 1 ? `Result: ${winners.join(" · ") || "No winning outcome"}` : undefined;
+    card = await marketCard(title, state === 1 ? "RESOLVED" : state === 2 ? "VOIDED" : "PRICE TARGET", coins, outcome);
+  } catch (error) {
+    console.error("Stock market OG data unavailable", error);
+    card = await marketCard(title);
+  }
+  try {
+    return new Response(await card.arrayBuffer(), { headers: card.headers });
+  } catch {
+    const fallback = await marketCard(title);
+    return new Response(await fallback.arrayBuffer(), { headers: fallback.headers });
+  }
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  if (isStockMarketRoute(id)) return stockMarketCard(req, id);
   const route = marketFromRoute(id);
   if (!route) return new Response("Market not found", { status: 404 });
   let title = new URL(req.url).searchParams.get("title") || "TICKR prediction market";
