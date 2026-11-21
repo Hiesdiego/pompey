@@ -223,6 +223,9 @@ export function baseStonkTokenUrl(memeAddress: string): string {
 
 // ── backend API types (fixed contract, build against it) ────────────
 
+/** How a registry meme is paired: a B20 stock, USDC, WETH or another token. */
+export type ArenaPairType = "stock" | "usdc" | "weth" | "other";
+
 /** Paired stock summary inside a registry meme. */
 export interface ArenaPairedStock {
   address: string;
@@ -239,6 +242,7 @@ export interface RegistryMeme {
   imageUrl: string | null;
   pairToken: string | null;
   pairSymbol: string | null;
+  pairType: ArenaPairType;
   pairedStock: ArenaPairedStock | null;
   pool: string | null;
   liquidityUsd: number | null;
@@ -499,6 +503,7 @@ function commentarySafe(raw: ClashSummary): Partial<ClashSummary> {
 /**
  * Arena API. Endpoints are fixed by the backend contract:
  *   GET /api/arena/registry        -> { memes: RegistryMeme[] }
+ *   GET /api/arena/registry/search -> { memes: RegistryMeme[] }
  *   GET /api/arena/clashes         -> { ok, data: { clashes, asOfBlock, refreshedAt } }
  *   GET /api/arena/clashes/:id     -> { ok, data: { clash, userPosition? } }
  *   GET /api/arena/rankings        -> { ok, data: { rankings, updatedAt } }
@@ -515,6 +520,16 @@ export const arenaApi = {
       | { ok: boolean; data: { memes: RegistryMeme[] } }
       | RegistryMeme[]
     >("/api/arena/registry");
+    if (Array.isArray(data)) return data;
+    if ("data" in data && data.data) return data.data.memes ?? [];
+    return (data as { memes: RegistryMeme[] }).memes ?? [];
+  },
+  registrySearch: async (q: string): Promise<RegistryMeme[]> => {
+    const data = await arenaGet<
+      | { memes: RegistryMeme[] }
+      | { ok: boolean; data: { memes: RegistryMeme[] } }
+      | RegistryMeme[]
+    >(`/api/arena/registry/search?q=${encodeURIComponent(q)}`);
     if (Array.isArray(data)) return data;
     if ("data" in data && data.data) return data.data.memes ?? [];
     return (data as { memes: RegistryMeme[] }).memes ?? [];

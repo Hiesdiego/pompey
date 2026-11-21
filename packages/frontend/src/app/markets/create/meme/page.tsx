@@ -18,10 +18,15 @@
  * to the paired stock with a derby option against another meme on the
  * same paired stock, and the window is 24 hours or a 1 hour blitz.
  * cupTie is always false from the UI, cup ties are seeded by the
- * backend seeder, never by hand.
+ * backend seeder, never by hand. Search also queries the full
+ * BaseStonk catalogue through the backend registry search, so memes
+ * outside the local registry list can be picked and used as derby
+ * opponents, and every picker row carries a pair badge naming what
+ * the meme is paired with (a stock, USDC, WETH or another token),
+ * with pair filter chips above the list.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Address } from "viem";
@@ -43,7 +48,7 @@ import {
   opponentKindCode,
   type RegistryMeme,
 } from "../../../../lib/arenaContracts";
-import { useArenaRegistry } from "../../../../lib/query/useArena";
+import { useArenaRegistry, useArenaRegistrySearch } from "../../../../lib/query/useArena";
 import { qks } from "../../../../lib/query/keys";
 import { queryClient } from "../../../../lib/query/queryClient";
 import { MemeLogo } from "../../../../components/MemeLogo";
@@ -53,6 +58,17 @@ import { toast } from "../../../../components/Toast";
 function usdLabel(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "n/a";
   return `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function pairBadgeLabel(meme: RegistryMeme): string {
+  if (meme.pairType === "stock") {
+    return meme.pairedStock
+      ? `Paired with ${arenaDisplaySymbol(meme.pairedStock.symbol)}`
+      : "Stock pair";
+  }
+  if (meme.pairType === "usdc") return "USDC pair";
+  if (meme.pairType === "weth") return "WETH pair";
+  return meme.pairSymbol ? `${arenaDisplaySymbol(meme.pairSymbol)} pair` : "Other pair";
 }
 
 export default function MemeClashCreatePage() {
@@ -65,6 +81,31 @@ export default function MemeClashCreatePage() {
   const memes = useMemo(() => registryQuery.data?.memes ?? [], [registryQuery.data]);
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const registrySearchQuery = useArenaRegistrySearch(debouncedSearch);
+  const searchMemes = useMemo(
+    () => registrySearchQuery.data?.memes ?? [],
+    [registrySearchQuery.data]
+  );
+
+  // Merged universe: the local registry plus catalogue search results,
+  // deduped by lowercase address. Registry entries are added first, so
+  // a local entry wins when the same meme appears in both lists.
+  const allMemes = useMemo(() => {
+    const byAddress = new Map<string, RegistryMeme>();
+    for (const meme of memes) byAddress.set(meme.address.toLowerCase(), meme);
+    for (const meme of searchMemes) {
+      const key = meme.address.toLowerCase();
+      if (!byAddress.has(key)) byAddress.set(key, meme);
+    }
+    return [...byAddress.values()];
+  }, [memes, searchMemes]);
+
+  const [pairFilter, setPairFilter] = useState<"all" | "stock" | "crypto">("all");
   const [selectedAddress, setSelectedAddress] = useState("");
   const [opponentMode, setOpponentMode] = useState<"stock" | "derby">("stock");
   const [derbyAddress, setDerbyAddress] = useState("");
@@ -72,19 +113,19 @@ export default function MemeClashCreatePage() {
   const [creatorName, setCreatorName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const selected: RegistryMeme | undefined = memes.find(
+  const selected: RegistryMeme | undefined = allMemes.find(
     (meme) => meme.address.toLowerCase() === selectedAddress.toLowerCase()
   );
 
   const derbyOptions = useMemo(() => {
     if (!selected?.pairToken) return [];
-    return memes.filter(
+    return allMemes.filter(
       (meme) =>
         meme.address.toLowerCase() !== selected.address.toLowerCase() &&
         meme.pairToken !== null &&
         meme.pairToken.toLowerCase() === selected.pairToken!.toLowerCase()
     );
-  }, [memes, selected]);
+  }, [allMemes, selected]);
 
   const derbyOpponent: RegistryMeme | undefined = derbyOptions.find(
     (meme) => meme.address.toLowerCase() === derbyAddress.toLowerCase()
@@ -95,7 +136,7 @@ export default function MemeClashCreatePage() {
   const selectable = (meme: RegistryMeme): { ok: boolean; reason: string | null } => {
     if (!meme.creationEnabled) return { ok: false, reason: meme.disableReason ?? "Creation is off for this meme" };
     if (meme.pairedStock) return { ok: true, reason: null };
-    const hasDerby = memes.some(
+    const hasDerby = allMemes.some(
       (other) =>
         other.address.toLowerCase() !== meme.address.toLowerCase() &&
         other.pairToken !== null &&
@@ -108,11 +149,19 @@ export default function MemeClashCreatePage() {
 
   const filtered = useMemo(
     () =>
-      memes
+      allMemes
         .filter((meme) => `${meme.name} ${meme.symbol}`.toLowerCase().includes(search.trim().toLowerCase()))
+        .filter((meme) => {
+          if (pairFilter === "stock") return meme.pairType === "stock";
+          if (pairFilter === "crypto") return meme.pairType !== "stock";
+          return true;
+        })
         .slice(0, 50),
-    [memes, search]
+    [allMemes, search, pairFilter]
   );
+
+  const searchingCatalogue =
+    registrySearchQuery.isFetching && search.trim().length >= 2;
 
   const effectiveMode: "stock" | "derby" = selected?.pairedStock ? opponentMode : "derby";
   const opponentToken =
@@ -231,9 +280,29 @@ export default function MemeClashCreatePage() {
             <Search className="absolute left-3 top-3.5 h-4 w-4 text-zinc-400" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search meme name or symbol" className="w-full rounded-xl border border-black/10 bg-transparent py-3 pl-10 pr-3 outline-none focus:border-[#2E7CF6] dark:border-white/10" />
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(
+              [
+                { value: "all", label: "All pairs" },
+                { value: "stock", label: "Stock-paired" },
+                { value: "crypto", label: "Crypto-paired" },
+              ] as const
+            ).map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                onClick={() => setPairFilter(chip.value)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${pairFilter === chip.value ? "border-[#2E7CF6] bg-[#2E7CF6]/10 text-[#2E7CF6]" : "border-black/10 dark:border-white/10"}`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
           <div className="mt-3 max-h-64 divide-y divide-black/[.06] overflow-y-auto rounded-xl border border-black/[.06] dark:divide-white/[.07] dark:border-white/[.07]">
             {registryQuery.isPending ? (
               <p className="p-4 text-sm text-zinc-500">Loading BaseStonk memes…</p>
+            ) : filtered.length === 0 && searchingCatalogue ? (
+              <p className="p-4 text-sm text-zinc-500">Searching all BaseStonk memes…</p>
             ) : filtered.length === 0 ? (
               <p className="p-4 text-sm text-zinc-500">No memes match your search.</p>
             ) : (
@@ -252,8 +321,13 @@ export default function MemeClashCreatePage() {
                       <span className="block truncate text-sm font-bold">
                         {meme.name} <span className="text-zinc-500">({arenaDisplaySymbol(meme.symbol)})</span>
                       </span>
-                      <span className="block text-xs text-zinc-500">
-                        {meme.pairedStock ? `Paired stock: ${arenaDisplaySymbol(meme.pairedStock.symbol)}` : "No paired stock"} · Liquidity {usdLabel(meme.liquidityUsd)} · 24h volume {usdLabel(meme.volume24hUsd)}
+                      <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        <span className="rounded-full bg-[#2E7CF6]/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[#2E7CF6]">
+                          {pairBadgeLabel(meme)}
+                        </span>
+                        <span>
+                          {meme.pairedStock ? `Paired stock: ${arenaDisplaySymbol(meme.pairedStock.symbol)}` : "No paired stock"} · Liquidity {usdLabel(meme.liquidityUsd)} · 24h volume {usdLabel(meme.volume24hUsd)}
+                        </span>
                       </span>
                       {!gate.ok && <span className="block text-xs text-amber-600 dark:text-amber-400">{gate.reason}</span>}
                     </span>
@@ -286,9 +360,17 @@ export default function MemeClashCreatePage() {
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-zinc-500">
-                  {selected.pairedStock
-                    ? "The paired stock is the default opponent. A derby pits this meme against another meme launched on the same stock."
-                    : "This meme has no paired stock, so a derby is the only mode."}
+                  {selected.pairType === "usdc"
+                    ? "This meme is paired with USDC, not a stock, so it has no stock opponent. Only a derby against another meme applies."
+                    : selected.pairType === "weth"
+                      ? "This meme is paired with WETH, not a stock, so it has no stock opponent. Only a derby against another meme applies."
+                      : selected.pairType === "other"
+                        ? selected.pairSymbol
+                          ? `This meme is paired with ${arenaDisplaySymbol(selected.pairSymbol)}, not a stock, so it has no stock opponent. Only a derby against another meme applies.`
+                          : "This meme is not paired with a stock, so it has no stock opponent. Only a derby against another meme applies."
+                        : selected.pairedStock
+                          ? "The paired stock is the default opponent. A derby pits this meme against another meme launched on the same stock."
+                          : "This meme has no paired stock, so a derby is the only mode."}
                 </p>
                 {effectiveMode === "stock" && selected.pairedStock && (
                   <div className="mt-3 flex items-center gap-3 rounded-xl border border-black/[.06] p-3 dark:border-white/[.07]">

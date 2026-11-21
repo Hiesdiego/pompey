@@ -694,6 +694,7 @@ function qualifiedStub(address: string, symbol: string, seed: number): Qualified
       imageUrl: null,
       pairToken: "",
       pairSymbol: null,
+      pairType: "other",
       pairedStock: null,
       pool: null,
       liquidityUsd: 0,

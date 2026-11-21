@@ -62,6 +62,15 @@
  * exactly one "launch" event, after the cache merge, so listeners
  * (the keeper's debut loop) read the merged entry.
  *
+ * PAIR TYPE AND SEARCH: every entry carries pairType, derived in
+ * decorate() from pairToken at pairing-resolution time ("stock"
+ * when pairToken resolves to a B20 stock, else "usdc", "weth" or
+ * "other"). The user-triggered searchMemes() is the one search path
+ * beyond the poll pages: it queries the full BaseStonk catalogue
+ * with q, merges the hits into the cache and returns them in API
+ * order. It never emits "launch" or "memes" events and never
+ * touches the poll timer, backoff, status or lastPoll stats.
+ *
  * DAILY VOLUME SNAPSHOTS: on the first poll after each UTC midnight,
  * every cached meme's volume24hUsd and liquidityUsd are written to
  * Supabase arena_volume_snapshots (address, day, volume24h_usd,
@@ -85,6 +94,9 @@ export interface ArenaPairedStock {
   name: string;
 }
 
+/** The kind of token a meme is paired with, derived from pairToken. */
+export type ArenaPairType = "stock" | "usdc" | "weth" | "other";
+
 /** One registry row, the shape served to the arena routes. */
 export interface ArenaRegistryEntry {
   /** Meme token contract on Base, as returned by the API. */
@@ -102,6 +114,11 @@ export interface ArenaRegistryEntry {
   /** The paired B20 stock when pairToken resolves in the stock list,
    *  else null (USDC/WETH pairs and meme pairs have no paired stock). */
   pairedStock: ArenaPairedStock | null;
+  /** Pair kind derived at pairing-resolution time from pairToken:
+   *  "stock" when pairToken resolves to a B20 stock, else "usdc"
+   *  for the USDC pair address, "weth" for the WETH pair address,
+   *  or "other" for anything else. */
+  pairType: ArenaPairType;
   /** Pool (or venue) address, or null when unknown. */
   pool: string | null;
   liquidityUsd: number;
@@ -158,6 +175,26 @@ interface PairIdentity {
 }
 
 const MAX_BACKOFF_MS = 10 * 60_000;
+/** USDC on Base, lowercase: the pair token for USDC-paired memes. */
+const USDC_PAIR_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+/** WETH on Base, lowercase: the pair token for WETH-paired memes. */
+const WETH_PAIR_ADDRESS = "0x4200000000000000000000000000000000000006";
+/** Results returned by one user-triggered catalogue search. */
+const SEARCH_LIMIT = 25;
+
+/**
+ * The pair kind for a meme: "stock" when pairToken resolved to a
+ * B20 stock, else "usdc" or "weth" when pairToken is that pair
+ * address (compared case-insensitively), else "other". Pure:
+ * exported for tests.
+ */
+export function pairTypeFor(pairToken: string, hasPairedStock: boolean): ArenaPairType {
+  if (hasPairedStock) return "stock";
+  const pair = pairToken.toLowerCase();
+  if (pair === USDC_PAIR_ADDRESS) return "usdc";
+  if (pair === WETH_PAIR_ADDRESS) return "weth";
+  return "other";
+}
 /** Pair-identity lookups per poll (runaway guard; identities are
  *  cached forever once fetched, so this only bites on the first polls). */
 const MAX_IDENTITY_LOOKUPS_PER_POLL = 10;
@@ -184,7 +221,7 @@ export function basestonkLogoUrl(address: string, baseUrl: string = arenaConfig.
  * and the creation gate are applied by the service, which owns the
  * stock list lookup and the floor; this parser only normalizes.
  */
-export function parseBasestonkToken(raw: unknown): Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason"> | null {
+export function parseBasestonkToken(raw: unknown): Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason"> | null {
   const token = raw as ApiToken;
   if (!token || typeof token.address !== "string" || typeof token.symbol !== "string") {
     return null;
@@ -209,10 +246,10 @@ export function parseBasestonkToken(raw: unknown): Omit<ArenaRegistryEntry, "pai
 }
 
 /** Parse a full BaseStonk list response body ({ tokens, ... }). */
-export function parseBasestonkResponse(body: unknown): Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">> {
+export function parseBasestonkResponse(body: unknown): Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">> {
   const tokens = (body as { tokens?: unknown[] } | null)?.tokens;
   if (!Array.isArray(tokens)) return [];
-  const out: Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">> = [];
+  const out: Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">> = [];
   for (const raw of tokens) {
     const parsed = parseBasestonkToken(raw);
     if (parsed) out.push(parsed);
@@ -325,6 +362,28 @@ export class ArenaRegistryService extends EventEmitter {
   }
 
   /**
+   * User-triggered full-catalogue search: query BaseStonk with q,
+   * merge the hits into the cache, resolve their pairs, and return
+   * the decorated entries in the API's result order. This is the
+   * only registry read that makes an upstream call, and it happens
+   * only when a user searches. It never emits "launch" or "memes"
+   * events and never touches the poll timer, backoff, status or
+   * lastPoll stats; the shared API call metering in fetchSearchPage
+   * is the only stats effect. ingestTokens still marks the hits as
+   * seen, on purpose: a later poll must not treat a searched old
+   * token as a new launch.
+   */
+  async searchMemes(query: string): Promise<ArenaRegistryEntry[]> {
+    const rows = await this.fetchSearchPage(query.trim());
+    this.ingestTokens(rows);
+    await this.fillPairIdentities();
+    this.redecorateAll();
+    return rows
+      .map((row) => this.getMemeByAddress(row.address))
+      .filter((entry): entry is ArenaRegistryEntry => entry !== undefined);
+  }
+
+  /**
    * Merge already-fetched token records into the cache, resolve pairs,
    * apply the creation gate, and return the entries that are NEW
    * (never seen since boot). Split out of poll() so the merge and
@@ -333,7 +392,7 @@ export class ArenaRegistryService extends EventEmitter {
    * the boot window, which are returned as new.
    */
   ingestTokens(
-    rows: Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">>,
+    rows: Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">>,
     nowMs: number = Date.now()
   ): ArenaRegistryEntry[] {
     const fresh: ArenaRegistryEntry[] = [];
@@ -354,7 +413,7 @@ export class ArenaRegistryService extends EventEmitter {
   /** Apply paired-stock resolution, the pair symbol and the creation
    *  gate to one normalized row. */
   private decorate(
-    row: Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">
+    row: Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">
   ): ArenaRegistryEntry {
     const stock = row.pairToken ? this.stockList?.getStockByAddress(row.pairToken) : undefined;
     const pairedStock: ArenaPairedStock | null = stock
@@ -362,6 +421,7 @@ export class ArenaRegistryService extends EventEmitter {
       : null;
     const identity = row.pairToken ? this.pairIdentities.get(row.pairToken.toLowerCase()) : undefined;
     const pairSymbol = pairedStock ? pairedStock.symbol : identity?.symbol ?? null;
+    const pairType = pairTypeFor(row.pairToken, pairedStock !== null);
 
     // An opponent exists when the meme has a paired stock, or when any
     // OTHER cached meme shares the same pair token (a derby).
@@ -390,7 +450,7 @@ export class ArenaRegistryService extends EventEmitter {
       creationEnabled = false;
       disableReason = "no opponent available";
     }
-    return { ...row, pairedStock, pairSymbol, creationEnabled, disableReason };
+    return { ...row, pairedStock, pairSymbol, pairType, creationEnabled, disableReason };
   }
 
   /** Re-apply the gate to every cached entry (pair resolutions and
@@ -414,7 +474,7 @@ export class ArenaRegistryService extends EventEmitter {
   private async poll(): Promise<void> {
     if (!this.running) return;
     const now = Date.now();
-    let pages: Array<Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">>>;
+    let pages: Array<Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">>>;
     try {
       pages = await Promise.all([
         this.fetchPage({ sort: "age", dir: "desc", view: "full" }),
@@ -453,7 +513,7 @@ export class ArenaRegistryService extends EventEmitter {
     await this.maybeWriteDailySnapshots(now);
   }
 
-  private async fetchPage(opts: { sort: string; dir: string; view: "full" | "list" }): Promise<Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "creationEnabled" | "disableReason">>> {
+  private async fetchPage(opts: { sort: string; dir: string; view: "full" | "list" }): Promise<Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">>> {
     const url = new URL(`${this.baseUrl}/api/v1/launchpad/tokens`);
     url.searchParams.set("chain", arenaConfig.basestonk.chain);
     url.searchParams.set("sort", opts.sort);
@@ -461,6 +521,42 @@ export class ArenaRegistryService extends EventEmitter {
     url.searchParams.set("limit", String(arenaConfig.registry.pageSize));
     url.searchParams.set("offset", "0");
     url.searchParams.set("view", opts.view);
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), {
+        headers: { accept: "application/json", "user-agent": "tickr-backend/1.0" },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      throw new Error(`BaseStonk API fetch failed: ${String(err)}`);
+    }
+    this.meterStats.calls++;
+    meter.count("arena_registry_calls", 1);
+    const bodyText = await res.text();
+    this.meterStats.bytes += Buffer.byteLength(bodyText);
+    meter.count("outbound_bytes:arena-registry", Buffer.byteLength(bodyText));
+    if (res.status === 429) throw new Error("BaseStonk API rate limited (429)");
+    if (!res.ok) throw new Error(`BaseStonk API request failed: ${res.status}`);
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      throw new Error("BaseStonk API returned unparseable JSON");
+    }
+    return parseBasestonkResponse(body);
+  }
+
+  /** One page of search results, mirroring fetchPage's metering and
+   *  error discipline exactly, with the search params added. */
+  private async fetchSearchPage(query: string): Promise<Array<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason">>> {
+    const url = new URL(`${this.baseUrl}/api/v1/launchpad/tokens`);
+    url.searchParams.set("chain", arenaConfig.basestonk.chain);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", String(SEARCH_LIMIT));
+    url.searchParams.set("offset", "0");
+    url.searchParams.set("view", "full");
+    url.searchParams.set("sort", "trending");
+    url.searchParams.set("dir", "desc");
     let res: Response;
     try {
       res = await fetch(url.toString(), {

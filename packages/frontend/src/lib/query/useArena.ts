@@ -58,6 +58,15 @@ export function useArenaRegistry() {
   });
 }
 
+export function useArenaRegistrySearch(q: string) {
+  return useQuery({
+    queryKey: qks.arenaRegistrySearch(q.trim().toLowerCase()),
+    queryFn: async () => ({ memes: await arenaApi.registrySearch(q.trim()) }),
+    enabled: Boolean(ARENA_CLASH_FACTORY_ADDRESS) && q.trim().length >= 2,
+    staleTime: 60_000,
+  });
+}
+
 export function useArenaRankings() {
   return useQuery({
     queryKey: qks.arenaRankings,

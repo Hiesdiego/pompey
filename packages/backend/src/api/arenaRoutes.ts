@@ -13,6 +13,11 @@
  *   GET /api/arena/registry        , { memes: [...] }, the dynamic
  *     BaseStonk registry from the ArenaRegistryService in-memory
  *     cache. A request NEVER triggers an upstream call.
+ *   GET /api/arena/registry/search , { memes: [...] }, the one
+ *     exception: a user-triggered full-catalogue search via
+ *     ArenaRegistryService.searchMemes(q). q must be at least 2
+ *     characters (400 otherwise) and is truncated to 64; an
+ *     upstream failure answers 502 in the error envelope below.
  *   GET /api/arena/clashes         , { ok: true, data: { clashes,
  *     asOfBlock, refreshedAt } }, the SAME envelope as the stock
  *     markets list, with ETag, 304 and gzip behaviour.
@@ -142,6 +147,27 @@ export function buildArenaRouter(deps: ArenaApiDeps): Router {
     // handler never triggers an upstream call (bandwidth hard cap).
     res.setHeader("Cache-Control", "public, max-age=15");
     res.json({ memes: deps.registry.getMemes() });
+  });
+
+  router.get("/api/arena/registry/search", async (req: Request, res: Response) => {
+    // The one user-triggered upstream search: unlike the registry
+    // read above, this handler does call BaseStonk, through the
+    // registry service's metered searchMemes(). Cache header mirrors
+    // the registry route; errors are never cached (apiError).
+    const q = String(req.query.q ?? "").trim();
+    if (q.length < 2) {
+      apiError(res, 400, "BAD_REQUEST", "Search query must be at least 2 characters.");
+      return;
+    }
+    const query = q.length > 64 ? q.slice(0, 64) : q;
+    try {
+      res.setHeader("Cache-Control", "public, max-age=15");
+      const memes = await deps.registry.searchMemes(query);
+      res.json({ memes });
+    } catch (err) {
+      logger.warn("[api/arena] registry search failed", { error: String(err) });
+      apiError(res, 502, "UPSTREAM_UNAVAILABLE", "Registry search is unavailable, please try again in a moment.");
+    }
   });
 
   router.get("/api/arena/clashes", async (req: Request, res: Response) => {
