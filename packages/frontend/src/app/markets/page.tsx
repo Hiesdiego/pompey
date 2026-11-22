@@ -34,6 +34,8 @@ import { useMarketFees } from "../../lib/query/useMarketFees";
 import { MarketCard, type MarketSummary } from "../../components/MarketCard";
 import { useStockMarkets } from "../../lib/query/useStockMarkets";
 import { stockCardDataFromSummary, StockMarketCard } from "../../components/StockMarketCard";
+import { useArenaClashes } from "../../lib/query/useArena";
+import { MemeClashCard } from "../../components/MemeClashCard";
 
 function useMarkets() {
   const { markets: summaries, error: queryError, dataUpdatedAt } = useCachedMarkets();
@@ -62,11 +64,13 @@ function useMarkets() {
 export default function MarketsPage() {
   const { markets, error, updatedAt } = useMarkets();
   const stockMarkets = useStockMarkets();
+  const arenaClashesQuery = useArenaClashes();
+  const openArenaClashes = (arenaClashesQuery.data?.clashes ?? []).filter((c) => c.status === "upcoming" || c.status === "inplay");
   const { feesBps } = useMarketFees();
   const { teams } = useTeams();
   const { playerAddress } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
-  const [tab, setTab] = useState<"all" | "featured" | "bounty" | "winnings">("all");
+  const [tab, setTab] = useState<"all" | "featured" | "bounty" | "winnings" | "memes">("all");
 
   // Fixture directory for spread markets: teams in home/away order,
   // matchday, kickoff. Fails soft — spread cards fall back to generic text.
@@ -198,6 +202,7 @@ export default function MarketsPage() {
           ["featured", "Featured", featured.length],
           ["bounty", "Bounty", bounty.length],
           ["winnings", "Winnings", winningsLoading ? "…" : winnings.length],
+          ["memes", "Memes", openArenaClashes.length],
         ] as const).map(([key, label, count]) => (
           <button
             key={key}
@@ -219,8 +224,17 @@ export default function MarketsPage() {
 
       {tab === "bounty" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">These markets have passed their end time and have stakes. Anyone can resolve one to earn the resolver fee once its outcome data is available.</p>}
       {tab === "winnings" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Resolved markets with your unclaimed winnings.</p>}
+      {tab === "memes" && <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">Meme clashes from the Stock Meme Arena. Staking closes at window start, Yes wins only on a strictly greater percent move.</p>}
 
-      {!markets || (tab === "winnings" && winningsLoading) ? (
+      {tab === "memes" ? (
+        arenaClashesQuery.isPending ? <SkeletonCards cards={6} /> : openArenaClashes.length === 0 ? (
+          <EmptyState title="No meme clashes right now" message="New clashes will appear here when they are created." />
+        ) : (
+          <div role="tabpanel" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {openArenaClashes.map((c) => <MemeClashCard key={`meme-${c.id}`} clash={c} />)}
+          </div>
+        )
+      ) : !markets || (tab === "winnings" && winningsLoading) ? (
         <SkeletonCards cards={6} />
       ) : tab === "winnings" && claimQuery.isError ? (
         <ErrorState message="Could not load your market claims." onRetry={() => void claimQuery.refetch()} />

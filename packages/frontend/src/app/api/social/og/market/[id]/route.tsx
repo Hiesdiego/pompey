@@ -179,12 +179,16 @@ async function stockIconUrl(symbol: string): Promise<string | null> {
 }
 
 // Mirror of imageDataUrl in ../_shared, with the stock logo hosts and
-// the content types the OG renderer can draw. imageDataUrl itself
+// the image types the OG renderer can draw. imageDataUrl itself
 // only allows the crypto logo hosts, so it returns null for every
 // stock logo URL. The fetch, timeout, size cap and base64 conversion
-// are copied from it unchanged. Content types are limited to png,
-// jpeg, svg, gif and webp: the DuckDuckGo league logos are .ico
-// files, which the renderer cannot draw, so the walk in
+// are copied from it unchanged. Drawable types are png, jpeg, svg,
+// gif and webp, taken from the content-type header when it names
+// one and otherwise sniffed from the bytes, because
+// metadata.coinbase.com serves its PNG icons as
+// binary/octet-stream. The DuckDuckGo league logos are .ico
+// files, which the renderer cannot draw and the sniffer does not
+// accept, so the walk in
 // stockLogoDataUrl skips them and falls through to the next
 // candidate (the Coinbase PNG icon), the same candidate walk
 // StockLogo performs in the browser on image error. When no
@@ -205,11 +209,29 @@ async function stockImageDataUrl(url: string): Promise<string | null> {
     });
     clearTimeout(timer);
     if (!res.ok) return null;
-    const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
-    if (!contentType || !STOCK_LOGO_CONTENT_TYPES.includes(contentType)) return null;
     const buf = await res.arrayBuffer();
     if (buf.byteLength === 0 || buf.byteLength > 200_000) return null;
     const bytes = new Uint8Array(buf);
+    // The content-type header cannot be trusted on the stock logo
+    // hosts: metadata.coinbase.com serves its equity icon PNGs as
+    // binary/octet-stream, so a header-only gate rejects every real
+    // logo and the card falls back to symbol text. Trust the header
+    // when it names a drawable image type; otherwise sniff the
+    // actual bytes (magic numbers, and the svg open tag) and use
+    // the sniffed type for the data URL.
+    const headerType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    let contentType = headerType && STOCK_LOGO_CONTENT_TYPES.includes(headerType) ? headerType : null;
+    if (!contentType) {
+      if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) contentType = "image/png";
+      else if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) contentType = "image/jpeg";
+      else if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) contentType = "image/gif";
+      else if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) contentType = "image/webp";
+      else {
+        const head = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 256)).replace(/^\uFEFF/, "").trimStart().toLowerCase();
+        if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg"))) contentType = "image/svg+xml";
+      }
+    }
+    if (!contentType) return null;
     let binary = "";
     const CHUNK = 8192;
     for (let i = 0; i < bytes.length; i += CHUNK) {

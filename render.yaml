@@ -119,3 +119,39 @@ services:
         sync: false
       - key: MARKET_FACTORY_DEPLOY_BLOCK
         sync: false
+
+      # --- stock price-target API (required by the Arena for paired-stock NAVs) ---
+      - key: STOCK_MARKET_FACTORY_ADDRESS
+        value: "0x8b7673bb0f04bc52b3f7f8b622969b6be5df3e0c"
+      - key: STOCK_MARKET_FACTORY_DEPLOY_BLOCK
+        value: "61011943"
+      - key: STOCK_MARKET_KEEPER_ENABLED
+        value: "true"
+      - key: STOCK_MARKET_KEEPER_INTERVAL_MINUTES
+        value: "15"
+      - key: STOCK_MARKET_KEEPER_MAX_PER_PASS
+        value: "10"
+
+      # --- Stock Meme Arena ----------------------------------------------------
+      - key: ARENA_CLASH_FACTORY_ADDRESS
+        value: "0x9aad32a641c96b745f12374e2e8db0cbd61b53a5"
+      - key: ARENA_CLASH_FACTORY_DEPLOY_BLOCK
+        value: "61843347"
+      - key: ARENA_TICK_TOKEN_ADDRESS
+        value: "0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b"
+      - key: ARENA_RESOLVER_ADDRESS
+        value: "0x5219d14dFbCF0be6EC00D6B5188fFF353aeb33BF"
+      - key: ARENA_TREASURY_ADDRESS
+        value: "0x5219d14dfbcf0be6ec00d6b5188fff353aeb33bf"
+      - key: ARENA_MIN_LIQUIDITY_USD
+        value: "5000"
+      - key: ARENA_REGISTRY_POLL_MINUTES
+        value: "15"
+      - key: ARENA_BASESTONK_API_URL
+        value: https://api.basestonk.io
+      - key: ARENA_KEEPER_ENABLED
+        value: "true"
+      - key: ARENA_KEEPER_INTERVAL_MINUTES
+        value: "15"
+      - key: ARENA_KEEPER_MAX_PER_PASS
+        value: "10"

@@ -61,6 +61,20 @@ Deployed on November 19, 2026 at block 61011943 (proxy creation transaction `0xd
 
 The stock price-target factory is separate from the crypto MarketFactory and the stock league. Market creation adds a 250 TICK seed; a featured market must be created with explicit stock, direction, target and deadline terms before the seed enters its pool.
 
+## Stock Meme Arena (Base Sepolia)
+
+Deployed on November 21, 2026 at block `61843347`. The deployer is the owner. The implementation and proxy were initialized atomically, and the deploy script verified the owner, TICK token, treasury and resolver on chain.
+
+| Contract / role | Address |
+| --- | --- |
+| MemeClashFactory implementation | `0xbb12fc44a957f293be835b01bff377529e46d0e5` |
+| MemeClashFactory proxy | `0x9aad32a641c96b745f12374e2e8db0cbd61b53a5` |
+| TICK token (reused) | `0xD7DAd21d5e61f398c88dA6d15b5CD03f6bBc499b` |
+| Treasury / resolver / owner | `0x5219d14dFbCF0be6EC00D6B5188fFF353aeb33BF` |
+| Backend seed allowance | `25,000 TICK` (approval tx `0xc6809cd4e836855f84c527325ef49d7b3a9d167e087c9ead6cc873ef0a168321`) |
+
+The Arena factory is independent of the crypto league, stock league and stock price-target factory. The backend signer has a finite 25,000 TICK allowance for clash seed creation; replenish it with `pnpm --filter @tickr/contracts approve:arena-seed:testnet` after updating `ARENA_SEED_ALLOWANCE_TICK` when needed. Arena services remain gated on `ARENA_CLASH_FACTORY_ADDRESS`; the Supabase schema and backend deployment must be applied before the keeper, registry, cup, ratings and commentary services can operate.
+
 Featured market seeded on November 19, 2026:
 
 | Market ID | Question | Seed | Creation transaction | Block |

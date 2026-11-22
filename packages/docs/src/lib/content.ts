@@ -1,4 +1,5 @@
 import { STOCK_DOCS_SECTIONS } from "./content-stock";
+import { ARENA_DOCS_SECTIONS } from "./content-arena";
 
 export type Doc = { slug: string; title: string; description: string; group: string; readTime: string; sections: { id: string; title: string; paragraphs: string[]; note?: string; code?: string; bullets?: string[]; links?: { label: string; address: string; description: string }[] }[] };
 
@@ -186,7 +187,18 @@ export const docs: Doc[] = [
     title: section.title,
     paragraphs: section.body.split(/\n\s*\n/).filter(Boolean),
   }],
+}))).concat(ARENA_DOCS_SECTIONS.map((section) => ({
+  slug: section.slug,
+  title: section.title,
+  description: `Stock Meme Arena ${section.title.toLowerCase()} and rules.`,
+  group: "Stock Meme Arena",
+  readTime: "4 min",
+  sections: [{
+    id: section.slug.split("/").at(-1) ?? section.slug,
+    title: section.title,
+    paragraphs: section.body.split(/\n\s*\n/).filter(Boolean),
+  }],
 })));
 
-export const groups = ["Start here", "The game", "Prices & trust", "Developers", "Stock League"];
+export const groups = ["Start here", "The game", "Prices & trust", "Developers", "Stock League", "Stock Meme Arena"];
 export function getDoc(slug: string) { return docs.find((doc) => doc.slug === slug); }
