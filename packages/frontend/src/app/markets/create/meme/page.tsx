@@ -23,13 +23,16 @@
  * outside the local registry list can be picked and used as derby
  * opponents, and every picker row carries a pair badge naming what
  * the meme is paired with (a stock, USDC, WETH or another token),
- * with pair filter chips above the list.
+ * with pair filter chips above the list. Pasting a full contract
+ * address into the search box fetches that one meme by address
+ * through the backend, bypassing the catalogue search index, whose
+ * gaps leave some live memes invisible to text search.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { Address } from "viem";
+import { isAddress, type Address } from "viem";
 import { ArrowLeft, Search, Swords } from "lucide-react";
 import { useTickr } from "../../../../hooks/useTickr";
 import { useTickBalance } from "../../../../lib/query/useTickBalance";
@@ -48,7 +51,7 @@ import {
   opponentKindCode,
   type RegistryMeme,
 } from "../../../../lib/arenaContracts";
-import { useArenaRegistry, useArenaRegistrySearch } from "../../../../lib/query/useArena";
+import { useArenaRegistry, useArenaRegistryByAddress, useArenaRegistrySearch } from "../../../../lib/query/useArena";
 import { qks } from "../../../../lib/query/keys";
 import { queryClient } from "../../../../lib/query/queryClient";
 import { MemeLogo } from "../../../../components/MemeLogo";
@@ -92,9 +95,21 @@ export default function MemeClashCreatePage() {
     [registrySearchQuery.data]
   );
 
-  // Merged universe: the local registry plus catalogue search results,
-  // deduped by lowercase address. Registry entries are added first, so
-  // a local entry wins when the same meme appears in both lists.
+  // Address lookup: only a full EVM address in the search box takes
+  // this path (same 300 ms debounce as the catalogue search). It
+  // fetches the one meme the catalogue search index may not see.
+  const isAddressLookup = isAddress(debouncedSearch.trim());
+  const addressQuery = useArenaRegistryByAddress(debouncedSearch);
+  const addressMeme = addressQuery.data?.meme ?? null;
+  const fetchingByAddress = isAddressLookup && addressQuery.isFetching && !addressMeme;
+  const addressNotFound = isAddressLookup && addressQuery.isSuccess && !addressMeme;
+
+  // Merged universe: the local registry plus catalogue search results
+  // plus the by-address fetch, deduped by lowercase address. Registry
+  // entries are added first, so a local entry wins when the same meme
+  // appears in more than one list. The derby opponent list reads this
+  // same universe, so a meme fetched by address can also be picked as
+  // a derby opponent.
   const allMemes = useMemo(() => {
     const byAddress = new Map<string, RegistryMeme>();
     for (const meme of memes) byAddress.set(meme.address.toLowerCase(), meme);
@@ -102,8 +117,12 @@ export default function MemeClashCreatePage() {
       const key = meme.address.toLowerCase();
       if (!byAddress.has(key)) byAddress.set(key, meme);
     }
+    if (addressMeme) {
+      const key = addressMeme.address.toLowerCase();
+      if (!byAddress.has(key)) byAddress.set(key, addressMeme);
+    }
     return [...byAddress.values()];
-  }, [memes, searchMemes]);
+  }, [memes, searchMemes, addressMeme]);
 
   const [pairFilter, setPairFilter] = useState<"all" | "stock" | "crypto">("all");
   const [selectedAddress, setSelectedAddress] = useState("");
@@ -147,18 +166,27 @@ export default function MemeClashCreatePage() {
     return { ok: false, reason: "No paired stock and no derby opponent yet" };
   };
 
-  const filtered = useMemo(
-    () =>
-      allMemes
-        .filter((meme) => `${meme.name} ${meme.symbol}`.toLowerCase().includes(search.trim().toLowerCase()))
-        .filter((meme) => {
-          if (pairFilter === "stock") return meme.pairType === "stock";
-          if (pairFilter === "crypto") return meme.pairType !== "stock";
-          return true;
-        })
-        .slice(0, 50),
-    [allMemes, search, pairFilter]
-  );
+  const filtered = useMemo(() => {
+    const base = allMemes
+      .filter((meme) => `${meme.name} ${meme.symbol}`.toLowerCase().includes(search.trim().toLowerCase()))
+      .filter((meme) => {
+        if (pairFilter === "stock") return meme.pairType === "stock";
+        if (pairFilter === "crypto") return meme.pairType !== "stock";
+        return true;
+      });
+    // An explicit address lookup always surfaces its meme: the user
+    // asked for that exact token, so neither the text filter (its
+    // name and symbol do not contain the address) nor the pair
+    // filter may hide it.
+    if (
+      isAddressLookup &&
+      addressMeme &&
+      !base.some((meme) => meme.address.toLowerCase() === addressMeme.address.toLowerCase())
+    ) {
+      return [addressMeme, ...base].slice(0, 50);
+    }
+    return base.slice(0, 50);
+  }, [allMemes, search, pairFilter, isAddressLookup, addressMeme]);
 
   const searchingCatalogue =
     registrySearchQuery.isFetching && search.trim().length >= 2;
@@ -301,6 +329,10 @@ export default function MemeClashCreatePage() {
           <div className="mt-3 max-h-64 divide-y divide-black/[.06] overflow-y-auto rounded-xl border border-black/[.06] dark:divide-white/[.07] dark:border-white/[.07]">
             {registryQuery.isPending ? (
               <p className="p-4 text-sm text-zinc-500">Loading BaseStonk memes…</p>
+            ) : filtered.length === 0 && fetchingByAddress ? (
+              <p className="p-4 text-sm text-zinc-500">Fetching this meme by address…</p>
+            ) : filtered.length === 0 && addressNotFound ? (
+              <p className="p-4 text-sm text-zinc-500">No meme found at that address.</p>
             ) : filtered.length === 0 && searchingCatalogue ? (
               <p className="p-4 text-sm text-zinc-500">Searching all BaseStonk memes…</p>
             ) : filtered.length === 0 ? (

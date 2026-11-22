@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Stock Meme Arena (BaseStonk), factory config, ABI, API client and helpers.
  *
  * Target location in the repo:

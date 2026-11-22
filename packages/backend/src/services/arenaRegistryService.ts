@@ -65,10 +65,14 @@
  * PAIR TYPE AND SEARCH: every entry carries pairType, derived in
  * decorate() from pairToken at pairing-resolution time ("stock"
  * when pairToken resolves to a B20 stock, else "usdc", "weth" or
- * "other"). The user-triggered searchMemes() is the one search path
- * beyond the poll pages: it queries the full BaseStonk catalogue
- * with q, merges the hits into the cache and returns them in API
- * order. It never emits "launch" or "memes" events and never
+ * "other"). Two user-triggered paths reach beyond the poll pages.
+ * searchMemes() queries the full BaseStonk catalogue with q,
+ * merges the hits into the cache and returns them in API order.
+ * fetchMemeByAddress() fetches one token by contract address from
+ * the single-token endpoint, which bypasses the catalogue search
+ * index entirely (the index has gaps: some live tokens answer no
+ * q at all). Both merge through the same ingest and redecorate
+ * sequence, and neither emits "launch" or "memes" events or
  * touches the poll timer, backoff, status or lastPoll stats.
  *
  * DAILY VOLUME SNAPSHOTS: on the first poll after each UTC midnight,
@@ -364,14 +368,15 @@ export class ArenaRegistryService extends EventEmitter {
   /**
    * User-triggered full-catalogue search: query BaseStonk with q,
    * merge the hits into the cache, resolve their pairs, and return
-   * the decorated entries in the API's result order. This is the
-   * only registry read that makes an upstream call, and it happens
-   * only when a user searches. It never emits "launch" or "memes"
-   * events and never touches the poll timer, backoff, status or
-   * lastPoll stats; the shared API call metering in fetchSearchPage
-   * is the only stats effect. ingestTokens still marks the hits as
-   * seen, on purpose: a later poll must not treat a searched old
-   * token as a new launch.
+   * the decorated entries in the API's result order. This is one of
+   * the two registry reads that make an upstream call (see
+   * fetchMemeByAddress for the other), and it happens only when a
+   * user searches. It never emits "launch" or "memes" events and
+   * never touches the poll timer, backoff, status or lastPoll
+   * stats; the shared API call metering in fetchSearchPage is the
+   * only stats effect. ingestTokens still marks the hits as seen,
+   * on purpose: a later poll must not treat a searched old token
+   * as a new launch.
    */
   async searchMemes(query: string): Promise<ArenaRegistryEntry[]> {
     const rows = await this.fetchSearchPage(query.trim());
@@ -381,6 +386,27 @@ export class ArenaRegistryService extends EventEmitter {
     return rows
       .map((row) => this.getMemeByAddress(row.address))
       .filter((entry): entry is ArenaRegistryEntry => entry !== undefined);
+  }
+
+  /**
+   * User-triggered single-token lookup by contract address: fetch
+   * the token from the single-token endpoint, merge it into the
+   * cache, resolve its pair, and return the decorated entry, or
+   * null when BaseStonk has no token at that address. This bypasses
+   * the catalogue search index, which has gaps (a live token can
+   * answer no q at all), so any launched meme is reachable by its
+   * address. Same discipline as searchMemes: no events, no poll
+   * state effects, and ingestTokens marks the token as seen, so a
+   * token fetched by address can never surface later as a "new"
+   * launch and trigger a debut clash.
+   */
+  async fetchMemeByAddress(address: string): Promise<ArenaRegistryEntry | null> {
+    const row = await this.fetchTokenByAddress(address.trim());
+    if (!row) return null;
+    this.ingestTokens([row]);
+    await this.fillPairIdentities();
+    this.redecorateAll();
+    return this.getMemeByAddress(row.address) ?? null;
   }
 
   /**
@@ -580,6 +606,42 @@ export class ArenaRegistryService extends EventEmitter {
       throw new Error("BaseStonk API returned unparseable JSON");
     }
     return parseBasestonkResponse(body);
+  }
+
+  /** One token record from the single-token endpoint, mirroring
+   *  fetchSearchPage's metering and error discipline exactly. A 404
+   *  from BaseStonk is not an error: it returns null (no token at
+   *  that address). A 200 whose record does not parse into a usable
+   *  row also returns null. The endpoint answers an envelope
+   *  { token: { ... } } whose token has the same record shape as a
+   *  list item, so it goes through parseBasestonkToken unchanged. */
+  private async fetchTokenByAddress(address: string): Promise<Omit<ArenaRegistryEntry, "pairedStock" | "pairSymbol" | "pairType" | "creationEnabled" | "disableReason"> | null> {
+    const url = new URL(`${this.baseUrl}/api/v1/launchpad/tokens/${encodeURIComponent(address)}`);
+    url.searchParams.set("chain", arenaConfig.basestonk.chain);
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), {
+        headers: { accept: "application/json", "user-agent": "tickr-backend/1.0" },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      throw new Error(`BaseStonk API fetch failed: ${String(err)}`);
+    }
+    this.meterStats.calls++;
+    meter.count("arena_registry_calls", 1);
+    const bodyText = await res.text();
+    this.meterStats.bytes += Buffer.byteLength(bodyText);
+    meter.count("outbound_bytes:arena-registry", Buffer.byteLength(bodyText));
+    if (res.status === 404) return null;
+    if (res.status === 429) throw new Error("BaseStonk API rate limited (429)");
+    if (!res.ok) throw new Error(`BaseStonk API request failed: ${res.status}`);
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      throw new Error("BaseStonk API returned unparseable JSON");
+    }
+    return parseBasestonkToken((body as { token?: unknown } | null)?.token);
   }
 
   /**

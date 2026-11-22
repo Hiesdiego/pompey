@@ -22,6 +22,8 @@ export const qks = {
   arenaClash: (id: number | string | bigint) => ["tickr", "arenaClash", id.toString()] as const,
   arenaRegistry: ["tickr", "arenaRegistry"] as const,
   arenaRegistrySearch: (q: string) => ["tickr", "arenaRegistrySearch", q] as const,
+  arenaRegistryAddress: (address: string) =>
+    ["tickr", "arenaRegistryAddress", address] as const,
   arenaRankings: ["tickr", "arenaRankings"] as const,
   arenaCups: ["tickr", "arenaCups"] as const,
   arenaCurrentCup: ["tickr", "arenaCurrentCup"] as const,

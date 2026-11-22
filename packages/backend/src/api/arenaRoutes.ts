@@ -18,6 +18,13 @@
  *     ArenaRegistryService.searchMemes(q). q must be at least 2
  *     characters (400 otherwise) and is truncated to 64; an
  *     upstream failure answers 502 in the error envelope below.
+ *   GET /api/arena/registry/address/:address , { meme }, a second
+ *     user-triggered exception: a single-token lookup by contract
+ *     address via ArenaRegistryService.fetchMemeByAddress, which
+ *     bypasses the catalogue search index. The param must be a
+ *     full EVM address (400 otherwise); an unknown token answers
+ *     404 and an upstream failure 502, both in the error envelope
+ *     below.
  *   GET /api/arena/clashes         , { ok: true, data: { clashes,
  *     asOfBlock, refreshedAt } }, the SAME envelope as the stock
  *     markets list, with ETag, 304 and gzip behaviour.
@@ -167,6 +174,32 @@ export function buildArenaRouter(deps: ArenaApiDeps): Router {
     } catch (err) {
       logger.warn("[api/arena] registry search failed", { error: String(err) });
       apiError(res, 502, "UPSTREAM_UNAVAILABLE", "Registry search is unavailable, please try again in a moment.");
+    }
+  });
+
+  router.get("/api/arena/registry/address/:address", async (req: Request, res: Response) => {
+    // A second user-triggered upstream read: fetch one token by its
+    // contract address, for memes the catalogue search index cannot
+    // see. The param must be a full EVM address (0x plus 40 hex
+    // chars); anything else is a client error, never an upstream
+    // call. Cache header mirrors the search route; errors are never
+    // cached (apiError).
+    const address = String(req.params.address ?? "").trim();
+    if (!isAddress(address)) {
+      apiError(res, 400, "BAD_REQUEST", "Invalid address.");
+      return;
+    }
+    try {
+      const meme = await deps.registry.fetchMemeByAddress(address);
+      if (!meme) {
+        apiError(res, 404, "NOT_FOUND", "No meme found at that address.");
+        return;
+      }
+      res.setHeader("Cache-Control", "public, max-age=15");
+      res.json({ meme });
+    } catch (err) {
+      logger.warn("[api/arena] registry address lookup failed", { error: String(err) });
+      apiError(res, 502, "UPSTREAM_UNAVAILABLE", "Registry address lookup is unavailable, please try again in a moment.");
     }
   });
 

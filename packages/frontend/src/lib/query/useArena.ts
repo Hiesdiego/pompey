@@ -18,6 +18,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { isAddress } from "viem";
 import { qks } from "./keys";
 import { ARENA_CLASH_FACTORY_ADDRESS, arenaApi } from "../arenaContracts";
 
@@ -63,6 +64,15 @@ export function useArenaRegistrySearch(q: string) {
     queryKey: qks.arenaRegistrySearch(q.trim().toLowerCase()),
     queryFn: async () => ({ memes: await arenaApi.registrySearch(q.trim()) }),
     enabled: Boolean(ARENA_CLASH_FACTORY_ADDRESS) && q.trim().length >= 2,
+    staleTime: 60_000,
+  });
+}
+
+export function useArenaRegistryByAddress(address: string) {
+  return useQuery({
+    queryKey: qks.arenaRegistryAddress(address.trim().toLowerCase()),
+    queryFn: async () => ({ meme: await arenaApi.registryByAddress(address.trim()) }),
+    enabled: Boolean(ARENA_CLASH_FACTORY_ADDRESS) && isAddress(address.trim()),
     staleTime: 60_000,
   });
 }
