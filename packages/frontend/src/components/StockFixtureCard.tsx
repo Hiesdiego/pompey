@@ -34,23 +34,24 @@
  * league "stocks", so the sheet stakes on the stock pool with stock
  * team badges.
  *
- * Unrevealed fixtures are TBD, never a countdown: unlike crypto, the
- * stock API carries no scheduledKickoff, and the deterministic backend
- * slot is not shown before the reveal, so the card exposes no time at
- * all until kickoffRevealed is true and kickoff is set. Revealed
- * upcoming fixtures show a countdown pill plus the kickoff date and
- * time in UTC under the teams.
+ * Scheduled countdown (user, 2026-11-26, crypto parity): the stock
+ * API publishes scheduledKickoff, the deterministic backend slot, so
+ * an unrevealed fixture shows the countdown pill and the kickoff date
+ * and time in UTC under the teams, exactly like a crypto fixture. The
+ * slot is provisional until the on-chain reveal confirms it: the
+ * reveal can shift it, and the card switches to the revealed kickoff
+ * the moment kickoffRevealed is true. TBD remains only for a fixture
+ * with no scheduled slot at all.
  *
  * LiveFixtureUpdate is imported from ./FixtureCard, where the crypto
  * card defines it. There is no hooks/useLiveFeed.ts in the branch, so
  * do not import the type from there.
  *
  * Statuses: tba / scheduled / upcoming / live / awaiting / settled /
- * voided / forfeit. "tba" is the unrevealed state: the pill reads TBD
- * and the card exposes no kickoff time and no countdown, because the
- * kickoff is not set until the on-chain reveal. "scheduled" is kept as
- * an alias of "upcoming" so callers from either naming can use it, but
- * this function never returns it for an unrevealed fixture. A settled
+ * voided / forfeit. "scheduled" is the unrevealed state with a
+ * published slot: countdown pill to the slot, provisional until the
+ * reveal. "tba" is the unrevealed state with no slot: the pill reads
+ * TBD and the card exposes no kickoff time and no countdown. A settled
  * flag is only honoured when the match can actually have been played:
  * a forfeit, a recorded scoreline, or a kickoff that has already
  * started. A settled flag on a fixture with no kickoff and no result
@@ -107,11 +108,18 @@ export function stockFixtureStatus(
     const windowStarted = kickoffMs !== null && Date.now() >= kickoffMs;
     if (hasResult || windowStarted) return f.forfeit ? "forfeit" : "settled";
   }
-  if (!revealed || kickoffMs === null) return "tba";
-  const now = Date.now();
-  if (now < kickoffMs) return "upcoming";
-  if (now <= kickoffMs + STOCK_MATCH_MS) return "live";
-  return "awaiting";
+  if (revealed && kickoffMs !== null) {
+    const now = Date.now();
+    if (now < kickoffMs) return "upcoming";
+    if (now <= kickoffMs + STOCK_MATCH_MS) return "live";
+    return "awaiting";
+  }
+  // Not yet revealed on-chain: the backend publishes the deterministic
+  // schedule (scheduledKickoff), so the start time is known in advance,
+  // provisional until the on-chain reveal confirms it. Mirrors the
+  // crypto FixtureCard.
+  if (isoToMs(f.scheduledKickoff) !== null) return "scheduled";
+  return "tba";
 }
 
 function StatusPill({
@@ -188,7 +196,10 @@ export function StockFixtureCard({
   if (!fixture.home || !fixture.away) return null;
   const status = stockFixtureStatus(fixture, liveUpdate);
   const kickoffMs = liveUpdate?.kickoffMs ?? isoToMs(fixture.kickoff);
-  const kickoffIso = kickoffMs !== null ? new Date(kickoffMs).toISOString() : null;
+  // The pill counts down to the confirmed kickoff, or to the scheduled
+  // slot while the on-chain reveal is still pending (crypto parity).
+  const pillMs = kickoffMs ?? isoToMs(fixture.scheduledKickoff);
+  const kickoffIso = pillMs !== null ? new Date(pillMs).toISOString() : null;
   // Centre-cell scoreline, same rule as the crypto card. Live cards show
   // the live score. Settled cards show the recorded goals, falling back
   // to the snapshot-derived score the parent passes as liveScore. A
@@ -269,7 +280,7 @@ export function StockFixtureCard({
           <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-500">
             {roundLabel}
           </span>
-          <StatusPill status={status} kickoffMs={kickoffMs} />
+          <StatusPill status={status} kickoffMs={pillMs} />
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-1">
           <div className="flex min-w-0 flex-col items-center text-center">

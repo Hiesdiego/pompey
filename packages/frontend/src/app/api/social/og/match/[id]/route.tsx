@@ -6,6 +6,11 @@ import { leagueScore } from "../../_league";
 import { SEASON_ID } from "@/lib/contracts";
 import { TICKR_TEAMS } from "@tickr/shared/teams";
 import {
+  stockLogoCandidates,
+  stockDisplaySymbol,
+  type StockListItem,
+} from "@/lib/stockMarketContracts";
+import {
   OG_WIDTH,
   OG_HEIGHT,
   OG_COLORS,
@@ -90,6 +95,89 @@ interface StockPoolDto {
   seed: string;
 }
 
+// Stock team logos for the stock match card, copied from the stock
+// market OG route (../market/[id]/route.tsx), which is the established
+// pattern for stock artwork: the iconUrl for a stock lives on the
+// backend stock list (StockListItem.iconUrl), matched by display
+// symbol, and the icon bytes are converted with a byte-sniffing fetch
+// because metadata.coinbase.com serves its equity icon PNGs as
+// binary/octet-stream, so a content-type gate would reject every real
+// logo. When no candidate yields drawable bytes the logo is null and
+// TeamBlock renders the symbol initial, the same fallback it gives a
+// crypto team when logoDataUrl returns null.
+async function stockIconUrl(symbol: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${backendUrl()}/api/stocks/list`, {
+      next: { revalidate: 60 },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { stocks?: StockListItem[] } | StockListItem[];
+    const list = Array.isArray(data) ? data : data.stocks ?? [];
+    const display = stockDisplaySymbol(symbol);
+    const match = list.find((item) => item?.symbol && stockDisplaySymbol(item.symbol) === display);
+    return match?.iconUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const STOCK_LOGO_HOSTS = ["icons.duckduckgo.com", "cdn.simpleicons.org", "metadata.coinbase.com"];
+const STOCK_LOGO_CONTENT_TYPES = ["image/png", "image/jpeg", "image/svg+xml", "image/gif", "image/webp"];
+
+async function stockImageDataUrl(url: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !STOCK_LOGO_HOSTS.includes(parsed.hostname)) return null;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength === 0 || buf.byteLength > 200_000) return null;
+    const bytes = new Uint8Array(buf);
+    // The content-type header cannot be trusted on the stock logo
+    // hosts: metadata.coinbase.com serves its equity icon PNGs as
+    // binary/octet-stream, so a header-only gate rejects every real
+    // logo and the card falls back to symbol text. Trust the header
+    // when it names a drawable image type; otherwise sniff the
+    // actual bytes (magic numbers, and the svg open tag) and use
+    // the sniffed type for the data URL.
+    const headerType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    let contentType = headerType && STOCK_LOGO_CONTENT_TYPES.includes(headerType) ? headerType : null;
+    if (!contentType) {
+      if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) contentType = "image/png";
+      else if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) contentType = "image/jpeg";
+      else if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) contentType = "image/gif";
+      else if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) contentType = "image/webp";
+      else {
+        const head = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 256)).replace(/^\uFEFF/, "").trimStart().toLowerCase();
+        if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg"))) contentType = "image/svg+xml";
+      }
+    }
+    if (!contentType) return null;
+    let binary = "";
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return `data:${contentType};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function stockLogoDataUrl(symbol: string, iconUrl: string | null): Promise<string | null> {
+  for (const candidate of stockLogoCandidates(symbol, iconUrl)) {
+    const data = await stockImageDataUrl(candidate);
+    if (data) return data;
+  }
+  return null;
+}
+
 async function renderStockMatchCard({ id }: { id: string }, fallbackTitle: string) {
   if (!isNumericId(id)) return new Response("Match not found", { status: 404 });
   const base = backendUrl();
@@ -98,6 +186,15 @@ async function renderStockMatchCard({ id }: { id: string }, fallbackTitle: strin
     fetchJson<StockPoolDto>(`${base}/api/stocks/fixtures/${id}/pool`),
   ]);
   if (!fixture?.home || !fixture?.away) return await fallbackMatchCard(fallbackTitle);
+
+  const [homeIconUrl, awayIconUrl] = await Promise.all([
+    stockIconUrl(fixture.home.symbol),
+    stockIconUrl(fixture.away.symbol),
+  ]);
+  const [homeLogo, awayLogo] = await Promise.all([
+    stockLogoDataUrl(fixture.home.symbol, homeIconUrl),
+    stockLogoDataUrl(fixture.away.symbol, awayIconUrl),
+  ]);
 
   const settled = fixture.settled;
   const score = fixture.homeGoals != null && fixture.awayGoals != null
@@ -118,13 +215,13 @@ async function renderStockMatchCard({ id }: { id: string }, fallbackTitle: strin
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 48 }}>
-          <TeamBlock name={fixture.home.name} symbol={fixture.home.symbol} logo={null} highlight={winner === 0} dim={winner !== null && winner !== 0} />
+          <TeamBlock name={fixture.home.name} symbol={fixture.home.symbol} logo={homeLogo} highlight={winner === 0} dim={winner !== null && winner !== 0} />
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
             {score ? <div style={{ fontSize: 96, fontWeight: 900, letterSpacing: 4 }}>{score[0]}–{score[1]}</div> : <div style={{ fontSize: 64, fontWeight: 800, color: c.zinc400 }}>{settled ? "FT" : "VS"}</div>}
             {settled && <div style={{ fontSize: 21, color: c.greenLight }}>{winner === 0 ? `${fixture.home.symbol} wins` : winner === 2 ? `${fixture.away.symbol} wins` : winner === 1 ? "Draw" : fixture.voided ? "Voided · stakes refunded" : "Result pending"}</div>}
             {!settled && <div style={{ fontSize: 22, color: c.zinc400 }}>{kickoffLabel}</div>}
           </div>
-          <TeamBlock name={fixture.away.name} symbol={fixture.away.symbol} logo={null} highlight={winner === 2} dim={winner !== null && winner !== 2} />
+          <TeamBlock name={fixture.away.name} symbol={fixture.away.symbol} logo={awayLogo} highlight={winner === 2} dim={winner !== null && winner !== 2} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 26, color: c.zinc400 }}>{settled ? <>Full-time score: <span style={{ color: c.greenLight, fontWeight: 800 }}>{score ? `${score[0]}–${score[1]}` : fixture.voided ? "VOID" : "FT"}</span></> : <>Pool: <span style={{ color: c.white, fontWeight: 800 }}>{formatTickShort(totalPool)} TICK</span></>}</div>

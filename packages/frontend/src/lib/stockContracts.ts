@@ -305,6 +305,9 @@ export interface StockApiFixture {
   windowEnd: string; // ISO, UTC
   kickoff: string | null; // ISO, UTC
   kickoffRevealed: boolean;
+  /** Deterministic backend kickoff slot (ISO, UTC), published before the
+   *  on-chain reveal; provisional until the reveal confirms it. */
+  scheduledKickoff: string | null;
   settled: boolean;
   /** True when the result is a 3-0 forfeit. */
   forfeit?: boolean;

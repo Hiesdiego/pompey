@@ -91,6 +91,10 @@ export interface SerializeStockFixtureOpts {
   voided?: boolean;
   homeGoals?: number | null;
   awayGoals?: number | null;
+  /** Deterministic kickoff slot (StockMatchLifecycle.getScheduledKickoffs),
+   *  published so unrevealed fixtures count down like crypto fixtures.
+   *  Null only when the caller has no slot for the fixture. */
+  scheduledKickoffMs?: number | null;
 }
 
 function serializeStockFixture(f: StockFixtureView, opts: SerializeStockFixtureOpts = {}) {
@@ -128,6 +132,10 @@ function serializeStockFixture(f: StockFixtureView, opts: SerializeStockFixtureO
     windowEnd: new Date(f.windowEndMs).toISOString(),
     kickoff: f.kickoffMs > 0 ? new Date(f.kickoffMs).toISOString() : null,
     kickoffRevealed: f.kickoffRevealed,
+    scheduledKickoff:
+      opts.scheduledKickoffMs !== null && opts.scheduledKickoffMs !== undefined
+        ? new Date(opts.scheduledKickoffMs).toISOString()
+        : null,
     matchEnd: f.matchEndMs > 0 ? new Date(f.matchEndMs).toISOString() : null,
     settled: f.settled,
     // Forfeit is surfaced, never hidden inside a 3-0 scoreline.
@@ -164,6 +172,7 @@ export function buildStockRouter(deps: StockApiDeps): Router {
     cache(res, 15);
     const forfeits = deps.reader.getForfeitMap();
     const fixtures = deps.lifecycle.getFixtures();
+    const scheduled = deps.lifecycle.getScheduledKickoffs();
     const out = [];
     for (const f of fixtures) {
       const forfeitingTeamId = forfeits.get(f.fixtureId.toString()) ?? null;
@@ -187,7 +196,7 @@ export function buildStockRouter(deps: StockApiDeps): Router {
           });
         }
       }
-      out.push(serializeStockFixture(f, { forfeitingTeamId, voided: f.voided, homeGoals, awayGoals }));
+      out.push(serializeStockFixture(f, { forfeitingTeamId, voided: f.voided, homeGoals, awayGoals, scheduledKickoffMs: scheduled.get(f.fixtureId) ?? null }));
     }
     res.json(out);
   });
@@ -229,6 +238,7 @@ export function buildStockRouter(deps: StockApiDeps): Router {
         voided,
         homeGoals: result?.homeGoals ?? null,
         awayGoals: result?.awayGoals ?? null,
+        scheduledKickoffMs: deps.lifecycle.getScheduledKickoffs().get(id) ?? null,
       })
     );
   });

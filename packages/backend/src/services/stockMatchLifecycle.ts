@@ -28,13 +28,24 @@
  *      double-scheduling. Reveal happens when the slot enters the legal
  *      reveal window (slot minus 120 min); a slot missed by a late
  *      backend falls back to now + lead, logged as late.
+ *      WEEKDAY SESSION RULE (2026-11-26): on Monday to Friday
+ *      matchdays the usable window is NOT the whole day. The NAV
+ *      barely moves while the US market is shut, so dead-zone matches
+ *      finish 0-0 (the Matchday 1 opener kicked off 02:15 UTC and
+ *      ended 0-0). Weekday slots are confined to the session bounds
+ *      in stockConfig.kickoff (slot starts 14:15 to 20:15 UTC, hourly
+ *      kickoffs 14:45 to 19:45 UTC). Weekend matchdays keep the
+ *      full-window spread above: the market is shut all day, so
+ *      staggering cannot fix them this season.
  *   3. DOUBLE-HEADER FINALE (Dec 16, rounds 21 and 22, matchdayIndex 20
  *      and 21). Nov 26 to Dec 16 inclusive is 21 days for 22 rounds, so
- *      the finale hosts two rounds in two waves (morning and evening).
- *      Rounds 21 and 22 share one on-chain Dec 16 window, while slot
- *      selection separates round 21 before noon and round 22 from noon.
- *      The reveal-time overlap guard shifts any colliding kickoff forward
- *      in 15-min steps and flags manual review when no free slot remains.
+ *      the finale hosts two rounds in two waves. Rounds 21 and 22 share
+ *      one on-chain Dec 16 window. Dec 16 is a Wednesday, so the waves
+ *      split the weekday session band instead of the day: round 21
+ *      takes the first half (kickoffs 14:30 to 17:00 UTC) and round 22
+ *      the second half (17:30 to 20:00 UTC). The reveal-time overlap
+ *      guard shifts any colliding kickoff forward in 15-min steps and
+ *      flags manual review when no free slot remains.
  *   4. HOT-ONLY REFRESH. The fixture cache re-reads only fixtures that
  *      can still change (unrevealed or unsettled), in multicall chunks
  *      of 50, and only on passes that do work. Revealed+settled fixtures
@@ -282,9 +293,12 @@ class StockFixtureCache {
  * manual review instead of revealing a doomed kickoff.
  *
  * `siblings` is every fixture of the same matchdayIndex (round),
- * including this one. The two Dec 16 rounds share a 24-hour on-chain
- * window, so constrain round 21 to the morning and round 22 to the
- * evening. Their six fixtures are spread independently within each wave.
+ * including this one. On weekday matchdays the usable window is the
+ * US session band from stockConfig (see the header, point 2); on
+ * weekends it is the padded full window. The two Dec 16 rounds share
+ * a 24-hour on-chain window, so on that weekday round 21 takes the
+ * first half of the session band and round 22 the second half. Their
+ * six fixtures are spread independently within each wave.
  */
 export function stockKickoffSlotMs(
   fixture: { fixtureId: bigint; matchdayIndex: number; windowStartMs: number; windowEndMs: number },
@@ -294,7 +308,28 @@ export function stockKickoffSlotMs(
   const gridMs = stockConfig.kickoff.slotGridMinutes * 60 * 1000;
   let usableStart = fixture.windowStartMs + stockConfig.kickoff.slotStartPadMinutes * 60 * 1000;
   let usableEnd = fixture.windowEndMs - durationMs - stockConfig.kickoff.slotEndPadMinutes * 60 * 1000;
-  if (fixture.matchdayIndex === 20) {
+  // Weekday session rule (2026-11-26): Monday to Friday matchdays play
+  // inside the US session, never in the 01:00 to 13:00 UTC dead zone.
+  // Matchday windows start at 00:00 UTC, so the weekday and the session
+  // bounds both read straight off windowStartMs. Weekends keep the
+  // full-window spread computed above, finale noon split included.
+  const utcDay = new Date(fixture.windowStartMs).getUTCDay();
+  const isWeekday = utcDay >= 1 && utcDay <= 5;
+  if (isWeekday) {
+    const sessionStart = fixture.windowStartMs + stockConfig.kickoff.weekdaySessionStartMinutes * 60 * 1000;
+    const sessionEnd = fixture.windowStartMs + stockConfig.kickoff.weekdaySessionEndMinutes * 60 * 1000;
+    const sessionMid = sessionStart + (sessionEnd - sessionStart) / 2;
+    if (fixture.matchdayIndex === 20) {
+      usableStart = sessionStart;
+      usableEnd = sessionMid;
+    } else if (fixture.matchdayIndex === 21) {
+      usableStart = sessionMid;
+      usableEnd = sessionEnd;
+    } else {
+      usableStart = sessionStart;
+      usableEnd = sessionEnd;
+    }
+  } else if (fixture.matchdayIndex === 20) {
     usableEnd = Math.min(usableEnd, fixture.windowStartMs + 12 * 60 * 60 * 1000 - durationMs);
   } else if (fixture.matchdayIndex === 21) {
     usableStart = Math.max(usableStart, fixture.windowStartMs + 12 * 60 * 60 * 1000);
@@ -385,6 +420,24 @@ export class StockMatchLifecycle {
   /** Read-only fixture list for the REST API. */
   getFixtures(): StockFixtureView[] {
     return this.cache.all();
+  }
+
+  /** Deterministic kickoff slot per unsettled fixture, keyed by
+   *  fixtureId: the same stockKickoffSlotMs the reveal pass runs on,
+   *  published by the API as scheduledKickoff so stock cards count down
+   *  to the slot before the on-chain reveal, exactly like crypto
+   *  (MatchLifecycle.getScheduledKickoffs). Provisional by nature: the
+   *  reveal-time overlap guard can shift a slot forward, and a slot
+   *  missed by a late backend falls back to now + lead. */
+  getScheduledKickoffs(): Map<bigint, number> {
+    const all = this.cache.all();
+    const out = new Map<bigint, number>();
+    for (const f of all) {
+      if (f.settled) continue;
+      const slot = stockKickoffSlotMs(f, all);
+      if (slot !== null) out.set(f.fixtureId, slot);
+    }
+    return out;
   }
 
   /** Read-only fixtures for one round (matchdayIndex). The Dec 16

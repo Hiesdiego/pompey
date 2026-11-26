@@ -534,6 +534,12 @@ export const arenaApi = {
     if ("data" in data && data.data) return data.data.memes ?? [];
     return (data as { memes: RegistryMeme[] }).memes ?? [];
   },
+  registryByAddress: async (address: string): Promise<RegistryMeme | null> => {
+    const data = await arenaGet<{ meme: RegistryMeme }>(
+      `/api/arena/registry/address/${encodeURIComponent(address)}`
+    );
+    return data.meme ?? null;
+  },
   clashes: async (): Promise<{ clashes: ClashSummary[]; asOfBlock: string | null; refreshedAt: string | null }> => {
     const data = await arenaGet<
       | { ok: boolean; data: { clashes: ClashSummary[]; asOfBlock?: string; refreshedAt?: string } }

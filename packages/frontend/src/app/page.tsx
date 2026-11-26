@@ -225,19 +225,59 @@ function MarketCard({ market, teams, fixtures, prices, priceFresh, featured = fa
 
 function FeaturedCarousel({ markets, teams, fixtures, prices, priceFresh, loading }: { markets: MarketSummary[]; teams: { symbol: string }[]; fixtures: ApiFixture[]; prices: Record<string, number>; priceFresh: boolean; loading: boolean }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [lastInteractionAt, setLastInteractionAt] = useState(0);
   const market = markets[activeIndex];
+  const count = markets.length;
+  const ADVANCE_MS = 7000;
+  const PAUSE_CAP_MS = 10000;
+  // Records an interaction inside the widget. With pause set, the carousel
+  // pauses and the pause is capped at PAUSE_CAP_MS after this interaction.
+  // Without pause, the interaction only refreshes the cap of a pause that is
+  // already active and resets the advance countdown through the effect below.
+  const noteInteraction = (pause: boolean) => {
+    setLastInteractionAt(Date.now());
+    if (pause) setPaused(true);
+  };
+  // Manual navigation helpers: every user triggered slide change records an
+  // interaction, so the advance countdown restarts from that moment and any
+  // active pause is capped from that moment instead of from an earlier one.
+  const goToPrevious = () => { setLastInteractionAt(Date.now()); setActiveIndex((index) => (index - 1 + count) % count); };
+  const goToNext = () => { setLastInteractionAt(Date.now()); setActiveIndex((index) => (index + 1) % count); };
+  const goToSlide = (target: number) => { setLastInteractionAt(Date.now()); setActiveIndex(target); };
   useEffect(() => setActiveIndex((index) => Math.min(index, Math.max(0, markets.length - 1))), [markets.length]);
+  // A pause never outlives the cap: once PAUSE_CAP_MS has passed since the
+  // last interaction the pause clears on its own, even if the pointer never
+  // leaves the widget and even if focus is still inside it. Repeated
+  // interactions reschedule this timer, so the cap always runs from the
+  // most recent interaction.
+  useEffect(() => {
+    if (!paused) return;
+    const remaining = lastInteractionAt ? Math.max(0, lastInteractionAt + PAUSE_CAP_MS - Date.now()) : PAUSE_CAP_MS;
+    const timer = window.setTimeout(() => setPaused(false), remaining);
+    return () => window.clearTimeout(timer);
+  }, [paused, lastInteractionAt]);
+  // Advance timer: a one shot timeout instead of an interval, restarted
+  // whenever the slide, the pause state, the slide count or the last
+  // interaction changes. A manual slide change therefore gets a full
+  // ADVANCE_MS before the next auto advance, and when a pause ends the
+  // countdown starts fresh from the resume moment.
+  useEffect(() => {
+    if (count < 2 || paused) return;
+    const timer = window.setTimeout(() => setActiveIndex((index) => (index + 1) % count), ADVANCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [count, paused, activeIndex, lastInteractionAt]);
   if (!market && loading) return <div className={`${card} min-h-[390px] animate-pulse rounded-3xl p-8`} aria-label="Loading featured markets" />;
   if (!market) return <div className={`${card} flex min-h-64 flex-col justify-center p-8`}><Sparkles className="h-6 w-6 text-[#2E7CF6]" /><h2 className="mt-4 font-display text-xl font-bold">No featured markets are open</h2><p className="mt-1 text-sm text-zinc-500">Top Gainer and Season Champion markets will appear here when available.</p></div>;
-  return <div aria-roledescription="carousel" aria-label="Featured markets">
+  return <div aria-roledescription="carousel" aria-label="Featured markets" onMouseEnter={() => { if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) noteInteraction(true); }} onMouseLeave={() => setPaused(false)} onFocusCapture={() => noteInteraction(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false); }} onPointerDownCapture={(event) => { if (event.pointerType === "touch") noteInteraction(true); else noteInteraction(false); }}>
     <MarketCard key={market.marketKey ?? market.id} market={market} teams={teams} fixtures={fixtures} prices={prices} priceFresh={priceFresh} featured />
     {markets.length > 1 && <div className="mt-3 flex items-center justify-between gap-3">
       <div className="flex items-center gap-1.5" aria-label={`Market ${activeIndex + 1} of ${markets.length}`}>
-        {markets.map((item, index) => <button key={item.marketKey ?? item.id} type="button" onClick={() => setActiveIndex(index)} aria-label={`Show featured market ${index + 1}`} aria-current={index === activeIndex ? "true" : undefined} className={`h-2 rounded-full transition-all ${index === activeIndex ? "w-6 bg-[#2E7CF6]" : "w-2 bg-zinc-300 dark:bg-zinc-600"}`} />)}
+        {markets.map((item, index) => <button key={item.marketKey ?? item.id} type="button" onClick={() => goToSlide(index)} aria-label={`Show featured market ${index + 1}`} aria-current={index === activeIndex ? "true" : undefined} className={`h-2 rounded-full transition-all ${index === activeIndex ? "w-6 bg-[#2E7CF6]" : "w-2 bg-zinc-300 dark:bg-zinc-600"}`} />)}
       </div>
       <div className="flex gap-2">
-        <button type="button" onClick={() => setActiveIndex((activeIndex - 1 + markets.length) % markets.length)} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Previous featured market"><ChevronLeft className="h-4 w-4" /></button>
-        <button type="button" onClick={() => setActiveIndex((activeIndex + 1) % markets.length)} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Next featured market"><ChevronRight className="h-4 w-4" /></button>
+        <button type="button" onClick={goToPrevious} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Previous featured market"><ChevronLeft className="h-4 w-4" /></button>
+        <button type="button" onClick={goToNext} className="rounded-xl border border-black/10 p-2 text-zinc-600 hover:bg-black/5 dark:border-white/10 dark:text-zinc-300 dark:hover:bg-white/5" aria-label="Next featured market"><ChevronRight className="h-4 w-4" /></button>
       </div>
     </div>}
   </div>;

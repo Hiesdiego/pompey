@@ -195,6 +195,21 @@ export const stockConfig = {
     /** Usable window ends this long before the last legal kickoff
      *  (windowEnd minus match duration minus this pad). */
     slotEndPadMinutes: optionalInt("STOCK_KICKOFF_SLOT_END_PAD_MINUTES", 60),
+    /** Weekday session window (user instruction 2026-11-26): on Monday
+     *  to Friday matchdays the kickoff slots are NOT spread across the
+     *  whole 24h window. Matches played while the US market is shut
+     *  finish 0-0 because the NAV barely moves (the Nov 26 opener kicked
+     *  off 02:15 UTC and ended 0-0), so weekday slots are confined to
+     *  the US session. The bounds are minutes after windowStart
+     *  (matchday windows start at 00:00 UTC, so they read as UTC times
+     *  of day): 14:15 to 20:15 with the lifecycle's centre formula
+     *  gives six hourly kickoffs at 14:45 to 19:45 UTC, every match
+     *  inside the 14:30 to 21:00 UTC regular session. Weekend matchdays
+     *  keep the full-window spread: the market is shut all day, so
+     *  staggering cannot help them this season. US market holidays are
+     *  NOT modelled: a holiday weekday still gets session slots. */
+    weekdaySessionStartMinutes: optionalInt("STOCK_KICKOFF_SESSION_START_MINUTES", 14 * 60 + 15),
+    weekdaySessionEndMinutes: optionalInt("STOCK_KICKOFF_SESSION_END_MINUTES", 20 * 60 + 15),
   },
 
   nav: {
