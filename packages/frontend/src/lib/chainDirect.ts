@@ -126,7 +126,9 @@ export async function proxyGet<T>(path: string): Promise<T> {
   } catch (err) {
     throw new ChainProxyError(
       "PROXY_UNREACHABLE",
-      err instanceof Error ? err.message : "backend unreachable"
+      process.env.NODE_ENV === "production"
+        ? "Market data is temporarily unavailable. Please try again."
+        : err instanceof Error ? err.message : "Market data is temporarily unavailable."
     );
   }
   let body: ProxyEnvelope<T>;
@@ -138,7 +140,9 @@ export async function proxyGet<T>(path: string): Promise<T> {
   if (!res.ok || body.ok === false) {
     throw new ChainProxyError(
       body.code ?? `HTTP_${res.status}`,
-      body.message ?? res.statusText
+      process.env.NODE_ENV === "production"
+        ? "Market data is temporarily unavailable. Please try again."
+        : body.message ?? res.statusText
     );
   }
   const data = body.data as T;

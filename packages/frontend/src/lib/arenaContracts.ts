@@ -454,12 +454,15 @@ async function arenaGet<T>(path: string): Promise<T> {
     const timedOut = err instanceof DOMException && err.name === "TimeoutError";
     throw new ArenaApiError(
       0,
-      timedOut
-        ? "Arena request timed out. Check the backend logs."
-        : "Backend unreachable, is it running?"
+      process.env.NODE_ENV === "production"
+        ? timedOut ? "This request took too long. Please try again." : "Arena data is temporarily unavailable. Please try again."
+        : timedOut ? "Arena request timed out." : "Arena data is temporarily unavailable."
     );
   }
   if (!res.ok) {
+    if (process.env.NODE_ENV === "production") {
+      throw new ArenaApiError(res.status, "Arena data is temporarily unavailable. Please try again.");
+    }
     let detail = res.statusText;
     try {
       const body = await res.json();

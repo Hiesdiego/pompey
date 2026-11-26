@@ -321,12 +321,15 @@ async function stockMarketGet<T>(path: string): Promise<T> {
     const timedOut = err instanceof DOMException && err.name === "TimeoutError";
     throw new StockMarketApiError(
       0,
-      timedOut
-        ? "Stock markets request timed out. Check the backend logs."
-        : "Backend unreachable, is it running?"
+      process.env.NODE_ENV === "production"
+        ? timedOut ? "This request took too long. Please try again." : "Stock markets are temporarily unavailable. Please try again."
+        : timedOut ? "Stock markets request timed out." : "Stock markets are temporarily unavailable."
     );
   }
   if (!res.ok) {
+    if (process.env.NODE_ENV === "production") {
+      throw new StockMarketApiError(res.status, "Stock markets are temporarily unavailable. Please try again.");
+    }
     let detail = res.statusText;
     try {
       const body = await res.json();

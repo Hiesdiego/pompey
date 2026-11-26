@@ -101,6 +101,20 @@ function optionalInt(name: string, fallback: number): number {
   return n;
 }
 
+function optionalBool(name: string, fallback: boolean): boolean {
+  const value = optional(name, fallback ? "true" : "false").toLowerCase();
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`[stockConfig] Env var ${name} must be true or false, got: ${value}`);
+}
+
+const DEFAULT_MARKET_HOLIDAYS: readonly string[] = [
+  "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
+  "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+  "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
+  "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+];
+
 function optionalAddress(name: string): `0x${string}` {
   const v = optional(name, "");
   if (v === "") return "" as `0x${string}`;
@@ -212,6 +226,17 @@ export const stockConfig = {
     weekdaySessionEndMinutes: optionalInt("STOCK_KICKOFF_SESSION_END_MINUTES", 20 * 60 + 15),
   },
 
+  marketCalendar: {
+    skipNonTradingDays: optionalBool("STOCK_SKIP_NON_TRADING_DAYS", true),
+    holidays: (() => {
+      const parsed = optional("STOCK_MARKET_HOLIDAYS", "")
+        .split(",")
+        .map((date) => date.trim())
+        .filter(Boolean);
+      return parsed.length > 0 ? parsed : [...DEFAULT_MARKET_HOLIDAYS];
+    })(),
+  },
+
   nav: {
     /** Base Tokenized Stocks API. Read-only, no key. Verified live
      *  2026-11-18: GET / returns { tokens: [...] } with nav_price,
@@ -309,6 +334,15 @@ export const stockConfig = {
 } as const;
 
 export type StockConfig = typeof stockConfig;
+
+/** Why the US market is closed on the UTC date containing `ms`, or null
+ *  when it trades. Early closes are treated as trading days. */
+export function stockMarketClosureReason(ms: number): "weekend" | "holiday" | null {
+  const day = new Date(ms).getUTCDay();
+  if (day === 0 || day === 6) return "weekend";
+  const date = new Date(ms).toISOString().slice(0, 10);
+  return stockConfig.marketCalendar.holidays.includes(date) ? "holiday" : null;
+}
 
 /** True only when every stock contract address is configured. Until then
  *  every stock service stays idle (league-only deployment), exactly like

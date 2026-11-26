@@ -379,12 +379,15 @@ async function stockGet<T>(path: string): Promise<T> {
     const timedOut = err instanceof DOMException && err.name === "TimeoutError";
     throw new StockApiError(
       0,
-      timedOut
-        ? `Stock backend request timed out at ${BACKEND_API_URL}. Check the backend logs.`
-        : `Backend unreachable at ${BACKEND_API_URL}, is it running?`
+      process.env.NODE_ENV === "production"
+        ? timedOut ? "This request took too long. Please try again." : "Stock data is temporarily unavailable. Please try again."
+        : timedOut ? "Stock request timed out." : "Stock data is temporarily unavailable."
     );
   }
   if (!res.ok) {
+    if (process.env.NODE_ENV === "production") {
+      throw new StockApiError(res.status, "Stock data is temporarily unavailable. Please try again.");
+    }
     let detail = res.statusText;
     try {
       const body = await res.json();

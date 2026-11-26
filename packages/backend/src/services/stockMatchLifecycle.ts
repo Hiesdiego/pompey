@@ -35,8 +35,8 @@
  *      ended 0-0). Weekday slots are confined to the session bounds
  *      in stockConfig.kickoff (slot starts 14:15 to 20:15 UTC, hourly
  *      kickoffs 14:45 to 19:45 UTC). Weekend matchdays keep the
- *      full-window spread above: the market is shut all day, so
- *      staggering cannot fix them this season.
+ *      full-window spread in the slot math, but they are never
+ *      played: the point 6 gate voids them at window open.
  *   3. DOUBLE-HEADER FINALE (Dec 16, rounds 21 and 22, matchdayIndex 20
  *      and 21). Nov 26 to Dec 16 inclusive is 21 days for 22 rounds, so
  *      the finale hosts two rounds in two waves. Rounds 21 and 22 share
@@ -72,6 +72,22 @@
  *          backend was down).
  *      A forfeit/void failure is logged at ERROR and the fixture is
  *      retried with backoff; it is never settled as a normal result.
+ *   6. NON-TRADING-DAY VOID (user decision 2026-11-26). A fixture
+ *      whose matchday (the UTC date of its window start) is a
+ *      Saturday, a Sunday, or a full-day US market holiday is voided
+ *      at window open, before any kickoff reveal:
+ *      voidNonTradingFixtures() runs ahead of the reveal pass in
+ *      every tick. The NAV is frozen on those days, so a played match
+ *      could only settle 0-0 on identical prices (Matchday 1 fell on
+ *      Thanksgiving Day and settled as six 0-0 draws before this gate
+ *      existed; the last-NAV fallback rescued both teams at full
+ *      time, so the point 5 void never fired). recordVoid makes no
+ *      table change and the pool refunds every stake 1:1 through
+ *      claim(). A fixture already revealed by a pre-gate backend is
+ *      voided too: recordVoid only requires that no result is
+ *      recorded yet. Early closes are trading days and play
+ *      normally. The calendar lives in stockConfig.marketCalendar;
+ *      the gate can be disabled there.
  *
  * FIX (2026-11-17, carried into this revision): the getFixture ABI
  * includes voided, so matchEndTimestamp is decoded from the right word
@@ -89,7 +105,7 @@
  * on the spike.
  */
 
-import { stockConfig } from "../stockConfig.js";
+import { stockConfig, stockMarketClosureReason } from "../stockConfig.js";
 import { logger } from "../lib/logger.js";
 import type { StockPriceFeed, StockPriceSource } from "./stockPriceFeed.js";
 import {
@@ -468,6 +484,7 @@ export class StockMatchLifecycle {
     try {
       await this.cache.refresh();
       this.updateNavHotWindow(Date.now());
+      await this.voidNonTradingFixtures();
       await this.revealDueKickoffs();
       await this.processLiveMatches();
     } catch (err) {
@@ -492,7 +509,7 @@ export class StockMatchLifecycle {
     let next = Number.POSITIVE_INFINITY;
     const all = this.cache.all();
     for (const f of all) {
-      if (f.settled) continue;
+      if (f.settled || f.voided) continue;
       if (!f.kickoffRevealed) {
         // Wake at the legal reveal time: the slot minus the max lead,
         // never before the window opens. A fixture whose slot is already
@@ -522,7 +539,7 @@ export class StockMatchLifecycle {
   private isHotWindow(now: number): boolean {
     const all = this.cache.all();
     for (const f of all) {
-      if (f.settled) continue;
+      if (f.settled || f.voided) continue;
       let kickoff: number;
       let end: number;
       if (f.kickoffRevealed) {
@@ -543,13 +560,72 @@ export class StockMatchLifecycle {
     this.navPoller.setHot(this.isHotWindow(now));
   }
 
+  // --------------------------------------------- non-trading-day void
+
+  /**
+   * Market-calendar gate (design point 6): void every unsettled
+   * fixture whose matchday is a Saturday, a Sunday, or a full-day US
+   * market holiday, once its window has opened and before the reveal
+   * pass of the same tick can touch it. Uses the same submitter void
+   * path as the full-time void (recordVoid: no table change, stakes
+   * refunded 1:1 through claim()). Failures back off and retry like
+   * every other pass. A fixture already revealed by a pre-gate
+   * backend is voided as well; recordVoid only requires that no
+   * result is recorded yet.
+   */
+  private async voidNonTradingFixtures(): Promise<void> {
+    if (!stockConfig.marketCalendar.skipNonTradingDays) return;
+    const now = Date.now();
+    const due = this.cache
+      .all()
+      .filter((f) => !f.settled && !f.voided && now >= f.windowStartMs);
+    if (due.length === 0) return;
+
+    let voided = 0;
+    for (const f of due) {
+      const reason = stockMarketClosureReason(f.windowStartMs);
+      if (reason === null) continue;
+      const failure = this.failures.get(f.fixtureId);
+      if (failure && now < failure.nextRetryAtMs) continue; // backing off
+      try {
+        await this.submitter.voidFixture(f.fixtureId);
+        f.voided = true;
+        if (failure) this.failures.delete(f.fixtureId);
+        voided++;
+        logger.error(
+          "[StockMatchLifecycle] NON-TRADING DAY VOID, fixture voided unplayed, stakes refunded 1:1",
+          {
+            fixtureId: f.fixtureId.toString(),
+            matchday: f.matchdayIndex,
+            round: f.matchdayIndex + 1,
+            date: new Date(f.windowStartMs).toISOString().slice(0, 10),
+            reason,
+          }
+        );
+      } catch (err) {
+        const count = (failure?.count ?? 0) + 1;
+        const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** (count - 1), BACKOFF_MAX_MS);
+        this.failures.set(f.fixtureId, { count, nextRetryAtMs: now + backoffMs });
+        logger.error("[StockMatchLifecycle] non-trading-day void failed", {
+          fixtureId: f.fixtureId.toString(),
+          attempt: count,
+          nextRetryInMin: Math.round(backoffMs / 60_000),
+          error: String(err),
+        });
+      }
+    }
+    if (voided > 0) {
+      logger.info("[StockMatchLifecycle] non-trading-day void pass complete", { voided });
+    }
+  }
+
   // ------------------------------------------------------------- reveal
 
   private async revealDueKickoffs(): Promise<void> {
     const now = Date.now();
     const all = this.cache.all();
     const due = all.filter(
-      (f) => !f.kickoffRevealed && !f.settled && f.windowStartMs <= now && now < f.windowEndMs
+      (f) => !f.kickoffRevealed && !f.settled && !f.voided && f.windowStartMs <= now && now < f.windowEndMs
     );
     if (due.length === 0) return;
 
@@ -678,7 +754,7 @@ export class StockMatchLifecycle {
     const now = Date.now();
     const live = this.cache
       .all()
-      .filter((f) => f.kickoffRevealed && !f.settled && f.kickoffMs <= now);
+      .filter((f) => f.kickoffRevealed && !f.settled && !f.voided && f.kickoffMs <= now);
     for (const f of live) {
       const failure = this.failures.get(f.fixtureId);
       if (failure && now < failure.nextRetryAtMs) continue; // backing off
