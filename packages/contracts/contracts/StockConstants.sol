@@ -62,16 +62,28 @@ library StockConstants {
     /// @notice 1-hour matches, same as the crypto league.
     uint64 constant MATCH_DURATION_SECONDS = 3600;
 
-    // --- Scoring (locked) ---
-    /// @notice 1 goal = 0.05% price move (5 basis points), half-up rounding.
-    uint256 constant BPS_PER_GOAL = 5;
-    /// @notice No team can score more than 10 goals in one match, however
-    /// large the raw move. This is the scoring cap.
-    int16 constant MAX_GOALS_PER_TEAM = 10;
+    // --- Scoring (banded scale, revised 2026-11-27) ---
+    /// @notice Goals are awarded on a banded scale over the absolute raw
+    /// move in basis points: reaching a band edge scores that band's
+    /// goals. Under 10 bps scores 0; 10/25/75/150/300/600 bps score
+    /// 1/2/3/4/5/6 goals. The scale replaced the original linear
+    /// 0.05%-per-goal conversion (BPS_PER_GOAL = 5) after Matchday 2 of
+    /// Season 1, where the 10-goal cap saturated on routine moves and a
+    /// +1.68% vs +0.50% match was recorded as a 10-10 draw.
+    uint256 constant GOAL_BAND_1_BPS = 10;
+    uint256 constant GOAL_BAND_2_BPS = 25;
+    uint256 constant GOAL_BAND_3_BPS = 75;
+    uint256 constant GOAL_BAND_4_BPS = 150;
+    uint256 constant GOAL_BAND_5_BPS = 300;
+    uint256 constant GOAL_BAND_6_BPS = 600;
+    /// @notice Beyond the 6-goal band there is NO cap: each full extra
+    /// 300 bps adds one more goal (900 bps scores 7, 1200 bps scores 8,
+    /// and so on). The tail is deliberately hard to climb, not closed.
+    uint256 constant GOAL_TAIL_STEP_BPS = 300;
     /// @notice Raw move above 3% (300 bps) in the 1-hour window is treated
-    /// as volatile: goals are still capped at 10, and the circuit breaker
-    /// flag trips (see StockPriceOracle) so the move is flagged for review
-    /// instead of silently swamping goal difference.
+    /// as volatile: the circuit breaker flag trips (see StockPriceOracle)
+    /// so the move is flagged for review instead of silently swamping
+    /// goal difference.
     int256 constant VOLATILE_CAP_BPS = 300;
 
     // --- Points and tiebreak (identical to crypto) ---

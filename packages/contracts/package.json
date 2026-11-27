@@ -23,6 +23,7 @@
     "draw:cup:testnet": "hardhat run scripts/cup-draw.ts --network baseSepolia",
     "seed:cup:testnet": "hardhat run scripts/cup-seed.ts --network baseSepolia",
     "deploy:stock:testnet": "hardhat run scripts/StockDeploy.ts --network baseSepolia",
+    "upgrade:stock-oracle:testnet": "hardhat run scripts/StockOracleUpgrade.ts --network baseSepolia",
     "deploy:stock-market:testnet": "hardhat run scripts/StockMarketFactoryDeploy.ts --network baseSepolia",
     "deploy:arena:testnet": "hardhat run scripts/MemeClashFactoryDeploy.ts --network baseSepolia",
     "approve:arena-seed:testnet": "hardhat run scripts/MemeClashSeedAllowance.ts --network baseSepolia",

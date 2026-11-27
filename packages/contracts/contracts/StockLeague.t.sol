@@ -21,8 +21,8 @@ import { StockPredictionPool } from "./StockPredictionPool.sol";
 /// that layout). If the stock contracts live in a stock/ subfolder,
 /// adjust the "./TickToken.sol" import to "../TickToken.sol".
 ///
-/// Coverage: scoring at 0.05% per goal, half-up rounding, no-negative
-/// scorelines, 10-goal cap, 3% volatile cap with circuit breaker flag,
+/// Coverage: banded scoring (revised 2026-11-27), no-negative
+/// scorelines, no goal cap, 3% volatile cap with circuit breaker flag,
 /// forfeit 3-0 with explicit flag, both-no-performance void with 1:1
 /// refund, tiebreak fields (points, GD, GF), treasury sweep on zero
 /// winning stakers, 7% fee parimutuel payout, and schedule shape
@@ -49,7 +49,7 @@ contract StockLeagueTest is Test {
 
     // 8-decimal NAV prices. $100.00 = 100 * 10**8.
     uint256 constant PRICE_100 = 100 * 10 ** 8;
-    // 0.05% of $100 = $0.05 = 5_000_000 units (1 goal at 5 bps).
+    // 0.05% of $100 = $0.05 = 5_000_000 units (a 5 bps move).
     uint256 constant STEP_005PCT = 5_000_000;
 
     function setUp() public {
@@ -168,68 +168,92 @@ contract StockLeagueTest is Test {
 
     // --- Scoring ---
 
-    function testScoringOneGoalPer005Pct() public {
-        // Home +0.05% (1 goal), away flat (0 goals): 1-0, home wins.
-        _settle(0, PRICE_100 + STEP_005PCT, PRICE_100);
+    function testScoringBandedScale() public {
+        // Home +0.50% = 50 bps lands in the 2-goal band (25 to 74 bps),
+        // away flat: 2-0, home wins.
+        _settle(0, PRICE_100 + 50_000_000, PRICE_100);
         (uint32 points, int32 gd, uint32 gf) = engine.getTeamScore(SEASON_ID, 0);
         // Fixture 0 home team is team 0 in the circle method (arr[0] home, round 0 even).
         assertEq(points, 3);
-        assertEq(gd, 1);
-        assertEq(gf, 1);
+        assertEq(gd, 2);
+        assertEq(gf, 2);
     }
 
-    function testHalfUpRounding() public {
-        // Home +0.03% = 3 bps: (3 + 2) / 5 = 1 goal. Away flat: 1-0.
-        _settle(0, PRICE_100 + 3_000_000, PRICE_100);
+    function testFirstBandEdge() public {
+        // Home +0.10% = 10 bps is the first band edge: 1 goal. Away flat: 1-0.
+        _settle(0, PRICE_100 + 10_000_000, PRICE_100);
         (uint32 points,,) = engine.getTeamScore(SEASON_ID, 0);
         assertEq(points, 3);
     }
 
-    function testBelowHalfGoalIsZero() public {
-        // Home +0.02% = 2 bps: (2 + 2) / 5 = 0 goals. 0-0 draw, 1 point each.
-        _settle(0, PRICE_100 + 2_000_000, PRICE_100);
+    function testBelowFirstBandIsZero() public {
+        // Home +0.09% = 9 bps: below the 10 bps first band, 0 goals.
+        // 0-0 draw, 1 point each.
+        _settle(0, PRICE_100 + 9_000_000, PRICE_100);
         (uint32 homePoints,,) = engine.getTeamScore(SEASON_ID, 0);
         assertEq(homePoints, 1);
     }
 
     function testNoNegativeScoreline() public {
-        // Home -0.05% (raw -1 goal), away +0.05% (raw +1 goal).
-        // Normalized: G_home = 0 + 0 = 0, G_away = 1 + 1 = 2. 0-2, away wins.
-        _settle(0, PRICE_100 - STEP_005PCT, PRICE_100 + STEP_005PCT);
+        // Home -0.50% (raw -2 goals), away +0.50% (raw +2 goals).
+        // Normalized: G_home = 0 + 0 = 0, G_away = 2 + 2 = 4. 0-4, away wins.
+        _settle(0, PRICE_100 - 50_000_000, PRICE_100 + 50_000_000);
         (uint32 homePoints, int32 homeGd,) = engine.getTeamScore(SEASON_ID, 0);
         assertEq(homePoints, 0);
-        assertEq(homeGd, -2);
+        assertEq(homeGd, -4);
     }
 
-    function testTenGoalCap() public {
-        // Home +1.00% = 100 bps = 20 goals raw, capped at 10. 10-0.
-        _settle(0, PRICE_100 + 100_000_000, PRICE_100);
+    function testNoGoalCap() public {
+        // Home +12.00% = 1200 bps: 6 goals at the 600 bps band plus one
+        // per full extra 300 bps, so 8 goals. Nothing caps the count,
+        // and 7 or 8 goal results stay reachable on extreme moves.
+        _settle(0, PRICE_100 + 1_200_000_000, PRICE_100);
         (uint32 points, int32 gd, uint32 gf) = engine.getTeamScore(SEASON_ID, 0);
         assertEq(points, 3);
-        assertEq(gd, 10);
-        assertEq(gf, 10);
+        assertEq(gd, 8);
+        assertEq(gf, 8);
     }
 
     function testVolatileCapTripsCircuitBreaker() public {
-        // Home +3.50% = 350 bps: above the 3% cap. Goals capped at 10 and
-        // the circuit breaker flag trips for review.
+        // Home +3.50% = 350 bps: above the 3% volatile cap, so the
+        // circuit breaker flag trips for review. The move lands in the
+        // 5-goal band (300 to 599 bps).
         _settle(0, PRICE_100 + 350_000_000, PRICE_100);
         uint256 gid = SEASON_ID * 1_000_000 + 0;
         assertTrue(oracle.volatileSpike(gid));
         (uint32 points, int32 gd,) = engine.getTeamScore(SEASON_ID, 0);
         assertEq(points, 3);
-        assertEq(gd, 10);
+        assertEq(gd, 5);
     }
 
     function testPreviewScoreline() public view {
+        // Below the first band: no goals.
         (int16 h, int16 a) = oracle.previewScoreline(5, 0);
+        assertEq(h, 0);
+        assertEq(a, 0);
+        // First band edge: 10 bps scores 1.
+        (h, a) = oracle.previewScoreline(10, 0);
         assertEq(h, 1);
         assertEq(a, 0);
-        (h, a) = oracle.previewScoreline(-5, 5);
+        // A fall transfers goals to the opponent: -57 bps is raw -2.
+        (h, a) = oracle.previewScoreline(-57, 0);
         assertEq(h, 0);
         assertEq(a, 2);
-        (h, a) = oracle.previewScoreline(100, 0);
-        assertEq(h, 10);
+        // Season 1 Matchday 2, MSTR +1.68% vs MSFT +0.50%: 4-2. The old
+        // linear scale recorded this match as a 10-10 draw.
+        (h, a) = oracle.previewScoreline(168, 50);
+        assertEq(h, 4);
+        assertEq(a, 2);
+        // Season 1 Matchday 2, SNDK +5.63% vs NVDA +0.12%: 5-1.
+        (h, a) = oracle.previewScoreline(563, 12);
+        assertEq(h, 5);
+        assertEq(a, 1);
+        // The tail is uncapped: 900 bps scores 7, 1200 bps scores 8.
+        (h, a) = oracle.previewScoreline(900, 0);
+        assertEq(h, 7);
+        assertEq(a, 0);
+        (h, a) = oracle.previewScoreline(1200, 0);
+        assertEq(h, 8);
         assertEq(a, 0);
     }
 
@@ -251,7 +275,7 @@ contract StockLeagueTest is Test {
         assertEq(awayGd, -3);
         // The forfeit flag is what distinguishes this from a normal 3-0:
         // a fixture settled on the pitch has resultForfeit false.
-        _settle(0, PRICE_100 + STEP_005PCT, PRICE_100);
+        _settle(0, PRICE_100 + 10 * STEP_005PCT, PRICE_100);
         assertFalse(engine.resultForfeit(SEASON_ID * 1_000_000 + 0));
     }
 
@@ -296,8 +320,9 @@ contract StockLeagueTest is Test {
     // --- Tiebreak ---
 
     function testTiebreakPointsThenGdThenGf() public {
-        // Team 0 wins fixture 0 by 2-0: 3 pts, GD +2, GF 2.
-        _settle(0, PRICE_100 + 2 * STEP_005PCT, PRICE_100);
+        // Team 0 wins fixture 0 by 2-0 (+0.50%, the 2-goal band):
+        // 3 pts, GD +2, GF 2.
+        _settle(0, PRICE_100 + 10 * STEP_005PCT, PRICE_100);
         // Fixture 1: forfeit the away team, home team wins 3-0.
         (uint16 homeId, uint16 awayId1) = _fixtureTeams(1);
         vm.prank(backend);
@@ -322,8 +347,8 @@ contract StockLeagueTest is Test {
         vm.prank(alice);
         pool.stake(SEASON_ID, 0, StockOutcome.WinHome, STAKE_100);
         uint256 treasuryBefore = tick.balanceOf(treasury);
-        // Away wins 1-0: nobody staked WinAway, entire pool sweeps.
-        _settle(0, PRICE_100, PRICE_100 + STEP_005PCT);
+        // Away wins 2-0: nobody staked WinAway, entire pool sweeps.
+        _settle(0, PRICE_100, PRICE_100 + 10 * STEP_005PCT);
         // Pool was 100 staked + 250 seed = 350 TICK, all to treasury.
         assertEq(tick.balanceOf(treasury), treasuryBefore + 350 * 10 ** 18);
         // Alice's claim pays nothing (pool already swept).
@@ -339,10 +364,10 @@ contract StockLeagueTest is Test {
         pool.stake(SEASON_ID, 0, StockOutcome.WinHome, STAKE_300);
         vm.prank(carol);
         pool.stake(SEASON_ID, 0, StockOutcome.WinAway, STAKE_100);
-        // Home wins 1-0. Total pool = 100 + 300 + 100 + 250 seed = 750.
+        // Home wins 2-0. Total pool = 100 + 300 + 100 + 250 seed = 750.
         // Distributable after 7% fee = 697.5. Winning pool = 400.
         // Alice: 100/400 * 697.5 = 174.375 TICK. Bob: 523.125 TICK.
-        _settle(0, PRICE_100 + STEP_005PCT, PRICE_100);
+        _settle(0, PRICE_100 + 10 * STEP_005PCT, PRICE_100);
         vm.prank(alice);
         pool.claim(SEASON_ID, 0);
         assertEq(tick.balanceOf(alice), 10_000 * 10 ** 18 - STAKE_100 + 174_375_000_000_000_000_000);

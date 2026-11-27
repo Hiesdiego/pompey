@@ -4,22 +4,28 @@
  * Target location in the repo:
  *   packages/frontend/src/lib/stockFormat.ts
  *
- * Scoring, locked, document everywhere it is used:
- *   1 goal = 0.05% (5 bps), integer basis point math, no-negative
- *   scorelines exactly like crypto, max 10 goals per team per match,
- *   raw volatile cap 3% with circuit breaker review, 3 pts win / 1 draw
- *   / 0 loss, tiebreak points, GD, GF, wins, fewest losses.
+ * Scoring, document everywhere it is used:
+ *   Banded goal scale (revised 2026-11-27): the absolute price move
+ *   over the 1-hour window lands in a band, and the band is the goal
+ *   count. Under 0.10% scores 0; 0.10% / 0.25% / 0.75% / 1.50% /
+ *   3.00% / 6.00% score 1 / 2 / 3 / 4 / 5 / 6 goals; each full extra
+ *   3.00% beyond 6.00% adds one more goal, with NO cap. No-negative
+ *   scorelines exactly like crypto, raw volatile cap 3% with circuit
+ *   breaker review, 3 pts win / 1 draw / 0 loss, tiebreak points, GD,
+ *   GF, wins, fewest losses.
  *   Forfeit: no performance for that period means 0-3, opponent wins
  *   3-0, marked FORFEIT. Both sides missing means void, stakes refunded.
  *
- * Crypto comparison, for reviewers: crypto is 1 goal = 0.5% (50 bps).
- * Stocks move far less in 1 hour, so the stock threshold is 10x finer:
- * 1 goal = 0.05% (5 bps). Integer math truncates the move to basis
- * points, and the on-chain half-up offset truncates 5 / 2 to 2 bps, so
- * 0.03% (3 bps) is the first scoring move, not 0.025%. The shape of
- * the math is identical, only the constant changes. Do not copy the
- * crypto 50/25 constants here, and do not restore a 2.5 bps threshold
- * in this file, the on-chain oracle cannot represent it.
+ * Crypto comparison, for reviewers: crypto converts linearly at
+ * 1 goal = 0.5% (50 bps). The stock scale was linear too until
+ * 2026-11-27 (1 goal = 0.05% with a 10-goal cap), but Matchday 2
+ * showed the flaw: routine in-session moves saturated the cap and a
+ * +1.68% vs +0.50% match was recorded as a 10-10 draw. The banded
+ * scale keeps normal matches in football range while still
+ * respecting extreme moves, because the tail never caps. Do not copy
+ * the crypto constants here, and do not restore the linear
+ * conversion: the on-chain oracle converts with these exact bands,
+ * in integer basis points.
  *
  * Price rule, user approved Nov 18 2026: accept the last NAV within
  * the 24h heartbeat as the end price when the feed is healthy but
@@ -33,14 +39,14 @@
  * helpers are self-contained and do not import it.
  *
  * Worked examples (also shown in StockScoringExplainer):
- *   +0.15% over 1 hour = 15 bps = 3 goals.
- *   +0.05% = 5 bps = 1 goal. +0.02% = 2 bps = 0 goals.
- *   +0.03% = 3 bps = 1 goal, the first scoring move.
- *   Home -0.10% vs Away +0.05%: raw goals -2 vs +1, normalized 0-3.
- *   Home +0.12% vs Away -0.04%: raw goals +2 vs -1, normalized 3-0.
- *   Home +0.15% vs Away +0.15%: raw goals 3 vs 3, normalized 3-3, draw.
- *   +3.00% raw = 300 bps = 60 goals uncapped, capped to 10 goals, and
- *   flagged volatile for circuit breaker review.
+ *   +0.50% over 1 hour = 50 bps = 2 goals (one full NAV print).
+ *   +0.10% = 10 bps = 1 goal, the first scoring move. +0.09% = 0.
+ *   +0.15% = 15 bps = 1 goal.
+ *   Home -0.57% vs Away 0.00%: raw goals -2 vs 0, normalized 0-2.
+ *   Home +1.68% vs Away +0.50%: raw goals 4 vs 2, final score 4-2.
+ *   Home +0.30% vs Away +0.30%: raw goals 2 vs 2, normalized 2-2, draw.
+ *   +5.63% raw = 563 bps = 5 goals, and flagged volatile (over 3%).
+ *   +12.00% raw = 8 goals: the tail adds 1 per full extra 3.00%.
  *   Forfeit: missing side scores 0, opponent scores 3, result 0-3.
  *
  * Rounds: 22 rounds, Nov 26 to Dec 16 2026. Nov 26 to Dec 16 inclusive
@@ -50,12 +56,14 @@
  * offset at 20, so round 22 maps to Dec 16, never Dec 17.
  */
 
-export const STOCK_GOAL_PCT = 0.05;
-export const STOCK_GOAL_BPS = 5;
-// Solidity's integer half-up offset truncates 5 / 2 to 2 bps.
-export const STOCK_HALF_UP_BPS = 2;
-export const STOCK_MAX_GOALS = 10;
-/** Raw move above this is capped and flagged for circuit breaker review. */
+/** Band edges in bps over the absolute move: reaching an edge scores
+ * that band's goals (10 bps = 1 goal, 25 = 2, 75 = 3, 150 = 4,
+ * 300 = 5, 600 = 6). Mirrors StockConstants on-chain exactly. */
+export const STOCK_GOAL_BAND_EDGES_BPS = [10, 25, 75, 150, 300, 600] as const;
+/** Beyond the last band edge there is no cap: each full extra step of
+ * this size adds one more goal (900 bps = 7, 1200 bps = 8). */
+export const STOCK_GOAL_TAIL_STEP_BPS = 300;
+/** Raw move above this is flagged for circuit breaker review. */
 export const STOCK_VOLATILE_CAP_PCT = 3;
 export const STOCK_POINTS_WIN = 3;
 export const STOCK_POINTS_DRAW = 1;
@@ -77,18 +85,29 @@ export function formatSignedPctStock(pct: number, digits = 2): string {
   return `${sign}${Math.abs(pct).toFixed(digits)}%`;
 }
 
+/** Goals for an absolute move in integer basis points, on the banded
+ * scale. Shared by the scoreline mirror below and any display that
+ * needs the raw conversion. */
+export function stockGoalsForBps(absBps: number): number {
+  const edges = STOCK_GOAL_BAND_EDGES_BPS;
+  for (let i = 0; i < edges.length; i++) {
+    if (absBps < edges[i]) return i;
+  }
+  const last = edges[edges.length - 1];
+  return edges.length + Math.floor((absBps - last) / STOCK_GOAL_TAIL_STEP_BPS);
+}
+
 /**
- * Round a raw % change to goals exactly like the stock oracle:
- * 1 goal = 0.05% (5 bps). The oracle first truncates the move to
- * integer basis points, then applies the integer half-up offset of
- * 2 bps, so 3 bps is the first scoring move. Returns a signed goal
- * count, negative when the price fell. The caller must clamp and
- * normalize (see stockScoreline below).
+ * Convert a raw % change to goals exactly like the stock oracle: the
+ * oracle first truncates the move to integer basis points, then the
+ * absolute value's band decides the goals. Returns a signed goal
+ * count, negative when the price fell. The caller must normalize (see
+ * stockScoreline below). There is no cap at any step.
  */
 export function roundPctLikeOracleStock(pct: number): number {
-  // PriceOracle first truncates the move to integer basis points.
+  // The oracle first truncates the move to integer basis points.
   const bps = Math.trunc(Math.abs(pct) * 100);
-  const goals = Math.floor((bps + STOCK_HALF_UP_BPS) / STOCK_GOAL_BPS);
+  const goals = stockGoalsForBps(bps);
   return pct < 0 ? -goals : goals;
 }
 
@@ -101,29 +120,27 @@ export function isVolatileStock(pct: number): boolean {
  * Mirror of the oracle scoreline normalization: no negative scorelines.
  * Each side's negative goals become plus-goals for the opponent
  * (for example 0:-1 becomes 1:0). Margin-preserving, so winners are
- * unaffected. The 10-goal cap is applied after normalization, because
- * normalization can add goals (for example +10 vs -10 becomes 20-0
- * before the cap, and must end 10-0, not 20-0).
+ * unaffected. No cap is applied: normalization can add goals (for
+ * example +4 vs -4 becomes 8-0), and the final score keeps them all.
  */
 export function normalizeScorelineStock(homeGoals: number, awayGoals: number): [number, number] {
   const home = Math.max(0, homeGoals) + Math.max(0, -awayGoals);
   const away = Math.max(0, awayGoals) + Math.max(0, -homeGoals);
-  return [Math.min(STOCK_MAX_GOALS, home), Math.min(STOCK_MAX_GOALS, away)];
+  return [home, away];
 }
 
 /**
- * Full stock scoreline from two raw % moves: round each side at
- * 0.05% per goal, clamp each raw side to 10, normalize, clamp again.
+ * Full stock scoreline from two raw % moves: convert each side on the
+ * banded scale, then normalize. No cap at any step.
  * Returns [homeGoals, awayGoals] and whether either side was volatile.
  */
 export function stockScoreline(
   homePct: number,
   awayPct: number
 ): { homeGoals: number; awayGoals: number; volatile: boolean } {
-  const clamp = (g: number) => Math.max(-STOCK_MAX_GOALS, Math.min(STOCK_MAX_GOALS, g));
   const [homeGoals, awayGoals] = normalizeScorelineStock(
-    clamp(roundPctLikeOracleStock(homePct)),
-    clamp(roundPctLikeOracleStock(awayPct))
+    roundPctLikeOracleStock(homePct),
+    roundPctLikeOracleStock(awayPct)
   );
   return {
     homeGoals,

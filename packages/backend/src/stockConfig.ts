@@ -102,17 +102,42 @@ function optionalInt(name: string, fallback: number): number {
 }
 
 function optionalBool(name: string, fallback: boolean): boolean {
-  const value = optional(name, fallback ? "true" : "false").toLowerCase();
-  if (value === "true") return true;
-  if (value === "false") return false;
-  throw new Error(`[stockConfig] Env var ${name} must be true or false, got: ${value}`);
+  const v = optional(name, fallback ? "true" : "false").toLowerCase();
+  if (v === "true") return true;
+  if (v === "false") return false;
+  throw new Error(`[stockConfig] Env var ${name} must be true or false, got: ${v}`);
 }
 
+/** NYSE full-day closures for 2026 and 2027, as UTC dates (YYYY-MM-DD).
+ *  Observed dates are used where the holiday falls on a weekend (for
+ *  example Independence Day 2026 falls on a Saturday, so the market
+ *  closes Friday Jul 3). Early closes (for example 13:00 ET on the day
+ *  after Thanksgiving) are NOT listed: the market still trades, so
+ *  those matchdays play. Extend the list per season, or override it
+ *  wholesale with STOCK_MARKET_HOLIDAYS. */
 const DEFAULT_MARKET_HOLIDAYS: readonly string[] = [
-  "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
-  "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
-  "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
-  "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+  // 2026
+  "2026-01-01", // New Year's Day
+  "2026-01-19", // Martin Luther King Jr. Day
+  "2026-02-16", // Presidents' Day
+  "2026-04-03", // Good Friday
+  "2026-05-25", // Memorial Day
+  "2026-06-19", // Juneteenth
+  "2026-07-03", // Independence Day (observed)
+  "2026-09-07", // Labor Day
+  "2026-11-26", // Thanksgiving Day
+  "2026-12-25", // Christmas Day
+  // 2027
+  "2027-01-01", // New Year's Day
+  "2027-01-18", // Martin Luther King Jr. Day
+  "2027-02-15", // Presidents' Day
+  "2027-03-26", // Good Friday
+  "2027-05-31", // Memorial Day
+  "2027-06-18", // Juneteenth (observed)
+  "2027-07-05", // Independence Day (observed)
+  "2027-09-06", // Labor Day
+  "2027-11-25", // Thanksgiving Day
+  "2027-12-24", // Christmas Day (observed)
 ];
 
 function optionalAddress(name: string): `0x${string}` {
@@ -218,20 +243,36 @@ export const stockConfig = {
      *  (matchday windows start at 00:00 UTC, so they read as UTC times
      *  of day): 14:15 to 20:15 with the lifecycle's centre formula
      *  gives six hourly kickoffs at 14:45 to 19:45 UTC, every match
-     *  inside the 14:30 to 21:00 UTC regular session. Weekend matchdays
-     *  keep the full-window spread: the market is shut all day, so
-     *  staggering cannot help them this season. US market holidays are
-     *  NOT modelled: a holiday weekday still gets session slots. */
+     *  inside the 14:30 to 21:00 UTC regular session. Weekend and
+     *  holiday matchdays are not played at all: the market-calendar
+     *  gate below (marketCalendar) voids them at window open. The slot
+     *  math still computes their slots, but the void lands first. */
     weekdaySessionStartMinutes: optionalInt("STOCK_KICKOFF_SESSION_START_MINUTES", 14 * 60 + 15),
     weekdaySessionEndMinutes: optionalInt("STOCK_KICKOFF_SESSION_END_MINUTES", 20 * 60 + 15),
   },
 
+  /** US market calendar gate (user decision 2026-11-26): a matchday
+   *  that falls on a Saturday, a Sunday, or a full-day US market
+   *  holiday is NOT played. The NAV is frozen on those days, so every
+   *  match would settle 0-0 on identical prices (Matchday 1 fell on
+   *  Thanksgiving Day 2026 and settled as six 0-0 draws before this
+   *  gate existed). The lifecycle voids such fixtures at window open
+   *  via recordVoid: no table change at all, and every stake is
+   *  refunded 1:1 through claim(). Early closes are still trading
+   *  days and play normally. The matchday is the UTC date of the
+   *  fixture's window start (windows start at 00:00 UTC). */
   marketCalendar: {
+    /** Master switch for the gate. Leave true; false restores the
+     *  pre-gate behaviour (weekend and holiday fixtures play on a
+     *  frozen NAV). */
     skipNonTradingDays: optionalBool("STOCK_SKIP_NON_TRADING_DAYS", true),
+    /** Full-day US market closures as UTC dates (YYYY-MM-DD). An
+     *  env value replaces the built-in 2026-2027 NYSE list wholesale;
+     *  an empty or unset env keeps the built-in list. */
     holidays: (() => {
       const parsed = optional("STOCK_MARKET_HOLIDAYS", "")
         .split(",")
-        .map((date) => date.trim())
+        .map((d) => d.trim())
         .filter(Boolean);
       return parsed.length > 0 ? parsed : [...DEFAULT_MARKET_HOLIDAYS];
     })(),
@@ -296,16 +337,19 @@ export const stockConfig = {
     batchSize: optionalInt("STOCK_CHECKPOINT_BATCH_SIZE", 20),
   },
 
-  /** Scoring constants (locked 2026-11-16). Mirrored here for the API and
-   *  the circuit-breaker review; the stock ResultEngine is the authority
-   *  on-chain and must be deployed with BPS_PER_GOAL = 5. */
+  /** Scoring (banded scale, revised 2026-11-27). Mirrored here for the
+   *  API and the circuit-breaker review; the stock PriceOracle is the
+   *  authority on-chain and must run the same bands. */
   scoring: {
-    /** 1 goal = 0.05% = 5 bps (crypto: 50 bps). */
-    bpsPerGoal: 5,
-    /** Max goals per team per match. A raw move beyond this still scores 10. */
-    maxGoalsPerTeam: 10,
-    /** Raw volatile cap: a single-team move beyond 3% (300 bps) is capped
-     *  at the 10-goal cap AND flagged for circuit-breaker review. */
+    /** Band edges in bps over the absolute move: reaching an edge
+     *  scores that band's goals (10 bps = 1 goal, 25 = 2, 75 = 3,
+     *  150 = 4, 300 = 5, 600 = 6). */
+    goalBandEdgesBps: [10, 25, 75, 150, 300, 600],
+    /** Beyond the last edge there is NO cap: each full extra step of
+     *  this size adds one more goal (900 bps = 7, 1200 bps = 8). */
+    goalTailStepBps: 300,
+    /** Raw volatile cap: a single-team move beyond 3% (300 bps) is
+     *  flagged for circuit-breaker review. */
     rawVolatileCapBps: 300,
     /** +/-30% raw price spike by either team inside the match window
      *  triggers circuit-breaker review: the scoreline is ignored and the
@@ -335,13 +379,28 @@ export const stockConfig = {
 
 export type StockConfig = typeof stockConfig;
 
-/** Why the US market is closed on the UTC date containing `ms`, or null
- *  when it trades. Early closes are treated as trading days. */
+/** UTC date (YYYY-MM-DD) containing a timestamp. Matchday windows
+ *  start at 00:00 UTC, so a fixture's window-start date IS its
+ *  matchday for calendar purposes. */
+export function stockUtcDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** Why the US market is closed on the day containing `ms`, or null
+ *  when the market trades that day. Only weekends and listed full-day
+ *  holidays close the market for this gate; early closes still trade. */
 export function stockMarketClosureReason(ms: number): "weekend" | "holiday" | null {
   const day = new Date(ms).getUTCDay();
   if (day === 0 || day === 6) return "weekend";
-  const date = new Date(ms).toISOString().slice(0, 10);
-  return stockConfig.marketCalendar.holidays.includes(date) ? "holiday" : null;
+  if (stockConfig.marketCalendar.holidays.includes(stockUtcDate(ms))) return "holiday";
+  return null;
+}
+
+/** True when the day containing `ms` is a non-trading day AND the
+ *  market-calendar gate is enabled. */
+export function stockIsNonTradingDay(ms: number): boolean {
+  if (!stockConfig.marketCalendar.skipNonTradingDays) return false;
+  return stockMarketClosureReason(ms) !== null;
 }
 
 /** True only when every stock contract address is configured. Until then

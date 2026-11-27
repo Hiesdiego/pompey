@@ -113,7 +113,7 @@ export function ArenaScoringExplainer({ compact = false }: { compact?: boolean }
         </div>
       )}
       <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
-        Stock scoring is different: 1 goal = 0.05% there. Meme clashes use the crypto league scale, 1 goal = 0.5%.
+        Stock scoring is different: a banded goal scale there, not a fixed rate. Meme clashes use the crypto league scale, 1 goal = 0.5%.
       </p>
     </section>
   );

@@ -25,7 +25,7 @@ import type { StockFullSnapshot } from "./StockPostMatchPanel";
  * box, same kickoff and full-time rows with the % change. Only the
  * data source differs: the stock price oracle address, the stock
  * season id, NAV prices at 1e8, and the stock scoring line
- * (1 goal = 0.05%). The last-NAV rule is stated plainly, with its
+ * (the banded goal scale). The last-NAV rule is stated plainly, with its
  * limit: it covers a healthy but quiet feed, it does not fix a team
  * with no NAV at all.
  *
@@ -97,7 +97,7 @@ export function StockOracleAuditCard({
       })}
     </div> : <p className="mt-4 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">The oracle snapshot could not be loaded here. Open the contract below to inspect this fixture directly.</p>}
 
-    {scoreline ? <p className="mt-3 text-sm">Settled scoreline <strong className="font-display tabular-nums">{scoreline.homeGoals}–{scoreline.awayGoals}</strong>. One goal equals 0.05% price movement, rounded to the nearest goal at 0.03% for the first goal; negative goals are transferred to the other side.{fixture.forfeit ? " This result was decided by forfeit, 3-0 to the opponent of the side with no performance." : ""} The scoreline comes from the backend fixture record; check the contract&apos;s events for this fixture on the explorer to verify it on-chain.</p> : <p className="mt-3 text-xs text-zinc-500">The settled scoreline is unavailable in this view. Check the contract&apos;s events for this fixture on the explorer.</p>}
+    {scoreline ? <p className="mt-3 text-sm">Settled scoreline <strong className="font-display tabular-nums">{scoreline.homeGoals}–{scoreline.awayGoals}</strong>. Goals follow the band table: under 0.10% scores 0, then 0.10%, 0.25%, 0.75%, 1.50%, 3.00% and 6.00% score 1 to 6 goals, and each full extra 3.00% past 6.00% adds one more, with no cap; negative goals are transferred to the other side.{fixture.forfeit ? " This result was decided by forfeit, 3-0 to the opponent of the side with no performance." : ""} The scoreline comes from the backend fixture record; check the contract&apos;s events for this fixture on the explorer to verify it on-chain.</p> : <p className="mt-3 text-xs text-zinc-500">The settled scoreline is unavailable in this view. Check the contract&apos;s events for this fixture on the explorer.</p>}
 
     <div className="mt-4 rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
       <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">StockPriceOracle contract address</p>

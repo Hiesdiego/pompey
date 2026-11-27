@@ -13,6 +13,7 @@ import {
 } from "../lib/stockContracts";
 import { formatTick, OUTCOME_LABELS, OUTCOME_SHORT } from "../lib/format";
 import { formatSignedPctStock } from "../lib/stockFormat";
+import { StockTeamBadge } from "./StockLeagueTable";
 import { cn } from "../lib/cn";
 import { celebrateClaim } from "../lib/confetti";
 import { getPublicClient } from "../hooks/usePublicClient";
@@ -174,9 +175,7 @@ export function StockPostMatchPanel({
             return (
               <div key={team.teamId} className="rounded-2xl border border-black/[.07] bg-black/[.025] p-4 dark:border-white/[.08] dark:bg-white/[.025]">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2E7CF6]/10 text-xs font-extrabold text-[#1D4ED8] dark:text-[#7db3ff]">
-                    {team.symbol.slice(0, 4)}
-                  </span>
+                  <StockTeamBadge teamId={team.teamId} size={40} showName={false} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-bold text-zinc-900 dark:text-white">{team.name}</p>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">

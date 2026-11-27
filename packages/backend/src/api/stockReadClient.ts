@@ -284,7 +284,28 @@ export class StockChainReader {
     const cached = this.resultByFixture.get(fixtureId.toString());
     const forfeitingTeamId = this.forfeitsByFixture.get(fixtureId.toString());
     if (!cached && forfeitingTeamId === undefined && !this.voidedFixtures.has(fixtureId.toString())) {
-      return null;
+      // The in-memory voided set is only filled by this process's own
+      // lifecycle (markVoided), so a restart loses every void submitted
+      // before it (Season 1 fixture 5, voided on Thanksgiving 2026, read
+      // as unvoided after the next deploy). The chain source of truth is
+      // the pool: a voided fixture's pool reads voided with no
+      // ResultRecorded behind it. Ask the chain once here and remember
+      // a positive for the process lifetime; a void is final, so the
+      // cached positive can never go stale.
+      try {
+        const pool = (await this.publicClient.readContract({
+          address: stockConfig.contracts.predictionPool,
+          abi: STOCK_PREDICTION_POOL_ABI,
+          functionName: "getPool",
+          args: [seasonId, fixtureId],
+        })) as { voided: boolean };
+        if (pool.voided) this.voidedFixtures.add(fixtureId.toString());
+      } catch {
+        // A failed read reports "unknown" (null below), never a false void.
+      }
+      if (!this.voidedFixtures.has(fixtureId.toString())) {
+        return null;
+      }
     }
     if (cached) {
       return {

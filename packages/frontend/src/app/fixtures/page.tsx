@@ -66,8 +66,14 @@ export default function FixturesPage() {
         if (!alive) return;
         setCryptoFixtures(crypto);
         setStockFixtures(stocks);
-        setCryptoDay((value) => value ?? (crypto.find((f) => !f.settled)?.matchdayIndex ?? 0));
-        setStockDay((value) => value ?? (stocks.find((f) => !f.settled)?.matchdayIndex ?? 0));
+        // Default to the current round: the first round with a fixture
+        // still to play. A voided fixture is never settled, so it must
+        // be excluded here, or one voided fixture pins the page to its
+        // round forever (stock fixture 5, voided on Thanksgiving 2026,
+        // pinned the stocks view to round 1). If every fixture is
+        // settled or voided, fall back to the last round, not round 1.
+        setCryptoDay((value) => value ?? (crypto.find((f) => !f.settled && !f.voided)?.matchdayIndex ?? crypto[crypto.length - 1]?.matchdayIndex ?? 0));
+        setStockDay((value) => value ?? (stocks.find((f) => !f.settled && !f.voided)?.matchdayIndex ?? stocks[stocks.length - 1]?.matchdayIndex ?? 0));
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       }

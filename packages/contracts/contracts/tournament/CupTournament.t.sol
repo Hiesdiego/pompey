@@ -77,7 +77,7 @@ contract CupTournamentTest is Test {
     }
 
     function _reveal(uint16 matchId) internal returns (uint64 kickoff) {
-        kickoff = uint64(block.timestamp) + 2 hours;
+        kickoff = uint64(vm.getBlockTimestamp()) + 2 hours;
         vm.prank(operator);
         registry.revealKickoff(matchId, kickoff);
     }
@@ -97,7 +97,9 @@ contract CupTournamentTest is Test {
     /// @notice Plays a full match with the chosen winner (+1.2% vs +0.1%).
     function _playMatch(uint16 matchId, uint16 winnerTeam) internal {
         CupRegistry.CupMatch memory m = registry.getMatch(matchId);
-        uint64 kickoff = uint64(block.timestamp) + 2 hours;
+        // Read through the cheatcode so viaIR cannot reuse a timestamp
+        // from before a previous match's vm.warp in the same test.
+        uint64 kickoff = uint64(vm.getBlockTimestamp()) + 2 hours;
         vm.prank(operator);
         registry.revealKickoff(matchId, kickoff);
         vm.warp(kickoff);
@@ -614,7 +616,7 @@ contract CupTournamentTest is Test {
         }
 
         // Reveal the final's kickoff and warp to it: the outright closes.
-        uint64 kf = uint64(block.timestamp) + 2 hours;
+        uint64 kf = uint64(vm.getBlockTimestamp()) + 2 hours;
         vm.prank(operator);
         registry.revealKickoff(62, kf);
         vm.warp(kf);

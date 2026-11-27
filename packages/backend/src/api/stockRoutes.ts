@@ -217,8 +217,11 @@ export function buildStockRouter(deps: StockApiDeps): Router {
     }
     // Forfeit flag and scoreline are best-effort: a failed chain read
     // must not 502 a fixture that the lifecycle cache already knows.
+    // Voided starts from the lifecycle cache, which reads the flag from
+    // the registry on every refresh, so it survives restarts; the
+    // reader result below can only add to it.
     let forfeitingTeamId: number | undefined;
-    let voided = false;
+    let voided = f.voided;
     let result: Awaited<ReturnType<typeof deps.reader.getStockFixtureResult>> = null;
     try {
       result = await deps.reader.getStockFixtureResult(stockConfig.seasonId, id);

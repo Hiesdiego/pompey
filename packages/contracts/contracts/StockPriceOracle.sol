@@ -28,19 +28,24 @@ interface IStockResultEngine {
 /// forming a 30-day rolling price history (same pattern as crypto).
 ///
 /// @dev STOCK DIFFERENCES FROM CRYPTO PriceOracle:
-///   - 1 goal = 0.05% (BPS_PER_GOAL = 5), not 0.5% (50). Half-up rounding
-///     is identical, just at the finer threshold: a +0.025% move rounds
-///     to 1 goal, +0.024% rounds to 0.
-///   - 10-GOAL CAP: neither side can score more than 10 goals in a match.
-///     The cap is applied AFTER normalization, so the margin is preserved
-///     whenever both sides are under the cap, and a blowout can never
-///     swamp goal difference beyond 10.
+///   - BANDED GOAL SCALE (revised 2026-11-27, replacing the original
+///     linear 1 goal = 0.05% with a 10-goal cap): goals come from the
+///     absolute move's band: under 0.10% scores 0, then 0.10% / 0.25% /
+///     0.75% / 1.50% / 3.00% / 6.00% score 1 / 2 / 3 / 4 / 5 / 6 goals,
+///     and each full extra 3.00% beyond 6.00% adds one more goal. There
+///     is NO goal cap: 9.00% scores 7, 12.00% scores 8, and the scale
+///     keeps climbing, just at a slower rate, so normal matches stay in
+///     football range while extreme moves are still respected. The
+///     linear scale saturated its cap on routine in-session moves (a
+///     +1.68% vs +0.50% match was recorded as a 10-10 draw on Matchday 2
+///     of Season 1), which is why it was replaced. No-negative
+///     normalization is unchanged and still applies after conversion.
 ///   - 3% VOLATILE CAP / CIRCUIT BREAKER: a raw move above 3% (300 bps)
 ///     in the 1-hour window trips `volatileSpike[globalFixtureId]` and
-///     emits CircuitBreakerTripped. The scoreline is still recorded,
-///     capped at 10 goals, so the season does not stall, but the flag is
-///     on-chain for backend/DAO review. This is a flag, not an automatic
-///     void: voiding stays a deliberate backend action via
+///     emits CircuitBreakerTripped. The scoreline is still recorded, so
+///     the season does not stall, but the flag is on-chain for
+///     backend/DAO review. This is a flag, not an automatic void:
+///     voiding stays a deliberate backend action via
 ///     StockResultEngine.recordVoid.
 ///   - STALE NAV: there is deliberately NO Dinari fallback in this
 ///     contract. If no fresh NAV price exists for a match period, the
@@ -69,7 +74,7 @@ contract StockPriceOracle is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     mapping(uint256 => Snapshot) public snapshots; // globalFixtureId => snapshot
 
     /// @notice True when either team's raw move in the window exceeded the
-    /// 3% volatile cap. Flagged for review, scoreline still capped at 10.
+    /// 3% volatile cap. Flagged for review; the scoreline still stands.
     mapping(uint256 => bool) public volatileSpike;
 
     /// @notice teamId => hourTimestamp (floored to the hour) => NAV price.
@@ -192,8 +197,6 @@ contract StockPriceOracle is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         int16 awayRaw = _bpsToGoals(awayRawBps);
 
         (int16 homeGoals, int16 awayGoals) = _normalizeScoreline(homeRaw, awayRaw);
-        homeGoals = _capGoals(homeGoals);
-        awayGoals = _capGoals(awayGoals);
 
         StockOutcome outcome;
         if (homeGoals > awayGoals) {
@@ -300,19 +303,33 @@ contract StockPriceOracle is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         return (delta * 10_000) / int256(startPrice);
     }
 
-    /// @notice Converts a raw basis-point move to goals at 5 bps per goal,
-    /// rounded half up (half away from zero for negatives). Examples:
-    /// +5 bps = 1 goal, +3 bps = 1 goal (3+2)/5, +2 bps = 0 goals,
-    /// -5 bps = -1 goal, -3 bps = -1 goal.
+    /// @notice Converts a raw basis-point move to goals on the banded
+    /// scale (see StockConstants): the absolute move's band decides the
+    /// goals and the sign is preserved for the no-negative normalization
+    /// below. Examples: +9 bps = 0 goals, +10 bps = 1, +50 bps = 2,
+    /// +168 bps = 4, +563 bps = 5, +900 bps = 7, -57 bps = -2 goals.
+    /// There is no cap: past the 6-goal band, each full extra 300 bps
+    /// adds one more goal.
     function _bpsToGoals(int256 bps) internal pure returns (int16) {
-        int256 halfGoal = int256(StockConstants.BPS_PER_GOAL) / 2;
-        int256 goals;
-        if (bps >= 0) {
-            goals = (bps + halfGoal) / int256(StockConstants.BPS_PER_GOAL);
+        uint256 magnitude = bps >= 0 ? uint256(bps) : uint256(-bps);
+        uint256 goals;
+        if (magnitude < StockConstants.GOAL_BAND_1_BPS) {
+            goals = 0;
+        } else if (magnitude < StockConstants.GOAL_BAND_2_BPS) {
+            goals = 1;
+        } else if (magnitude < StockConstants.GOAL_BAND_3_BPS) {
+            goals = 2;
+        } else if (magnitude < StockConstants.GOAL_BAND_4_BPS) {
+            goals = 3;
+        } else if (magnitude < StockConstants.GOAL_BAND_5_BPS) {
+            goals = 4;
+        } else if (magnitude < StockConstants.GOAL_BAND_6_BPS) {
+            goals = 5;
         } else {
-            goals = (bps - halfGoal) / int256(StockConstants.BPS_PER_GOAL);
+            goals = 6 + (magnitude - StockConstants.GOAL_BAND_6_BPS) / StockConstants.GOAL_TAIL_STEP_BPS;
         }
-        return int16(goals);
+        int16 signed = int16(int256(goals));
+        return bps < 0 ? -signed : signed;
     }
 
     /// @notice Removes negative scorelines: each side's negative goals are
@@ -331,24 +348,16 @@ contract StockPriceOracle is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         awayGoals = awayGains + homeLosses;
     }
 
-    /// @notice Caps one side's goals at MAX_GOALS_PER_TEAM (10). Goals are
-    /// non-negative by the time this runs (normalization happens first).
-    function _capGoals(int16 goals) internal pure returns (int16) {
-        if (goals > StockConstants.MAX_GOALS_PER_TEAM) return StockConstants.MAX_GOALS_PER_TEAM;
-        return goals;
-    }
-
     /// @notice Pure helper exposed for tests and off-chain tooling: the
     /// scoreline a (homeBps, awayBps) pair of raw moves produces, after
-    /// half-up rounding, no-negative normalization and the 10-goal cap.
+    /// the banded conversion and no-negative normalization. No cap is
+    /// applied at any step.
     function previewScoreline(int256 homeBps, int256 awayBps)
         external
         pure
         returns (int16 homeGoals, int16 awayGoals)
     {
         (homeGoals, awayGoals) = _normalizeScoreline(_bpsToGoals(homeBps), _bpsToGoals(awayBps));
-        homeGoals = _capGoals(homeGoals);
-        awayGoals = _capGoals(awayGoals);
     }
 
     function getSnapshot(uint256 seasonId, uint256 fixtureId) external view returns (Snapshot memory) {
