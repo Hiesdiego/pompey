@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, Flame, Radio, Sparkles, Target, Trophy, Zap } from "lucide-react";
 import { TEMPLATES, TEMPLATE_NAMES, MARKET_FACTORY_ADDRESS } from "../lib/marketFactory";
 import { api, type ApiFixture, type ApiTableRow } from "../lib/api";
@@ -38,7 +39,9 @@ import { useMarketFees } from "../lib/query/useMarketFees";
 import { useFactoryEvents } from "../lib/query/useFactoryEvents";
 import { useStockMarkets } from "../lib/query/useStockMarkets";
 import { stockCardDataFromSummary, StockMarketCard } from "../components/StockMarketCard";
-import { useArenaClashes } from "../lib/query/useArena";
+import { StockLeagueTable } from "../components/StockLeagueTable";
+import { MemeLogo } from "../components/MemeLogo";
+import { useArenaRankings, useArenaClashes } from "../lib/query/useArena";
 
 const card = "surface-card";
 const open = (m: MarketSummary) => m.state === 0 && m.bettingCloseTime * 1000 > Date.now();
@@ -367,6 +370,8 @@ export default function HomePage() {
   const { markets, isLoading } = useMarkets();
   const stockMarketQuery = useStockMarkets();
   const arenaClashesQuery = useArenaClashes();
+  const arenaRankings = useArenaRankings();
+  const stockTable = useQuery({ queryKey: ["home-stock-table"], queryFn: () => stockApi.table(), refetchInterval: 30_000 });
   const { teams: teamData } = useTeams();
   const { authenticated } = useTickr();
   const { prices, status: priceStatus } = usePriceFeed(true);
@@ -409,6 +414,8 @@ export default function HomePage() {
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_350px]">
       <section><div className="mb-4"><p className="text-[11px] font-extrabold uppercase tracking-[.2em] text-[#2E7CF6]">The market is moving</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white sm:text-3xl">Featured markets</h2></div><FeaturedCarousel markets={featured} teams={names} fixtures={fixtures} prices={prices} priceFresh={priceStatus !== "stale"} loading={isLoading && !markets} /></section>
       <aside className="space-y-5"><section><div className="mb-3 flex items-center justify-between">{table === null ? <div className="skeleton h-5 w-28 rounded-md" aria-hidden /> : <h2 className="font-display text-base font-bold">League table</h2>}<Link href="/standings" className="text-xs font-bold text-[#2E7CF6]">Full table</Link></div><div className={card + " overflow-hidden p-2"}>{table === null ? <LeagueTableSkeleton rows={8} compact /> : <LeagueTable rows={table} limit={8} compact />}</div></section>
+        <section className="hidden md:block"><div className="mb-3 flex items-center justify-between"><h2 className="font-display text-base font-bold">Stock league</h2><Link href="/stocks/standings" className="text-xs font-bold text-[#2E7CF6]">Full table</Link></div><div className={card + " overflow-hidden p-2"}>{stockTable.isPending ? <LeagueTableSkeleton rows={5} compact /> : stockTable.isError ? <p className="p-3 text-sm text-zinc-500">Stock standings are refreshing.</p> : <StockLeagueTable rows={stockTable.data ?? []} limit={5} compact />}</div></section>
+        <section className="hidden md:block"><div className="mb-3 flex items-center justify-between"><h2 className="font-display text-base font-bold">Meme Arena rankings</h2><Link href="/arena" className="text-xs font-bold text-pink-500">Full rankings</Link></div><div className={card + " overflow-hidden p-2"}>{arenaRankings.isLoading ? <LeagueTableSkeleton rows={5} compact /> : <table className="w-full text-sm"><thead><tr className="border-b border-black/5 text-xs uppercase text-zinc-500 dark:border-white/10"><th className="p-2 text-left">#</th><th className="p-2 text-left">Meme</th><th className="p-2 text-right">Titles</th><th className="p-2 text-right">Pts</th></tr></thead><tbody>{(arenaRankings.data?.rankings ?? []).slice(0, 5).map((row) => <tr key={row.address} className="border-b border-black/5 last:border-0 dark:border-white/5"><td className="p-2 font-bold tabular-nums">{row.rank}</td><td className="p-2"><span className="flex items-center gap-2"><MemeLogo symbol={row.symbol} logoUrl={row.logoUrl} imageUrl={row.imageUrl} size={22} /><span className="max-w-24 truncate font-semibold" title={row.name}>{row.symbol}</span></span></td><td className="p-2 text-right tabular-nums">{row.titles}</td><td className="p-2 text-right font-bold tabular-nums text-pink-500">{Math.round(row.points).toLocaleString()}</td></tr>)}</tbody></table>}{!arenaRankings.isLoading && !arenaRankings.data?.rankings.length && <p className="p-3 text-sm text-zinc-500">{arenaRankings.isError ? "Rankings are refreshing." : "Rankings appear after the first cup."}</p>}</div></section>
         {authenticated && <Link href="/markets/create" className="group block overflow-hidden rounded-3xl bg-gradient-to-br from-[#1765dc] via-[#2E7CF6] to-[#6ea7ff] p-5 text-white shadow-lg shadow-[#2E7CF6]/20 transition hover:-translate-y-0.5"><div className="flex items-start justify-between"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-white/15"><Zap className="h-5 w-5" /></span><ArrowUpRight className="h-5 w-5 transition-transform group-hover:translate-x-1 group-hover:-translate-y-1" /></div><h3 className="mt-4 max-w-[16rem] font-display text-lg font-extrabold leading-snug">Get others to stake on your market.</h3><p className="mt-1 text-sm text-white/75">Make your call. Bring the crowd.</p><span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-[#1d5fc9]">Create a market <ArrowRight className="h-4 w-4" /></span></Link>}
       </aside>
     </div>

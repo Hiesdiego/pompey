@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
 import { api, type ApiFixture } from "../../lib/api";
 import { stockApi, STOCK_CONTRACTS, STOCK_PRICE_DECIMALS, STOCK_PRICE_ORACLE_ABI, STOCK_SEASON_ID, type StockApiFixture } from "../../lib/stockContracts";
@@ -28,6 +29,15 @@ const REFETCH_MS = 15_000;
 const dayTime = (fixture: ApiFixture | StockApiFixture) => fixture.kickoff ?? ("scheduledKickoff" in fixture ? fixture.scheduledKickoff : null) ?? fixture.windowStart;
 const dayKey = (fixture: ApiFixture | StockApiFixture) => utcDayKey(dayTime(fixture));
 
+function FixtureLeagueSync({ onChange }: { onChange: (league: LeagueFilter) => void }) {
+  const search = useSearchParams();
+  useEffect(() => {
+    const league = search.get("league");
+    onChange(league === "crypto" || league === "stocks" || league === "memes" ? league : "all");
+  }, [search, onChange]);
+  return null;
+}
+
 function DayPager({ values, selected, onChange, stock = false }: { values: [number, (ApiFixture | StockApiFixture)[]][]; selected: number; onChange: (day: number) => void; stock?: boolean }) {
   const selectedIndex = values.findIndex(([day]) => day === selected);
   const label = (day: number) => stock ? stockRoundLabel(day) : `Matchday ${day + 1}`;
@@ -49,6 +59,7 @@ export default function FixturesPage() {
   const [stockFixtures, setStockFixtures] = useState<StockApiFixture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<LeagueFilter>("all");
+  const [timelineDay, setTimelineDay] = useState(() => new Date().toISOString().slice(0, 10));
   const [cryptoDay, setCryptoDay] = useState<number | null>(null);
   const [stockDay, setStockDay] = useState<number | null>(null);
   const { prices } = usePriceFeed(true);
@@ -57,8 +68,6 @@ export default function FixturesPage() {
   const arenaClashes = useMemo(() => arenaClashesQuery.data?.clashes ?? [], [arenaClashesQuery.data]);
 
   useEffect(() => {
-    const requestedLeague = new URLSearchParams(window.location.search).get("league");
-    if (requestedLeague === "crypto" || requestedLeague === "stocks" || requestedLeague === "all" || requestedLeague === "memes") setFilter(requestedLeague);
     let alive = true;
     const load = async () => {
       try {
@@ -99,7 +108,7 @@ export default function FixturesPage() {
     for (const f of cryptoFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "crypto", fixture: f }]); }
     for (const f of stockFixtures ?? []) { const day = dayKey(f); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "stocks", fixture: f }]); }
     for (const c of arenaClashes) { const day = utcDayKey(new Date(c.windowStart * 1000).toISOString()); if (day) groups.set(day, [...(groups.get(day) ?? []), { kind: "memes", clash: c }]); }
-    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([day, matches]) => [day, matches.sort((a, b) => (b.kind === "memes" ? b.clash.windowStart * 1000 : new Date(dayTime(b.fixture)).getTime()) - (a.kind === "memes" ? a.clash.windowStart * 1000 : new Date(dayTime(a.fixture)).getTime()))] as const);
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, matches]) => [day, matches.sort((a, b) => (a.kind === "memes" ? a.clash.windowStart * 1000 : new Date(dayTime(a.fixture)).getTime()) - (b.kind === "memes" ? b.clash.windowStart * 1000 : new Date(dayTime(b.fixture)).getTime()))] as const);
   }, [cryptoFixtures, stockFixtures, arenaClashes]);
 
   const memeTimeline = useMemo(() => {
@@ -111,7 +120,7 @@ export default function FixturesPage() {
   const activeCrypto = filter === "crypto" ? cryptoDays.find(([day]) => day === cryptoDay)?.[1] ?? [] : [];
   // The All timeline uses the same score-bearing cards as the league views,
   // so fetch snapshots for every live or settled crypto fixture it can show.
-  const scoreFixtures = (filter === "all" ? cryptoFixtures ?? [] : activeCrypto)
+  const scoreFixtures = (filter === "all" ? (cryptoFixtures ?? []).filter((fixture) => dayKey(fixture) === timelineDay) : activeCrypto)
     .filter((f) => ["live", "settled"].includes(fixtureStatus(f)));
   const scoreIds = scoreFixtures.map((f) => f.fixtureId).join(",");
   const [snapshots, setSnapshots] = useState<Record<string, FixtureSnapshot>>({});
@@ -198,12 +207,19 @@ export default function FixturesPage() {
   const loading = !cryptoFixtures || !stockFixtures || cryptoDay === null || stockDay === null;
 
   return <div>
+    <Suspense fallback={null}><FixtureLeagueSync onChange={setFilter} /></Suspense>
     <SectionTitle title="Fixtures" action={<Link href="/standings" className="inline-flex items-center gap-1 text-sm font-semibold text-[#1D4ED8] dark:text-[#7db3ff]"><Table2 className="h-4 w-4" /> League standings</Link>} />
     <div className="mb-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Fixture league">
       {(["all", "crypto", "stocks", "memes"] as LeagueFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("rounded-xl px-4 py-1.5 text-sm font-semibold", filter === value ? "bg-gradient-to-b from-[#2E7CF6] to-[#1D4ED8] text-white" : "glass text-zinc-500 dark:text-zinc-400")}>{value === "all" ? "All" : value === "crypto" ? "Crypto" : value === "stocks" ? "Stocks" : "Memes"}</button>)}
     </div>
-    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "All crypto, stock and meme fixtures, newest first by UTC date and kickoff time" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : filter === "memes" ? "Meme clashes from the Stock Meme Arena, newest first by window start date, all times UTC" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
-    {loading ? <SkeletonCards cards={6} /> : filter === "all" ? timeline.length === 0 ? <EmptyState title="No fixtures available." /> : <div className="space-y-9">{timeline.map(([day, matches]) => <section key={day}>
+    <p className="mb-6 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-4 w-4 text-[#2E7CF6]" />{filter === "all" ? "Crypto, stock and meme fixtures and results for the selected UTC date" : filter === "crypto" ? "Crypto season fixtures, sorted by matchday" : filter === "memes" ? "Meme clashes from the Stock Meme Arena, newest first by window start date, all times UTC" : `Stock Season 1 · ${STOCK_TOTAL_ROUNDS} rounds · all times UTC`}</p>
+    {filter === "all" && <div className="glass mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl p-3">
+      <button aria-label="Previous date" className="rounded-xl p-2 hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setTimelineDay(new Date(Date.parse(`${timelineDay}T00:00:00Z`) - 86400000).toISOString().slice(0, 10))}><ChevronLeft className="h-4 w-4" /></button>
+      <label className="flex items-center gap-2 text-sm font-semibold">Date (UTC)<input aria-label="Fixture date (UTC)" type="date" value={timelineDay} onChange={(event) => { if (event.target.value) setTimelineDay(event.target.value); }} className="rounded-lg border border-black/10 bg-transparent p-2 dark:border-white/10" /></label>
+      <button onClick={() => setTimelineDay(new Date().toISOString().slice(0, 10))} className="rounded-xl bg-[#2E7CF6]/10 px-3 py-2 text-sm font-bold text-[#2E7CF6]">Today</button>
+      <button aria-label="Next date" className="rounded-xl p-2 hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setTimelineDay(new Date(Date.parse(`${timelineDay}T00:00:00Z`) + 86400000).toISOString().slice(0, 10))}><ChevronRight className="h-4 w-4" /></button>
+    </div>}
+    {loading ? <SkeletonCards cards={6} /> : filter === "all" ? !timeline.some(([day]) => day === timelineDay) ? <EmptyState title="No fixtures on this date" message="Choose another date to browse fixtures and results across all leagues." /> : <div className="space-y-9">{timeline.filter(([day]) => day === timelineDay).map(([day, matches]) => <section key={day}>
       <h2 className="mb-4 border-b border-black/10 pb-2 font-display text-lg font-bold text-zinc-900 dark:border-white/10 dark:text-white">{new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}<span className="ml-2 text-sm font-normal text-zinc-500">UTC · {matches.length} fixtures</span></h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{matches.map((entry) => entry.kind === "crypto" ? <FixtureCard key={`crypto-${entry.fixture.fixtureId}`} fixture={entry.fixture} score={scoreFor(entry.fixture)} /> : entry.kind === "stocks" ? <StockFixtureCard key={`stock-${entry.fixture.fixtureId}`} fixture={entry.fixture} liveUpdate={fixtureUpdates[entry.fixture.fixtureId]} liveScore={stockScoreFor(entry.fixture)} /> : <MemeClashCard key={`meme-${entry.clash.id}`} clash={entry.clash} />)}</div>
     </section>)}</div> : filter === "crypto" ? <>

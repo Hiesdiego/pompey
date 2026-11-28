@@ -65,6 +65,7 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { isAddress } from "viem";
 import { logger } from "../lib/logger.js";
+import { basestonkLogoUrl } from "../services/arenaRegistryService.js";
 import { ChainApiError } from "../services/chainCache.js";
 import type { ArenaRegistryService } from "../services/arenaRegistryService.js";
 import type { ArenaClashReader, ArenaClashSummary } from "../services/arenaClashReader.js";
@@ -137,6 +138,12 @@ function commentaryInScope(clash: ArenaClashSummary): boolean {
 
 export function buildArenaRouter(deps: ArenaApiDeps): Router {
   const router = Router();
+  const side = (address: string | null, symbol: string | null) => {
+    if (!address) return null;
+    const meme = deps.registry.getMemes().find((m) => m.address.toLowerCase() === address.toLowerCase());
+    return { address, symbol: meme?.symbol ?? symbol ?? "?", name: meme?.name ?? symbol ?? address,
+      logoUrl: meme?.logoUrl || basestonkLogoUrl(address), imageUrl: meme?.imageUrl ?? null };
+  };
   router.use(arenaRateLimit());
 
   // Never edge-cache an error (mirrors the stock market router).
@@ -265,7 +272,9 @@ export function buildArenaRouter(deps: ArenaApiDeps): Router {
         return;
       }
       const data = await deps.ratings.getRankings();
-      res.json({ ok: true, data });
+      res.json({ ok: true, data: { ...data, rankings: data.rankings.map((row) => ({
+        ...row, ...side(row.address, row.symbol),
+      })) } });
     } catch (err) {
       chainError(res, err);
     }
@@ -280,8 +289,9 @@ export function buildArenaRouter(deps: ArenaApiDeps): Router {
         data: {
           cups: cups.map((cup) => ({
             ...cup,
-            champion: cup.champion ? { address: cup.champion, symbol: cup.championSymbol } : null,
-            runnerUp: cup.runnerUp ? { address: cup.runnerUp, symbol: cup.runnerUpSymbol } : null,
+            weekStart: cup.weekKey,
+            champion: side(cup.champion, cup.championSymbol),
+            runnerUp: side(cup.runnerUp, cup.runnerUpSymbol),
           })),
         },
       });
@@ -307,11 +317,14 @@ export function buildArenaRouter(deps: ArenaApiDeps): Router {
       }
       const rounds = roundOrder
         .filter((round) => byRound.has(round))
-        .map((round) => ({
-          round,
-          ties: (byRound.get(round) ?? []).sort((a, b) => a.tieIndex - b.tieIndex),
+        .map((round, index) => ({
+          round: index,
+          ties: (byRound.get(round) ?? []).sort((a, b) => a.tieIndex - b.tieIndex).map((tie) => ({
+            ...tie, memeA: side(tie.memeA, tie.symbolA), memeB: side(tie.memeB, tie.symbolB),
+            status: ["won", "bye", "advanced_double_void"].includes(tie.status) ? "settled" : tie.status === "live" ? "inplay" : tie.status === "void_replay" ? "voided" : "upcoming",
+          })),
         }));
-      res.json({ ok: true, data: { cup: { ...current.cup, rounds } } });
+      res.json({ ok: true, data: { cup: { ...current.cup, weekStart: current.cup.weekKey, rounds } } });
     } catch (err) {
       chainError(res, err);
     }

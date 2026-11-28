@@ -162,6 +162,37 @@ contract MarketFactoryTest is Test {
         require(exists && activeId == first, "active duplicate index missing");
     }
 
+    function test_CannotDuplicateChampionWithTrailingBytes() public {
+        _approveAll(creator);
+        _approveAll(alice);
+        uint8 t = factory.T_CHAMPION();
+        bytes memory params = abi.encode(SEASON_ID);
+        vm.prank(creator);
+        uint256 first = factory.createMarket(t, params, "first");
+        vm.expectRevert(abi.encodeWithSelector(
+            MarketFactory.DuplicateOpenMarket.selector, t, keccak256(abi.encode(t, params)), first
+        ));
+        vm.prank(alice);
+        factory.createMarket(t, bytes.concat(params, hex"01"), "duplicate");
+    }
+
+    function test_CannotDuplicateExactTargetWithTrailingBytes() public {
+        _approveAll(creator);
+        _approveAll(alice);
+        uint8 t = factory.T_TARGET();
+        bytes memory params = abi.encode(uint16(0), uint256(100e8), uint64(block.timestamp + 2 hours), true);
+        vm.prank(creator);
+        uint256 first = factory.createMarket(t, params, "first");
+        vm.expectRevert(abi.encodeWithSelector(
+            MarketFactory.DuplicateOpenMarket.selector, t, keccak256(abi.encode(t, params)), first
+        ));
+        vm.prank(alice);
+        factory.createMarket(t, bytes.concat(params, hex"01"), "duplicate");
+        // A different timestamp is a different prediction.
+        vm.prank(alice);
+        factory.createMarket(t, abi.encode(uint16(0), uint256(100e8), uint64(block.timestamp + 3 hours), true), "later");
+    }
+
     function _market(uint256 id)
         internal
         view

@@ -33,6 +33,13 @@ const NAV = [
   { href: "https://docs.tickrbase.top", label: "Docs" },
 ];
 
+const QUICK_NAV = [
+  { href: "/arena", label: "Meme Arena", pink: true },
+  { href: "/fixtures?league=stocks", label: "Stock fixtures", pink: false },
+  { href: "/fixtures?league=crypto", label: "Crypto fixtures", pink: false },
+  { href: "/#trending", label: "Trending", pink: false },
+];
+
 function ThemeToggle({ inMenu = false }: { inMenu?: boolean }) {
   const { theme, toggle } = useTheme();
   return (
@@ -327,14 +334,16 @@ export function Header() {
           )}
         </div>
       </div>
-      <nav aria-label="More destinations" className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-1.5 md:hidden dark:border-white/5">
-        {[{ href: "/#trending", label: "Trending" }, { href: "/standings", label: "League" }, ...NAV.filter((n) => !["/", "/markets", "/fixtures", "/standings"].includes(n.href))].map((n) => (
+      <nav aria-label="Quick navigation" className="mx-auto flex min-w-0 max-w-6xl items-center gap-2 overflow-x-auto overscroll-x-contain border-t border-black/5 px-4 py-2.5 dark:border-white/5">
+        {[...QUICK_NAV, { href: "/standings", label: "League", pink: false }, ...NAV.filter((n) => !["/", "/markets", "/fixtures", "/standings"].includes(n.href)).map((n) => ({ ...n, pink: false }))].map((n) => (
           <Link
             key={n.href}
             href={n.href}
             className={cn(
-              "shrink-0 whitespace-nowrap rounded-lg px-3 py-1 text-sm font-medium transition-colors",
-              pathname === n.href
+              "shrink-0 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-semibold transition-colors",
+              n.pink ? "border-pink-500/25 bg-pink-500/10 text-pink-600 hover:bg-pink-500/20 dark:text-pink-400" : "border-black/5 bg-black/[.025] hover:bg-black/5 dark:border-white/10 dark:bg-white/[.025] dark:hover:bg-white/10",
+              !QUICK_NAV.some((item) => item.href === n.href) && "md:hidden",
+              n.pink ? "" : pathname === n.href
                 ? "bg-[#2E7CF6]/12 text-[#1D4ED8] dark:bg-[#2E7CF6]/15 dark:text-[#7db3ff]"
                 : "text-zinc-500 dark:text-zinc-400"
               )}

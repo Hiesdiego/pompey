@@ -78,10 +78,10 @@
  * Never import from the @tickr/shared barrel. Direct module paths only.
  */
 
+import { priceTargetDeadline } from "./priceTargetQuestion";
 import type { Address } from "viem";
 import { BACKEND_API_URL } from "./contracts";
 import { STOCK_TEAMS } from "./stockTeams";
-import { formatUtcDate } from "./utcTime";
 
 // ── factory address ─────────────────────────────────────────────────
 
@@ -180,7 +180,7 @@ export function parseNavPrice(navPrice: string | number | null | undefined): num
 
 /**
  * The card and detail question, verbatim shape from the locked spec:
- * "Will NVDA be above $150 by Dec 31, 2026?" The date is the deadline
+ * "Will NVDA finish at or below $150 at the end of 2026 (UTC)?" The date is the deadline
  * formatted in UTC via lib/utcTime. The symbol is the display symbol
  * (see stockDisplaySymbol), never the raw contract symbol with a "c"
  * suffix.
@@ -192,8 +192,7 @@ export function stockPriceTargetQuestion(
   deadline: Date | number
 ): string {
   const date = deadline instanceof Date ? deadline : new Date(deadline);
-  const when = Number.isNaN(date.getTime()) ? "the deadline" : formatUtcDate(date);
-  return `Will ${symbol} be ${above ? "above" : "below"} ${formatStockTargetUsd(targetPriceScaled)} by ${when}?`;
+  return `Will ${symbol} finish ${above ? "above" : "at or below"} ${formatStockTargetUsd(targetPriceScaled)} ${priceTargetDeadline(date)}?`;
 }
 
 // ── symbols and logos ───────────────────────────────────────────────

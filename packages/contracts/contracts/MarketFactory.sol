@@ -515,7 +515,25 @@ contract MarketFactory is Ownable, ReentrancyGuard {
     // =========================================================================
 
     function _marketKey(uint8 templateId, bytes memory params) internal pure returns (bytes32) {
-        return keccak256(abi.encode(templateId, params));
+        // Canonicalize decoded terms: ABI decoders accept trailing bytes, which
+        // must not allow a second market for the same season or exact deadline.
+        bytes memory canonical;
+        if (templateId == T_TOP_GAINER) {
+            (uint256 seasonId, uint8 day) = abi.decode(params, (uint256, uint8));
+            canonical = abi.encode(seasonId, day);
+        } else if (templateId == T_CHAMPION) {
+            canonical = abi.encode(abi.decode(params, (uint256)));
+        } else if (templateId == T_H2H) {
+            (uint16 a, uint16 b, uint64 start, uint64 end) = abi.decode(params, (uint16, uint16, uint64, uint64));
+            canonical = abi.encode(a, b, start, end);
+        } else if (templateId == T_TARGET) {
+            (uint16 team, uint256 price, uint64 at, bool above) = abi.decode(params, (uint16, uint256, uint64, bool));
+            canonical = abi.encode(team, price, at, above);
+        } else {
+            (uint256 seasonId, uint256 fixture, int16 spread) = abi.decode(params, (uint256, uint256, int16));
+            canonical = abi.encode(seasonId, fixture, spread);
+        }
+        return keccak256(abi.encode(templateId, canonical));
     }
 
     /// @notice The live resolving data for a TOP_GAINER market: every team's

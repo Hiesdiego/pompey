@@ -51,7 +51,7 @@ function SideRow({ side, seed, isWinner }: { side: RankingSide | null; seed: num
       )}
     >
       <span className="w-8 shrink-0 text-xs font-bold tabular-nums text-zinc-500">{seed !== null ? `#${seed}` : ""}</span>
-      <MemeLogo symbol={side.symbol} logoUrl={side.logoUrl} size={28} />
+      <MemeLogo symbol={side.symbol} logoUrl={side.logoUrl} imageUrl={side.imageUrl} size={28} />
       <span className="min-w-0 flex-1 truncate">
         {side.name} <span className="text-zinc-500">({arenaDisplaySymbol(side.symbol)})</span>
       </span>
@@ -99,7 +99,7 @@ function CupSide({ label, side }: { label: string; side: RankingSide | null }) {
       <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">{label}</span>
       {side ? (
         <>
-          <MemeLogo symbol={side.symbol} logoUrl={side.logoUrl} size={24} />
+          <MemeLogo symbol={side.symbol} logoUrl={side.logoUrl} imageUrl={side.imageUrl} size={24} />
           <span className="truncate font-semibold">{side.name}</span>
           <span className="text-xs text-zinc-500">({arenaDisplaySymbol(side.symbol)})</span>
         </>
@@ -116,9 +116,9 @@ export default function ArenaPage() {
   const rankingsQuery = useArenaRankings();
 
   const cup = currentCupQuery.data?.cup ?? null;
-  const cups = cupsQuery.data?.cups ?? [];
+  const cups = (cupsQuery.data?.cups ?? []).filter((cup) => cup.status === "completed");
   const rankings = (rankingsQuery.data?.rankings ?? []).slice(0, 140);
-  const loading = currentCupQuery.isPending && cupsQuery.isPending && rankingsQuery.isPending;
+  const loading = currentCupQuery.isLoading || cupsQuery.isLoading || rankingsQuery.isLoading;
   const error = currentCupQuery.error ?? cupsQuery.error ?? rankingsQuery.error;
 
   if (loading) {
@@ -140,7 +140,7 @@ export default function ArenaPage() {
 
   return (
     <div className="pb-14">
-      <SectionTitle title="Meme Arena" />
+      <div className="mb-6 rounded-3xl border border-pink-500/20 bg-gradient-to-br from-pink-500/15 via-fuchsia-500/5 to-transparent p-6"><p className="mb-2 text-sm font-bold uppercase tracking-widest text-pink-600 dark:text-pink-400">The Weekly Meme Cup</p><h1 className="font-display text-3xl font-black">Meme Arena</h1><p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">Follow the bracket, celebrate the champions, and track the memes climbing the rankings.</p></div>
       <p className="mb-8 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
         The Weekly Meme Cup and the cup rankings. Memes qualify on age, liquidity and trailing 7 day volume. Rankings come from cup matches only and never affect qualification or seeding.
       </p>
@@ -149,7 +149,7 @@ export default function ArenaPage() {
         <h2 className="mb-4 flex items-center gap-2 font-display text-lg font-bold text-zinc-950 dark:text-white">
           <Trophy className="h-5 w-5 text-amber-500" /> Current cup
         </h2>
-        {!cup ? (
+        {currentCupQuery.isError ? <ErrorState message="Could not load the current cup." onRetry={() => void currentCupQuery.refetch()} /> : !cup ? (
           <EmptyState title="No cup running right now" message="The next cup is seeded on Monday at 00:00 UTC. Past cups and rankings are below." />
         ) : (
           <div className="space-y-8">
@@ -170,9 +170,9 @@ export default function ArenaPage() {
         )}
       </section>
 
-      <section className="mb-10">
+      <section id="past-cups" className="mb-10 scroll-mt-36">
         <h2 className="mb-4 font-display text-lg font-bold text-zinc-950 dark:text-white">Past cups</h2>
-        {cups.length === 0 ? (
+        {cupsQuery.isError ? <ErrorState message="Could not load past cups." onRetry={() => void cupsQuery.refetch()} /> : cups.length === 0 ? (
           <EmptyState title="No past cups yet" message="Finished cups will appear here with their champion and runner-up." />
         ) : (
           <div className="space-y-3">
@@ -194,7 +194,7 @@ export default function ArenaPage() {
           Elo style points from cup matches only, starting at 1000. Rankings never affect qualification or seeding.
           {rankingsQuery.data?.updatedAt ? ` Updated ${formatUtcDate(rankingsQuery.data.updatedAt)}.` : ""}
         </p>
-        {rankings.length === 0 ? (
+        {rankingsQuery.isError ? <ErrorState message="Could not load rankings." onRetry={() => void rankingsQuery.refetch()} /> : rankings.length === 0 ? (
           <EmptyState title="No rankings yet" message="Rankings appear after the first cup matches settle." />
         ) : (
           <div className="surface-card overflow-x-auto rounded-2xl">
@@ -206,7 +206,7 @@ export default function ArenaPage() {
                   <th className="px-4 py-3 text-right font-bold">Points</th>
                   <th className="px-4 py-3 text-right font-bold">Wins</th>
                   <th className="px-4 py-3 text-right font-bold">Losses</th>
-                  <th className="px-4 py-3 text-right font-bold">Played</th>
+                  <th className="px-4 py-3 text-right font-bold">Cups</th>
                   <th className="px-4 py-3 text-right font-bold">Titles</th>
                 </tr>
               </thead>
@@ -216,7 +216,7 @@ export default function ArenaPage() {
                     <td className="px-4 py-3 font-display font-bold tabular-nums">{row.rank}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-2">
-                        <MemeLogo symbol={row.symbol} logoUrl={row.logoUrl} size={28} />
+                        <MemeLogo symbol={row.symbol} logoUrl={row.logoUrl} imageUrl={row.imageUrl} size={28} />
                         <span className="font-semibold">{row.name}</span>
                         <span className="text-xs text-zinc-500">({arenaDisplaySymbol(row.symbol)})</span>
                       </span>

@@ -22,12 +22,13 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Info, Trophy, Crown, Swords, Target, BarChart3, Sparkles, ShieldCheck, Wallet, Search } from "lucide-react";
 import { decodeAbiParameters, encodeAbiParameters, parseAbiParameters } from "viem";
+import { canonicalMarketTerms, readCreatedMarkets } from "../../../lib/marketCreation";
 import { useTickr } from "../../../hooks/useTickr";
 import { useMyProfile } from "../../../hooks/useMyProfile";
 import { getPublicClient } from "../../../hooks/usePublicClient";
@@ -180,6 +181,10 @@ export default function CreateMarketPage() {
   const [spreadPoints, setSpreadPoints] = useState("5");
   const [fixtures, setFixtures] = useState<ApiFixture[]>([]);
   const [createdTerms, setCreatedTerms] = useState<Set<string>>(new Set());
+  const [termsError, setTermsError] = useState<string | null>(null);
+  const creationInFlight = useRef(false);
+  const [checkingCreation, setCheckingCreation] = useState(false);
+  const [creationCheckError, setCreationCheckError] = useState<string | null>(null);
   const [termsLoading, setTermsLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
 
@@ -200,18 +205,17 @@ export default function CreateMarketPage() {
     (async () => {
       try {
         const fixtureList = await api.fixtures();
-        const count = (await publicClient.readContract({ address: NEW_MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketCount" })) as bigint;
-        const ids = Array.from({ length: Number(count) }, (_, i) => BigInt(i));
-        const infos = ids.length === 0 ? [] : await publicClient.multicall({
-          contracts: ids.map((id) => ({ address: NEW_MARKET_FACTORY_ADDRESS, abi: MARKET_FACTORY_ABI, functionName: "marketInfo", args: [id] })) as any,
-          allowFailure: true,
-        }) as any[];
+        const markets = await readCreatedMarkets();
         const terms = new Set<string>();
-        for (const result of infos) {
-          if (result?.status !== "success") continue;
-          const info = result.result as any;
-          const id = Number(info.templateId ?? info[0]);
-          const params = (info.params ?? info[7]) as `0x${string}`;
+        const seasonId = BigInt(process.env.NEXT_PUBLIC_SEASON_ID?.trim() || "2");
+        for (const market of markets) {
+          const id = market.templateId;
+          const params = market.params;
+          terms.add(canonicalMarketTerms(id, params));
+          if ([TEMPLATES.TOP_GAINER, TEMPLATES.CHAMPION, TEMPLATES.SPREAD].includes(id as 0 | 1 | 4)) {
+            const [marketSeason] = decodeAbiParameters(parseAbiParameters("uint256"), params);
+            if (marketSeason !== seasonId) continue;
+          }
           if (id === TEMPLATES.TOP_GAINER) {
             const [, md] = decodeAbiParameters(parseAbiParameters("uint256, uint8"), params);
             terms.add(`md:${Number(md)}`);
@@ -223,12 +227,12 @@ export default function CreateMarketPage() {
           } else if (id === TEMPLATES.CHAMPION) terms.add("champion");
         }
         if (alive) {
+          setTermsError(null);
           setFixtures(fixtureList);
           setCreatedTerms(terms);
         }
       } catch {
-        // The contract remains the authoritative validator; the UI just
-        // degrades to stricter client-side checks below.
+        if (alive) setTermsError("Could not verify existing markets. Refresh to retry before creating a market.");
       } finally {
         if (alive) setTermsLoading(false);
       }
@@ -308,6 +312,7 @@ export default function CreateMarketPage() {
 
   const paramsError = useMemo(() => {
     if (termsLoading) return "Loading eligible terms…";
+    if (termsError) return termsError;
     if (templateId === null) return null;
     try {
       if (templateId === TEMPLATES.TOP_GAINER) {
@@ -342,7 +347,7 @@ export default function CreateMarketPage() {
         if (!opt) throw new Error("Select a fixture from the list");
         if (!opt.eligible) throw new Error(`Fixture #${opt.fixture.fixtureId} is not eligible (${opt.reason}) — pick another`);
       }
-      encodeParams(templateId, {
+      const encodedTerms = encodeParams(templateId, {
         matchdayIndex,
         teamA,
         teamB,
@@ -355,11 +360,15 @@ export default function CreateMarketPage() {
         spreadFixture,
         spreadPoints,
       });
+      if (!(templateId === TEMPLATES.TARGET && targetAssetType === "stock") && createdTerms.has(canonicalMarketTerms(templateId, encodedTerms))) {
+        throw new Error("A market with these exact terms and deadline already exists.");
+      }
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Invalid parameters";
     }
   }, [
+    termsError, createdTerms,
     termsLoading,
     templateId,
     matchdayIndex,
@@ -417,6 +426,16 @@ export default function CreateMarketPage() {
           : "Pick the format to preview your market";
 
   async function handleCreate() {
+    if (creationInFlight.current) return;
+    creationInFlight.current = true;
+    setCheckingCreation(true);
+    setCreationCheckError(null);
+    try { await createVerifiedMarket(); }
+    catch (error) { setCreationCheckError(error instanceof Error ? error.message : "Could not verify market terms. Please retry."); }
+    finally { creationInFlight.current = false; setCheckingCreation(false); }
+  }
+
+  async function createVerifiedMarket() {
     if (templateId === null || !address || !publicClient || paramsError) return;
     if (templateId === TEMPLATES.TARGET && targetAssetType === "stock") {
       if (!selectedStock || !STOCK_MARKET_FACTORY_ADDRESS) return;
@@ -426,6 +445,10 @@ export default function CreateMarketPage() {
       const stockTarget = Number(targetPrice);
       const scaledTarget = Number.isFinite(stockTarget) && stockTarget > 0 ? scaleTargetPrice(stockTarget) : 0n;
       if (scaledTarget <= 0n) return;
+      const existing = (await stockMarketApi.markets()).find((market) =>
+        market.tokenAddress.toLowerCase() === selectedStock.contractAddress.toLowerCase()
+        && market.above === targetAbove && BigInt(market.targetPrice) === scaledTarget && market.deadline === deadlineSeconds);
+      if (existing) throw new Error(`Stock market #${existing.id} already has these exact terms and deadline.`);
       const allowance = (await publicClient.readContract({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "allowance", args: [address, factory] })) as bigint;
       if (allowance < seedWei) await writeApprove({ address: CONTRACTS.tickToken as `0x${string}`, abi: TICK_TOKEN_ABI, functionName: "approve", args: [factory, seedWei] });
       await writeCreate({ address: factory, abi: STOCK_MARKET_FACTORY_ABI, functionName: "createMarket", args: [selectedStock.contractAddress as `0x${string}`, stockDisplaySymbol(selectedStock.symbol), directionFromAbove(targetAbove), scaledTarget, BigInt(deadlineSeconds), (myProfile?.username || creatorName).slice(0, 32)] });
@@ -447,6 +470,11 @@ export default function CreateMarketPage() {
       spreadPoints,
     });
 
+    const existing = (await readCreatedMarkets()).find((market) =>
+      canonicalMarketTerms(market.templateId, market.params) === canonicalMarketTerms(templateId, params));
+    if (existing) {
+      throw new Error(`This market already exists: /markets/${marketRouteKey(existing.factory, existing.id)}`);
+    }
     const activeRaw = (await publicClient.readContract({
       address: NEW_MARKET_FACTORY_ADDRESS,
       abi: MARKET_FACTORY_ABI,
@@ -726,7 +754,7 @@ export default function CreateMarketPage() {
           ) : (
             <button
               onClick={handleCreate}
-            disabled={busy || (!creatorName.trim() && !myProfile?.username)}
+            disabled={checkingCreation || busy || (!creatorName.trim() && !myProfile?.username)}
               className="gradient-cta flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-white shadow-[0_0_20px_rgba(46,124,246,0.4)] disabled:opacity-40"
             >
               {busy ? "Confirm in wallet…" : `Pay ${CREATION_SEED_TICK} TICK & launch`}
@@ -737,6 +765,7 @@ export default function CreateMarketPage() {
               Transaction failed or was rejected. Check your wallet and try again.
             </p>
           )}
+          {creationCheckError && <p role="alert" className="mt-3 text-sm text-red-500">{creationCheckError}</p>}
           {duplicateMarketId !== null && (
             <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
               An unresolved market with these exact terms already exists. You can join it instead: {" "}
@@ -1035,8 +1064,8 @@ function TemplateParamsForm({
             onChange={(e) => v.setTargetAbove(e.target.value === "above")}
             className={inputCls}
           >
-            <option value="above">Price ends ABOVE target (Yes wins)</option>
-            <option value="below">Price ends BELOW target (Yes wins)</option>
+            <option value="above">{v.targetAssetType === "stock" ? "Price finishes ABOVE target (Yes wins)" : "Price finishes AT OR ABOVE target (Yes wins)"}</option>
+            <option value="below">Price finishes AT OR BELOW target (Yes wins)</option>
           </select>
         </div>
         <div className="min-w-0">

@@ -380,7 +380,16 @@ export function buildStockTargetQuestion(
   endTimeSec: number
 ): string {
   const deadlineIso = new Date(endTimeSec * 1000).toISOString();
-  return `Will ${symbol} be ${above ? "above" : "below"} $${targetPriceUsd} by ${deadlineIso}?`;
+  const date = new Date(deadlineIso);
+  let when = `on ${deadlineIso}`;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  if (date.getUTCDate() === lastDay && date.getUTCHours() === 23 && date.getUTCMinutes() === 59) {
+    when = month === 11 ? `at the end of ${year} (UTC)`
+      : `at the end of ${date.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })} ${year} (UTC)`;
+  }
+  return `Will ${symbol} finish ${above ? "above" : "at or below"} $${targetPriceUsd} ${when}?`;
 }
 
 const MULTICALL_CHUNK = 100;

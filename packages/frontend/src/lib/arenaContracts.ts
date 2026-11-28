@@ -380,6 +380,7 @@ export interface RankingRow {
   symbol: string;
   name: string;
   logoUrl: string | null;
+  imageUrl?: string | null;
   points: number;
   wins: number;
   losses: number;
@@ -405,6 +406,7 @@ export interface RankingSide {
   symbol: string;
   name: string;
   logoUrl: string | null;
+  imageUrl?: string | null;
 }
 
 /** One tie in the current cup bracket. */

@@ -87,7 +87,7 @@ export const TEMPLATE_DESCRIPTIONS: Record<number, string> = {
   [TEMPLATES.H2H]:
     "Which of two teams gains more over a custom time window (up to 30 days). An exact tie splits the pool between both outcomes.",
   [TEMPLATES.TARGET]:
-    "Will a team's price be above (or below) a target at a specific time? Yes/No. Resolves from the oracle checkpoint at that time.",
+    "Will a coin finish at or above, or at or below, a target price at a specific UTC time? Yes/No. Resolves from the oracle checkpoint at that time.",
   [TEMPLATES.SPREAD]:
     "Does the home team beat the away team by more than the spread (in rounded % points)? Resolves from the fixture's on-chain end prices.",
 };

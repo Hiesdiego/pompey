@@ -65,7 +65,7 @@ import { StockMarketKeeper } from "./services/stockMarketKeeper.js";
 import { StockMarketIndexer } from "./services/stockMarketIndexer.js";
 import { buildStockMarketRouter } from "./api/stockMarketRoutes.js";
 import { arenaConfigured } from "./arenaConfig.js";
-import { ArenaRegistryService } from "./services/arenaRegistryService.js";
+import { basestonkLogoUrl, ArenaRegistryService } from "./services/arenaRegistryService.js";
 import { ArenaClashReader } from "./services/arenaClashReader.js";
 import { ArenaKeeper } from "./services/arenaKeeper.js";
 import { ArenaCupService } from "./services/arenaCupService.js";
@@ -212,7 +212,7 @@ async function main(): Promise<void> {
   const arenaReader = arenaEnabled
     ? new ArenaClashReader({
         memeNameLookup: (tokenAddress) => arenaRegistry?.getMemeByAddress(tokenAddress)?.name ?? null,
-        memeLogoLookup: (tokenAddress) => arenaRegistry?.getMemeByAddress(tokenAddress)?.logoUrl ?? null,
+        memeLogoLookup: (tokenAddress) => arenaRegistry?.getMemeByAddress(tokenAddress)?.imageUrl || arenaRegistry?.getMemeByAddress(tokenAddress)?.logoUrl || basestonkLogoUrl(tokenAddress),
         stockNameLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.name ?? null,
         stockLogoLookup: (tokenAddress) => stockListService?.getStockByAddress(tokenAddress)?.iconUrl ?? null,
         store: arenaCupService

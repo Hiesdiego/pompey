@@ -31,6 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const entries: Array<{ path: string; priority: number; changeFrequency: "daily" | "monthly" | "yearly" }> = [
     { path: "", priority: 1, changeFrequency: "daily" },
     { path: "/fixtures", priority: 0.8, changeFrequency: "daily" },
+    { path: "/arena", priority: 0.8, changeFrequency: "daily" },
     { path: "/standings", priority: 0.8, changeFrequency: "daily" },
     { path: "/markets", priority: 0.8, changeFrequency: "daily" },
     { path: "/how-to-play", priority: 0.8, changeFrequency: "monthly" },

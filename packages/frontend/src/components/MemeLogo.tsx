@@ -31,8 +31,13 @@ export function memeLogoCandidates(
   imageUrl?: string | null
 ): string[] {
   const out: string[] = [];
-  if (logoUrl?.trim() && !out.includes(logoUrl.trim())) out.push(logoUrl.trim());
-  if (imageUrl?.trim() && !out.includes(imageUrl.trim())) out.push(imageUrl.trim());
+  for (const candidate of [imageUrl, logoUrl]) {
+    if (!candidate?.trim()) continue;
+    let url = candidate.trim();
+    if (url.startsWith("ipfs://")) url = `https://ipfs.io/ipfs/${url.slice(7).replace(/^ipfs\//, "")}`;
+    else if (url.startsWith("/")) url = new URL(url, "https://basestonk.io").href;
+    if (!out.includes(url)) out.push(url);
+  }
   return out;
 }
 
@@ -66,6 +71,7 @@ export function MemeLogo({
         alt={display}
         width={size}
         height={size}
+        referrerPolicy="no-referrer"
         onError={() => setStage((s) => s + 1)}
         className={cn("shrink-0 rounded-full bg-white object-cover ring-1 ring-black/10 dark:ring-white/10", className)}
         style={{ width: size, height: size }}

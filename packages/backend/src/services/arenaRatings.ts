@@ -93,6 +93,8 @@ export interface ArenaRatingRow {
 
 export interface ArenaRankingEntry extends ArenaRatingRow {
   rank: number;
+  titles?: number;
+  runnerUps?: number;
 }
 
 /**
@@ -271,8 +273,19 @@ export class ArenaRatings {
       .order("points", { ascending: false })
       .limit(500);
     if (error) throw error;
+    const { data: cups, error: cupsError } = await this.db.from("arena_cups")
+      .select("champion,runner_up").eq("status", "completed");
+    if (cupsError) throw cupsError;
+    const titles = new Map<string, number>();
+    const runnerUps = new Map<string, number>();
+    for (const cup of cups ?? []) {
+      if (cup.champion) { const key = cup.champion.toLowerCase(); titles.set(key, (titles.get(key) ?? 0) + 1); }
+      if (cup.runner_up) { const key = cup.runner_up.toLowerCase(); runnerUps.set(key, (runnerUps.get(key) ?? 0) + 1); }
+    }
     return {
-      rankings: rankRatings((data ?? []).map(rowFromDb)),
+      rankings: rankRatings((data ?? []).map(rowFromDb)).map((row) => ({
+        ...row, titles: titles.get(row.address.toLowerCase()) ?? 0, runnerUps: runnerUps.get(row.address.toLowerCase()) ?? 0,
+      })),
       updatedAt: new Date().toISOString(),
     };
   }
